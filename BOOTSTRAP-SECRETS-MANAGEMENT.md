@@ -67,7 +67,46 @@ rm /tmp/test-secret.txt
 
 ---
 
-## Part 2: AWS Secrets Manager Patterns
+## Part 2: GitHub Actions — Enforce in CI
+
+Local hooks are not committed to the repo — anyone who clones without running `git secrets --install` has no protection. Add a workflow to enforce scanning in CI:
+
+Create `.github/workflows/secret-scan.yml`:
+
+```yaml
+name: Secret Scan
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  git-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-secrets
+        run: |
+          git clone https://github.com/awslabs/git-secrets.git /tmp/git-secrets
+          cd /tmp/git-secrets && sudo make install
+
+      - name: Register AWS patterns
+        run: git secrets --register-aws --global
+
+      - name: Scan for secrets
+        run: git secrets --scan-history
+```
+
+This applies to **all repos** including markdown-only ones. Secrets can hide in docs too.
+
+---
+
+## Part 3: AWS Secrets Manager Patterns
 
 ### Store a secret
 
