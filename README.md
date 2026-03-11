@@ -13,6 +13,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-HEARTBEAT.md](BOOTSTRAP-HEARTBEAT.md) | Autonomous monitoring loop — task board, pipelines, security |
 | [BOOTSTRAP-OUTLINE-SYNC.md](BOOTSTRAP-OUTLINE-SYNC.md) | Sync workspace docs to Outline wiki via daily crons |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add Claude Code PR + commit review to GitHub repos |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | Wire CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
 | [BOOTSTRAP-TELEGRAM-FORMATTING.md](BOOTSTRAP-TELEGRAM-FORMATTING.md) | Telegram formatting rules (no tables, no headers) |
 | [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills |
 
