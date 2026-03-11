@@ -4,105 +4,58 @@
 
 ## Overview
 
-OpenClaw's `memory_search` uses an OpenAI-compatible embeddings API. Since we're on AWS, we run a tiny local proxy that translates OpenAI `/v1/embeddings` calls into Amazon Bedrock Titan Embed calls. No external API keys needed — uses the EC2 instance profile.
+OpenClaw's `memory_search` uses an OpenAI-compatible embeddings API. We run [embedrock](https://github.com/inceptionstack/embedrock) — a tiny Go binary that translates OpenAI `/v1/embeddings` calls into Amazon Bedrock embedding calls. No external API keys needed — uses the EC2 instance profile.
 
 ```
-OpenClaw memory_search → http://127.0.0.1:8089/v1/embeddings → Bedrock Titan Embed v2 → vector results
+OpenClaw memory_search → http://127.0.0.1:8089/v1/embeddings → embedrock → Bedrock Cohere Embed v4 → vector results
 ```
 
 ## Prerequisites
 
-- EC2 instance with IAM role that has `bedrock:InvokeModel` permission for `amazon.titan-embed-text-v2:0`
-- Node.js installed (via mise or system)
-- Bedrock model access enabled for Titan Embed Text v2 in your region (us-east-1)
+- EC2 instance with IAM role that has `bedrock:InvokeModel` permission
+- Bedrock model access enabled for `cohere.embed-v4:0` in us-east-1
+- No Node.js or extra dependencies required — embedrock is a single static binary
 
-## Step 1: Create the Proxy Script
-
-Save as `/home/ec2-user/bedrock-embed-proxy.mjs`:
-
-```javascript
-import http from 'http';
-import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
-
-const client = new BedrockRuntimeClient({ region: "us-east-1" });
-const MODEL_ID = "amazon.titan-embed-text-v2:0";
-const PORT = 8089;
-
-const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', model: MODEL_ID }));
-    return;
-  }
-  if (req.method !== 'POST' || !req.url.endsWith('/embeddings')) {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Not found' }));
-    return;
-  }
-  let body = '';
-  for await (const chunk of req) body += chunk;
-  try {
-    const { input, model } = JSON.parse(body);
-    const inputs = Array.isArray(input) ? input : [input];
-    const embeddings = await Promise.all(inputs.map(async (text, index) => {
-      const cmd = new InvokeModelCommand({
-        modelId: MODEL_ID,
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify({ inputText: typeof text === 'string' ? text : String(text) }),
-      });
-      const resp = await client.send(cmd);
-      const result = JSON.parse(new TextDecoder().decode(resp.body));
-      return { object: 'embedding', index, embedding: result.embedding };
-    }));
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      object: 'list',
-      data: embeddings,
-      model: model || MODEL_ID,
-      usage: { prompt_tokens: inputs.reduce((s, t) => s + (typeof t === 'string' ? t.length : 0), 0), total_tokens: 0 },
-    }));
-  } catch (err) {
-    console.error('Error:', err.message);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: err.message, type: 'server_error' } }));
-  }
-});
-server.listen(PORT, '127.0.0.1', () => console.log(`Bedrock Embed Proxy on http://127.0.0.1:${PORT}`));
-```
-
-## Step 2: Install the AWS SDK Dependency
+## Step 1: Install embedrock
 
 ```bash
-cd /home/ec2-user && npm install @aws-sdk/client-bedrock-runtime
+# Linux arm64 (EC2 Graviton)
+curl -fsSL https://github.com/inceptionstack/embedrock/releases/latest/download/embedrock-linux-arm64 \
+  -o /tmp/embedrock && chmod +x /tmp/embedrock && sudo mv /tmp/embedrock /usr/local/bin/embedrock
+
+# Linux amd64
+curl -fsSL https://github.com/inceptionstack/embedrock/releases/latest/download/embedrock-linux-amd64 \
+  -o /tmp/embedrock && chmod +x /tmp/embedrock && sudo mv /tmp/embedrock /usr/local/bin/embedrock
+
+# Verify
+embedrock --version
 ```
 
-## Step 3: Create a systemd Service
+## Step 2: Create a systemd service
 
 ```bash
-sudo tee /etc/systemd/system/bedrock-embed-proxy.service > /dev/null << 'EOF'
+sudo tee /etc/systemd/system/embedrock.service > /dev/null << 'EOF'
 [Unit]
-Description=Bedrock Embedding Proxy (OpenAI-compatible)
+Description=embedrock - Bedrock embedding proxy
 After=network.target
 
 [Service]
 Type=simple
 User=ec2-user
-ExecStart=/home/ec2-user/.local/share/mise/shims/node /home/ec2-user/bedrock-embed-proxy.mjs
+ExecStart=/usr/local/bin/embedrock --port 8089 --region us-east-1 --model cohere.embed-v4:0
 Restart=always
 RestartSec=5
-Environment=HOME=/home/ec2-user
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable bedrock-embed-proxy
-sudo systemctl start bedrock-embed-proxy
+sudo systemctl enable embedrock
+sudo systemctl start embedrock
 ```
 
-## Step 4: Configure OpenClaw
+## Step 3: Configure OpenClaw
 
 Add this to your `openclaw.json` under `agents.defaults`:
 
@@ -115,7 +68,7 @@ Add this to your `openclaw.json` under `agents.defaults`:
     "apiKey": "not-needed"
   },
   "fallback": "none",
-  "model": "amazon.titan-embed-text-v2:0",
+  "model": "cohere.embed-v4:0",
   "query": {
     "hybrid": {
       "enabled": true,
@@ -132,40 +85,52 @@ Add this to your `openclaw.json` under `agents.defaults`:
 
 Then restart the OpenClaw gateway.
 
-## Step 5: How to Test
+## Step 4: Verify
 
-**Test 1 — Proxy is running:**
+**Service running:**
 ```bash
-systemctl status bedrock-embed-proxy
+systemctl status embedrock
 # Should show: active (running)
 ```
 
-**Test 2 — Health check:**
+**Health check:**
 ```bash
-curl -s http://127.0.0.1:8089/ | jq
-# Expected: {"status":"ok","model":"amazon.titan-embed-text-v2:0"}
+curl -s http://127.0.0.1:8089/
+# Expected: {"status":"ok","model":"cohere.embed-v4:0"}
 ```
 
-**Test 3 — Single embedding:**
+**Single embedding:**
 ```bash
 curl -s -X POST http://127.0.0.1:8089/v1/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"input": "test embedding", "model": "amazon.titan-embed-text-v2:0"}' \
+  -d '{"input": "test embedding", "model": "cohere.embed-v4:0"}' \
   | jq '{object, model, dims: (.data[0].embedding | length)}'
-# Expected: {"object":"list","model":"amazon.titan-embed-text-v2:0","dims":1024}
+# Expected: {"object":"list","model":"cohere.embed-v4:0","dims":1536}
 ```
 
-**Test 4 — Batch embeddings:**
+**Batch embeddings:**
 ```bash
 curl -s -X POST http://127.0.0.1:8089/v1/embeddings \
   -H "Content-Type: application/json" \
-  -d '{"input": ["first text", "second text", "third text"], "model": "amazon.titan-embed-text-v2:0"}' \
+  -d '{"input": ["first text", "second text"], "model": "cohere.embed-v4:0"}' \
   | jq '{results: (.data | length), dims: [.data[].embedding | length]}'
-# Expected: {"results":3,"dims":[1024,1024,1024]}
+# Expected: {"results":2,"dims":[1536,1536]}
 ```
 
-**Test 5 — End-to-end memory search (from OpenClaw):**
+**End-to-end memory search:**
 Ask Loki to run `memory_search` with any query. It should return ranked results from workspace memory files using hybrid search (70% vector, 30% text).
+
+## Supported Models
+
+embedrock auto-detects model family by ID prefix:
+
+| Model | ID | Dims |
+|-------|----|------|
+| **Cohere Embed v4** (recommended) | `cohere.embed-v4:0` | 1536 |
+| Cohere Embed English v3 | `cohere.embed-english-v3` | 1024 |
+| Cohere Embed Multilingual v3 | `cohere.embed-multilingual-v3` | 1024 |
+| Titan Embed Text V2 | `amazon.titan-embed-text-v2:0` | 1024 |
+| Titan Embed G1 Text | `amazon.titan-embed-g1-text-02` | 1536 |
 
 ## Finish
 
