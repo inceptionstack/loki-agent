@@ -38,7 +38,7 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" \
     [print(f'Chat ID: {u[\"message\"][\"chat\"][\"id\"]}  From: {u[\"message\"][\"from\"].get(\"username\",\"?\")}') for u in updates if 'message' in u]"
 ```
 
-Note your **numeric chat ID** (e.g. `1775159795`).
+Note your **numeric chat ID** (e.g. `123456789`).
 
 ### Step 3: Configure OpenClaw
 
