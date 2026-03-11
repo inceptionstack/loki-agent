@@ -6,6 +6,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 | Script | Purpose |
 |--------|---------|
+| [BOOTSTRAP-MODEL-CONFIG.md](BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — set Sonnet as default, Opus as fallback (saves tokens on all other bootstraps) |
 | [BOOTSTRAP-SECURITY.md](BOOTSTRAP-SECURITY.md) | Enable security monitoring, budgets, and operational hygiene |
 | [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
 | [BOOTSTRAP-SECRETS-MANAGEMENT.md](BOOTSTRAP-SECRETS-MANAGEMENT.md) | git-secrets on all repos + Secrets Manager patterns (standing rules) |
@@ -18,7 +19,8 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 ## Recommended Run Order (New Instance)
 
-1. **SECURITY** — always first
+1. **MODEL-CONFIG** — always first, saves tokens on everything that follows
+2. **SECURITY** — always second
 2. **SECRETS-MANAGEMENT** — install git-secrets, establish rules
 3. **SKILLS** — unlocks capabilities
 4. **MEMORY-SEARCH** — enables semantic recall
