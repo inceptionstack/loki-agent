@@ -9,7 +9,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-MODEL-CONFIG.md](BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — set Sonnet as default, Opus as fallback (saves tokens on all other bootstraps) |
 | [BOOTSTRAP-SECURITY.md](BOOTSTRAP-SECURITY.md) | Enable security monitoring, budgets, and operational hygiene |
 | [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
-| [BOOTSTRAP-SECRETS-MANAGEMENT.md](BOOTSTRAP-SECRETS-MANAGEMENT.md) | git-secrets on all repos + Secrets Manager patterns (standing rules) |
+| [BOOTSTRAP-SECRETS-AWS.md](BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration for OpenClaw (exec provider, gotchas, troubleshooting) |
 | [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Enable semantic memory search with embedrock + Cohere Embed v4 |
 | [BOOTSTRAP-OUTLINE-NOTES.md](BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki setup + workspace sync cron |
 | [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
