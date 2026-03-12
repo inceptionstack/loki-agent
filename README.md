@@ -13,9 +13,9 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Enable semantic memory search with embedrock + Cohere Embed v4 |
 | [BOOTSTRAP-OUTLINE-NOTES.md](BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki setup + workspace sync cron |
 | [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw alerts |
+| [BOOTSTRAP-DAILY-UPDATE.md](BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing — costs, security findings, pipeline health |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add Claude Code PR + commit review to GitHub repos |
 | [BOOTSTRAP-TELEGRAM.md](BOOTSTRAP-TELEGRAM.md) | Set up Telegram bot + communication rules (formatting, buttons, reactions) |
-| [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window bloat — slim SOUL.md, extract skills |
 
 ## Recommended Run Order (New Instance)
 
