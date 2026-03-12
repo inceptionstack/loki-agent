@@ -1,107 +1,128 @@
-# BOOTSTRAP-DISK-SPACE-STRAT.md — EBS Data Volume + Disk Hygiene
+# BOOTSTRAP-DISK-SPACE-STRAT.md — EC2 Disk Space Strategy
 
-> **Run this once on a fresh EC2 instance to set up the disk space strategy.**
+> **Assumption: This agent runs on an EC2 instance on AWS.**
+> If that's not the case, ignore this file.
+>
 > If `memory/.bootstrapped-disk-space` exists, skip.
 
 ## Overview
 
-The EC2 instance has two volumes:
-- **Root disk (40GB)** — OS, workspace, OpenClaw runtime. Keep lean.
-- **EBS data volume (80GB gp3)** — Docker, `/tmp`, builds, clones. All heavy work goes here.
+EC2 instances that run builds, Docker images, and git clones will fill their root volume unless you actively manage it. The strategy:
 
-The strategy: bind-mount the EBS volume as `/tmp` and move Docker root there so builds, clones, and containers never eat the root disk.
+- **Root volume** — OS, workspace, OpenClaw runtime only. Keep lean.
+- **Secondary EBS data volume** — Docker, `/tmp`, builds, clones. All heavy work goes here.
+
+This keeps the root volume from filling up and avoids costly instance resizes.
 
 ---
 
-## Step 1: Attach and Mount the EBS Volume
-
-Attach an 80GB gp3 EBS volume to the instance in the AWS Console or via CLI, then:
+## Step 1: Check Your Current Disk Situation
 
 ```bash
-# Find the device (usually nvme1n1 on Graviton)
+# What volumes do you have?
 lsblk
 
-# Format if new
+# What's the current usage?
+df -h
+
+# What's eating space?
+du -sh /* /home/*/ 2>/dev/null | sort -rh | head -20
+
+# Is Docker installed? How much is it using?
+docker system df 2>/dev/null
+```
+
+Identify:
+- Your root device (usually `nvme0n1` on Graviton, `xvda` on x86)
+- Whether a secondary data volume exists (if not, create and attach one in the AWS Console or via CLI)
+- The biggest space consumers
+
+---
+
+## Step 2: Attach a Secondary EBS Volume (if not already attached)
+
+If you only have a root volume, attach a secondary EBS gp3 volume for data. Size it based on your expected Docker image footprint + build artifacts — gp3 is the default and costs ~$0.08/GB/month.
+
+```bash
+# After attaching in AWS Console, find the device
+lsblk
+
+# Format if new (replace nvme1n1 with your device)
 sudo mkfs -t ext4 /dev/nvme1n1
 
 # Mount it
 sudo mkdir -p /mnt/ebs-data
 sudo mount /dev/nvme1n1 /mnt/ebs-data
 
-# Get UUID for fstab
+# Make it persistent — get UUID first
 sudo blkid /dev/nvme1n1
-```
 
-Add to `/etc/fstab` for persistence across reboots:
-
-```bash
-# Add EBS data volume
+# Add to /etc/fstab
 echo "UUID=YOUR_UUID  /mnt/ebs-data  ext4  defaults,nofail  0  2" | sudo tee -a /etc/fstab
 ```
 
 ---
 
-## Step 2: Move Docker Root to EBS
+## Step 3: Move Docker Root to EBS
 
-Docker images and containers are the biggest disk consumers. Move them off root:
+Docker images are usually the biggest root disk consumer. Move them to the data volume:
 
 ```bash
 # Stop Docker
 sudo systemctl stop docker
 
-# Move existing Docker data
+# Move Docker data to EBS
 sudo mv /var/lib/docker /mnt/ebs-data/docker
 
-# Symlink it back
+# Symlink back so Docker finds it
 sudo ln -s /mnt/ebs-data/docker /var/lib/docker
 
-# Restart Docker
+# Restart and verify
 sudo systemctl start docker
-
-# Verify
 docker info | grep "Docker Root Dir"
 # Expected: Docker Root Dir: /mnt/ebs-data/docker
 ```
 
 ---
 
-## Step 3: Bind-Mount EBS as /tmp
+## Step 4: Bind-Mount EBS as /tmp
 
-All builds, git clones, and temp files go to `/tmp`. Redirect it to EBS:
+All builds, git clones, and temp files land in `/tmp`. Redirect it to EBS so they never touch the root volume:
 
 ```bash
 # Create tmp dir on EBS
 sudo mkdir -p /mnt/ebs-data/tmp
 sudo chmod 1777 /mnt/ebs-data/tmp
 
-# Bind-mount (immediate)
+# Bind-mount immediately
 sudo mount --bind /mnt/ebs-data/tmp /tmp
 
-# Add to fstab for persistence
+# Make persistent in fstab
 echo "/mnt/ebs-data/tmp  /tmp  none  bind  0  0" | sudo tee -a /etc/fstab
 ```
 
 ---
 
-## Step 4: Set Up Disk Watchdog
+## Step 5: Set Up a Disk Watchdog
 
-Prevents runaway processes from filling root disk:
+Runaway processes can hold large deleted file handles, filling the disk invisibly. A watchdog catches this:
 
 ```bash
 sudo tee /usr/local/bin/disk-watchdog.sh > /dev/null << 'WATCHDOG'
 #!/bin/bash
-# Kill processes holding >1GB deleted file handles when root disk >90%
+# Kill processes holding large deleted file handles when root disk is critically full
+THRESHOLD=${DISK_WATCHDOG_THRESHOLD:-90}
 USAGE=$(df / | awk 'NR==2 {print $5}' | tr -d '%')
-if [ "$USAGE" -gt 90 ]; then
-  echo "WARNING: Root disk at ${USAGE}% — scanning for large deleted file handles"
-  # Find processes holding large deleted files
+
+if [ "$USAGE" -gt "$THRESHOLD" ]; then
+  echo "WARNING: Root disk at ${USAGE}% (threshold: ${THRESHOLD}%) — scanning for large deleted file handles"
   lsof 2>/dev/null | awk '$4~/DEL/ && $7+0 > 1073741824 {print $2}' | sort -u | while read pid; do
-    # Skip critical system processes
     name=$(ps -p $pid -o comm= 2>/dev/null)
+    # Never kill critical system or agent processes
     case "$name" in
       systemd|sshd|docker|containerd|ssm-agent|node|openclaw) continue ;;
     esac
-    echo "Killing PID $pid ($name) — holding large deleted file"
+    echo "Killing PID $pid ($name) — holding >1GB deleted file handle"
     kill -9 "$pid" 2>/dev/null
   done
 fi
@@ -109,7 +130,6 @@ WATCHDOG
 
 sudo chmod +x /usr/local/bin/disk-watchdog.sh
 
-# Run every 30 minutes via systemd timer
 sudo tee /etc/systemd/system/disk-watchdog.timer > /dev/null << 'EOF'
 [Unit]
 Description=Disk watchdog timer
@@ -135,22 +155,24 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now disk-watchdog.timer
 ```
 
+The threshold defaults to 90% but can be overridden via `DISK_WATCHDOG_THRESHOLD` env var.
+
 ---
 
-## Step 5: Set Up Nightly Disk Cleanup Cron
+## Step 6: Set Up Nightly Cleanup Cron
 
 Add via OpenClaw to auto-clean on a schedule:
 
 ```
 /cron add "Nightly disk cleanup" --schedule "0 3 * * *" --session isolated --message "Run nightly disk cleanup:
-1. Delete node_modules/ under workspace: find ~/.openclaw/workspace -name node_modules -type d -prune -exec rm -rf {} +
-2. Delete build artifacts: .next/, dist/, build/, coverage/ under workspace
-3. Clean npm cache: npm cache clean --force
-4. Delete /tmp files older than 2 days: find /tmp -maxdepth 1 -mtime +2 -exec rm -rf {} + 2>/dev/null
-5. Prune Docker: docker system prune -af --volumes 2>/dev/null
-6. Clean journal logs: sudo journalctl --vacuum-time=7d
-7. Report disk usage: df -h /
-Alert Roy on Telegram ONLY if root disk >75% or any directory grew unexpectedly >2GB."
+1. Delete node_modules/ under workspace
+2. Delete build artifacts (.next/, dist/, build/, coverage/) under workspace
+3. Clean npm/pip/uv cache
+4. Delete /tmp files older than 2 days
+5. Prune Docker (stopped containers, unused images, dangling volumes, build cache): docker system prune -af --volumes
+6. Vacuum journal logs older than 7 days: sudo journalctl --vacuum-time=7d
+7. Report: df -h / and highlight any volume over 80% usage
+Alert the operator on Telegram ONLY if root disk exceeds 75% after cleanup, or if any unexpected directory has grown by more than 2GB."
 ```
 
 ---
@@ -159,9 +181,10 @@ Alert Roy on Telegram ONLY if root disk >75% or any directory grew unexpectedly 
 
 ```markdown
 ## Disk Hygiene
-- Root disk (40GB): OS + workspace only. EBS /mnt/ebs-data (80GB): Docker, /tmp, builds.
-- Never keep node_modules/ in workspace. Prune Docker after builds. Clean /tmp clones.
-- Nightly cron auto-cleans. Watchdog kills processes if root >90%.
+- Root volume: OS + workspace only. Secondary EBS: Docker, /tmp, builds.
+- Never commit node_modules/ or build artifacts to workspace.
+- Prune Docker after builds. Clean /tmp clones when done.
+- Nightly cron auto-cleans. Watchdog kills stuck processes if root disk is critically full.
 ```
 
 ---
@@ -169,18 +192,17 @@ Alert Roy on Telegram ONLY if root disk >75% or any directory grew unexpectedly 
 ## Verify
 
 ```bash
+# All volumes and mounts look correct
 df -h
-# Root disk should be <50% used
-# /mnt/ebs-data should show as /tmp too
 
-mount | grep ebs
-# Should show: /dev/nvme1n1 on /mnt/ebs-data and /mnt/ebs-data/tmp on /tmp
-
+# Docker is on EBS
 docker info | grep "Docker Root Dir"
-# Should show: /mnt/ebs-data/docker
 
+# /tmp points to EBS
+mount | grep tmp
+
+# Watchdog is active
 systemctl is-active disk-watchdog.timer
-# Should show: active
 ```
 
 ---
