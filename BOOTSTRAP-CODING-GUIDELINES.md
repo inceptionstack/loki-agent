@@ -22,6 +22,11 @@
 - Never use `x86` instance types when `arm64` (Graviton) is available — arm64 is default
 - Never hardcode cross-account credentials — use IAM roles
 
+**Notifications**
+- Never leave a pipeline without build notifications wired up
+- Never send raw internal metadata or stack traces to the operator — summarize them
+- Never notify for routine/expected events (successful deploys, low findings) — only alert on failures and HIGH/CRITICAL issues
+
 **Code**
 - Never have a Lambda function without all config values injected via `process.env`
 - Never have a frontend with hardcoded Cognito IDs, CloudFront domains, or API URLs
@@ -51,6 +56,13 @@
 - CloudFront for all public HTTPS endpoints
 - Cognito for all auth (OIDC)
 - Encrypt all storage: EBS, Aurora, S3
+
+**Notifications**
+- Every CodePipeline: wire up EventBridge → pipeline notifier Lambda → Telegram + OpenClaw system event
+- Every GitHub repo: register webhook → API Gateway → webhook Lambda → Telegram
+- Pipeline failure → Loki auto-investigates (checks CodeBuild logs, fixes, pushes)
+- Pipeline success when a task was waiting → move task to done, notify operator
+- See `BOOTSTRAP-PIPELINE-NOTIFICATIONS.md` for setup
 
 **CloudFront SPAs**
 - Add CloudFront Function on `viewer-request` to rewrite paths for S3 OAC (S3 REST API doesn't auto-resolve `index.html` for subdirs)
@@ -88,5 +100,8 @@
 - git secrets --install && git secrets --register-aws on first clone
 - IaC first (CFN/CDK), Graviton arm64 by default, CloudFront for HTTPS, Cognito for auth
 - Validate CFN before deploy: aws cloudformation validate-template
+- Every CodePipeline: EventBridge → notifier Lambda → Telegram + OpenClaw system event
+- Every GitHub repo: webhook → API Gateway → webhook Lambda → Telegram
+- Pipeline failure → auto-investigate and fix; pipeline success (task waiting) → mark done, notify operator
 - CloudFront SPA: viewer-request Function for path rewriting, plain HTML for OAuth callbacks, invalidate /* after deploy
 ```
