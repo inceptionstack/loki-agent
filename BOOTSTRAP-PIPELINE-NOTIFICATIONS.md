@@ -220,6 +220,10 @@ GitHub workflow_run event (started / completed)
 
 > **Note:** Lambda Function URLs are blocked by SCP in this org — use API Gateway instead.
 
+> **⚠️ OSS Repos:** GitHub repos are assumed to be **open source**. Repo-level webhooks fire for ALL contributors — not just your team. The webhook Lambda **must** filter by author before sending notifications, otherwise every random fork PR or external contributor commit will ping your Telegram. Add an allowlist of GitHub usernames or org membership check inside the Lambda handler. See the filtering example below.
+>
+> **CodePipeline** (Part 1) does **not** have this problem — CodePipeline runs are internal to your AWS account and only trigger for commits that make it through your pipeline source configuration.
+
 ### Step 1: Deploy the webhook Lambda
 
 Create `index.mjs`:
@@ -254,6 +258,15 @@ export const handler = async (event) => {
 
   if (ghEvent === "workflow_run") {
     const { action, workflow_run: wr, repository: repo } = body;
+
+    // OSS filter: only notify for commits by allowed authors
+    // Add your GitHub usernames here — external contributors are silently ignored
+    const ALLOWED_AUTHORS = (process.env.ALLOWED_AUTHORS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const author = (wr?.actor?.login || wr?.triggering_actor?.login || "").toLowerCase();
+    if (ALLOWED_AUTHORS.length > 0 && !ALLOWED_AUTHORS.includes(author)) {
+      return { statusCode: 200, body: "skipped — external contributor" };
+    }
+
     const repoName = repo?.name || "unknown";
     const branch = wr?.head_branch || "?";
     const sha = wr?.head_sha?.slice(0, 7) || "?";
@@ -285,7 +298,7 @@ aws lambda create-function \
   --handler index.handler \
   --role arn:aws:iam::ACCOUNT_ID:role/github-webhook-lambda-role \
   --zip-file fileb://function.zip \
-  --environment "Variables={TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN,TELEGRAM_CHAT_ID=YOUR_CHAT_ID}" \
+  --environment "Variables={TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN,TELEGRAM_CHAT_ID=YOUR_CHAT_ID,ALLOWED_AUTHORS=your-github-username}" \
   --region us-east-1
 ```
 
