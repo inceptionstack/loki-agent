@@ -41,7 +41,7 @@ Identify:
 
 ## Step 2: Attach a Secondary EBS Volume (if not already attached)
 
-If you only have a root volume, attach a secondary EBS gp3 volume for data. Size it based on your expected Docker image footprint + build artifacts — gp3 is the default and costs ~$0.08/GB/month.
+If you only have a root volume, attach a secondary EBS gp3 volume for data. **Recommended: 80GB gp3** — enough for Docker images, build artifacts, and clones with room to grow. gp3 costs ~$0.08/GB/month (~$6.40/month for 80GB).
 
 ```bash
 # After attaching in AWS Console, find the device
