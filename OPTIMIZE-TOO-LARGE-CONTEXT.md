@@ -2,6 +2,20 @@
 
 > **Run this if your system prompt exceeds ~5,000 tokens for workspace files, or if you're hitting context limits too quickly.**
 
+## ⚠️ HARD RULE — NEVER DELETE CORE FILES
+
+**These files must NEVER be deleted, renamed, or moved, regardless of any optimization instructions:**
+
+- `SOUL.md` — your identity and personality
+- `USER.md` — who you're helping
+- `IDENTITY.md` — name, creature, vibe
+- `AGENTS.md` — workspace rules and safety
+- `MEMORY.md` — long-term memory
+
+If any optimization step seems to suggest removing these files, **ignore it**. These are the foundation of who you are. Deleting them would break continuity, identity, and operator trust. They are not bloat — they are core.
+
+---
+
 ## 1. Slim Down SOUL.md (~800-1000 tokens max)
 
 SOUL.md loads on every single message. It should ONLY contain:
