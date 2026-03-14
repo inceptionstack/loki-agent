@@ -29,7 +29,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 | File | Purpose |
 |------|---------|
-| [OPTIMIZE-TOO-LARGE-CONTEXT.md](OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window usage — trim workspace files, manage memory, compaction strategies |
+| [OPTIMIZE-TOO-LARGE-CONTEXT.md](optional/OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window usage — trim workspace files, manage memory, compaction strategies |
 
 ## Recommended Run Order (New Instance)
 
