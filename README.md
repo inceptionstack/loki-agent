@@ -2,20 +2,19 @@
 
 Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on first boot to get a secure, capable agent environment.
 
-## Core Bootstraps
+## Essential Bootstraps (`essential/`)
 
 | File | Purpose |
 |------|---------|
-| [BOOTSTRAP-MODEL-CONFIG.md](BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — configure AI models (Sonnet default, Opus fallback) to save tokens on all other bootstraps |
-| [BOOTSTRAP-SECURITY.md](BOOTSTRAP-SECURITY.md) | Enable Security Hub, Inspector, budgets, WAF, and operational hygiene |
-| [BOOTSTRAP-SECRETS-AWS.md](BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration — exec provider, gotchas, troubleshooting |
-| [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
-| [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Semantic memory search with embedrock + Cohere Embed v4 on Bedrock |
-| [BOOTSTRAP-CODING-GUIDELINES.md](BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD rules |
-| [BOOTSTRAP-DISK-SPACE-STRAT.md](BOOTSTRAP-DISK-SPACE-STRAT.md) | EC2 disk space strategy — secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
-| [BOOTSTRAP-DAILY-UPDATE.md](BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
-| [BOOTSTRAP-WEB-UI.md](BOOTSTRAP-WEB-UI.md) | Expose OpenClaw Control UI via CloudFront + Cognito — ALB, proxy, WebSocket, device pairing |
+| [BOOTSTRAP-MODEL-CONFIG.md](essential/BOOTSTRAP-MODEL-CONFIG.md) | **Run first** — configure AI models (Sonnet default, Opus fallback) to save tokens on all other bootstraps |
+| [BOOTSTRAP-SECURITY.md](essential/BOOTSTRAP-SECURITY.md) | Enable Security Hub, Inspector, budgets, WAF, and operational hygiene |
+| [BOOTSTRAP-SECRETS-AWS.md](essential/BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration — exec provider, gotchas, troubleshooting |
+| [BOOTSTRAP-SKILLS.md](essential/BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
+| [BOOTSTRAP-MEMORY-SEARCH.md](essential/BOOTSTRAP-MEMORY-SEARCH.md) | Semantic memory search with embedrock + Cohere Embed v4 on Bedrock |
+| [BOOTSTRAP-CODING-GUIDELINES.md](essential/BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD rules |
+| [BOOTSTRAP-DISK-SPACE-STRAT.md](essential/BOOTSTRAP-DISK-SPACE-STRAT.md) | EC2 disk space strategy — secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
+| [BOOTSTRAP-DAILY-UPDATE.md](essential/BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](essential/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
 
 ## Optional Bootstraps (`optional/`)
 
@@ -24,6 +23,7 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Create Telegram bot, wire up OpenClaw, add formatting/reaction rules to SOUL.md |
 | [BOOTSTRAP-OUTLINE-NOTES.md](optional/BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) + workspace sync cron |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add automatic Claude Code PR + commit review to GitHub repos via Actions |
+| [BOOTSTRAP-WEB-UI.md](optional/BOOTSTRAP-WEB-UI.md) | Expose OpenClaw Control UI via CloudFront + Cognito — ALB, proxy, WebSocket, device pairing |
 
 ## Optimization Guides
 
@@ -33,19 +33,22 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 
 ## Recommended Run Order (New Instance)
 
+**Essential (run in order):**
 1. **MODEL-CONFIG** — always first, saves tokens on everything that follows
 2. **SECURITY** — always second
 3. **SECRETS-AWS** — git-secrets, Secrets Manager rules
 4. **SKILLS** — unlocks capabilities
 5. **MEMORY-SEARCH** — enables semantic recall
-6. **TELEGRAM** — create bot, wire up OpenClaw, formatting rules
-7. **CODING-GUIDELINES** — establish coding standards
-8. **DISK-SPACE-STRAT** — set up data volume + nightly cleanup
-9. **OUTLINE-NOTES** — team wiki (when needed)
-10. **PIPELINE-NOTIFICATIONS** — wire up build alerts
-11. **DAILY-UPDATE** — morning briefing cron
-12. **GITHUBACTION-CODE-REVIEW** — add to each repo as needed
-13. **WEB-UI** — expose Control UI via CloudFront (when ready for browser access)
+6. **CODING-GUIDELINES** — establish coding standards
+7. **DISK-SPACE-STRAT** — set up data volume + nightly cleanup
+8. **PIPELINE-NOTIFICATIONS** — wire up build alerts
+9. **DAILY-UPDATE** — morning briefing cron
+
+**Optional (add as needed):**
+- **TELEGRAM** — create bot, wire up OpenClaw, formatting rules
+- **OUTLINE-NOTES** — team wiki
+- **GITHUBACTION-CODE-REVIEW** — add to each repo
+- **WEB-UI** — expose Control UI via CloudFront
 
 > **Built-in (no bootstrap needed):** Heartbeat monitoring (`HEARTBEAT.md`), daily memory logging (`memory/YYYY-MM-DD.md`), long-term recall (`MEMORY.md`) — these are part of the OpenClaw runtime.
 
