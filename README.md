@@ -2,7 +2,7 @@
 
 Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on first boot to get a secure, capable agent environment.
 
-## Available Bootstraps
+## Core Bootstraps
 
 | File | Purpose |
 |------|---------|
@@ -11,14 +11,19 @@ Recommended bootstrap scripts for new Loki/OpenClaw instances. Run these on firs
 | [BOOTSTRAP-SECRETS-AWS.md](BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration — exec provider, gotchas, troubleshooting |
 | [BOOTSTRAP-SKILLS.md](BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
 | [BOOTSTRAP-MEMORY-SEARCH.md](BOOTSTRAP-MEMORY-SEARCH.md) | Semantic memory search with embedrock + Cohere Embed v4 on Bedrock |
-| [BOOTSTRAP-TELEGRAM.md](BOOTSTRAP-TELEGRAM.md) | Create Telegram bot, wire up OpenClaw, add formatting/reaction rules to SOUL.md |
-| [BOOTSTRAP-OUTLINE-NOTES.md](BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) + workspace sync cron |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
-| [BOOTSTRAP-DAILY-UPDATE.md](BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
-| [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add automatic Claude Code PR + commit review to GitHub repos via Actions |
 | [BOOTSTRAP-CODING-GUIDELINES.md](BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD rules |
 | [BOOTSTRAP-DISK-SPACE-STRAT.md](BOOTSTRAP-DISK-SPACE-STRAT.md) | EC2 disk space strategy — secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
+| [BOOTSTRAP-DAILY-UPDATE.md](BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing cron — costs, security findings, pipeline health |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions → Telegram + OpenClaw webhook alerts |
 | [BOOTSTRAP-WEB-UI.md](BOOTSTRAP-WEB-UI.md) | Expose OpenClaw Control UI via CloudFront + Cognito — ALB, proxy, WebSocket, device pairing |
+
+## Optional Bootstraps (`optional/`)
+
+| File | Purpose |
+|------|---------|
+| [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Create Telegram bot, wire up OpenClaw, add formatting/reaction rules to SOUL.md |
+| [BOOTSTRAP-OUTLINE-NOTES.md](optional/BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) + workspace sync cron |
+| [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Add automatic Claude Code PR + commit review to GitHub repos via Actions |
 
 ## Optimization Guides
 
