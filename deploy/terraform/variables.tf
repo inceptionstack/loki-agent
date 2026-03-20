@@ -1,47 +1,47 @@
 variable "environment_name" {
   type        = string
   default     = "openclaw"
-  description = "Name prefix for all resources"
+  description = "A short name for this deployment (e.g. 'my-openclaw'). Used as prefix for all AWS resources. Lowercase letters, numbers, and hyphens only."
 
   validation {
-    condition     = can(regex("^[a-z0-9-]+$", var.environment_name)) && length(var.environment_name) <= 24
-    error_message = "Must be lowercase alphanumeric with hyphens, max 24 chars."
+    condition     = can(regex("^[a-z0-9-]+$", var.environment_name))
+    error_message = "Environment name must contain only lowercase letters, numbers, and hyphens."
   }
 }
 
 variable "instance_type" {
   type        = string
   default     = "t4g.xlarge"
-  description = "EC2 instance type (must be arm64/Graviton)"
+  description = "EC2 instance size. t4g.medium works for light use. t4g.xlarge recommended for production. All options are ARM64 Graviton."
 
   validation {
-    condition     = contains(["t4g.medium", "t4g.large", "t4g.xlarge", "t4g.2xlarge", "m7g.medium", "m7g.large", "m7g.xlarge", "c7g.large", "c7g.xlarge"], var.instance_type)
-    error_message = "Must be a supported arm64/Graviton instance type."
+    condition     = can(regex("^(t4g|m7g|c7g)\\.", var.instance_type))
+    error_message = "Instance type must be ARM64 Graviton (t4g, m7g, or c7g family)."
   }
 }
 
 variable "vpc_cidr" {
   type        = string
   default     = "10.0.0.0/16"
-  description = "CIDR block for the VPC"
+  description = "CIDR block for the new VPC. Change only if it conflicts with existing VPCs in your account."
 }
 
 variable "public_subnet_cidr" {
   type        = string
   default     = "10.0.1.0/24"
-  description = "CIDR block for the public subnet"
+  description = "CIDR for the public subnet. Must be within the VPC CIDR range."
 }
 
 variable "ssh_allowed_cidr" {
   type        = string
   default     = "127.0.0.1/32"
-  description = "CIDR block allowed to SSH. Default disables SSH (use SSM instead)."
+  description = "IP range allowed to SSH. Default 127.0.0.1/32 disables SSH entirely — use AWS SSM Session Manager instead (recommended). Set to your-ip/32 to enable SSH."
 }
 
 variable "root_volume_size" {
   type        = number
   default     = 40
-  description = "Root EBS volume size in GB (gp3)"
+  description = "Root disk size in GB. 40GB is sufficient for most deployments."
 
   validation {
     condition     = var.root_volume_size >= 20 && var.root_volume_size <= 200
@@ -52,7 +52,7 @@ variable "root_volume_size" {
 variable "data_volume_size" {
   type        = number
   default     = 80
-  description = "Data EBS volume size in GB (gp3) mounted at /mnt/ebs-data"
+  description = "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for production."
 
   validation {
     condition     = var.data_volume_size >= 20 && var.data_volume_size <= 500
@@ -63,13 +63,13 @@ variable "data_volume_size" {
 variable "key_pair_name" {
   type        = string
   default     = ""
-  description = "EC2 key pair name for SSH access (leave blank to skip)"
+  description = "EC2 key pair for SSH access. Leave blank to skip — SSM Session Manager is the recommended access method."
 }
 
 variable "openclaw_gateway_port" {
   type        = number
   default     = 18789
-  description = "Port for the OpenClaw gateway service"
+  description = "Internal port for the OpenClaw gateway service. Change only if port 18789 conflicts with other services."
 
   validation {
     condition     = var.openclaw_gateway_port >= 1024 && var.openclaw_gateway_port <= 65535
@@ -80,7 +80,7 @@ variable "openclaw_gateway_port" {
 variable "bedrock_region" {
   type        = string
   default     = "us-east-1"
-  description = "AWS region for Bedrock API calls"
+  description = "AWS region for Bedrock API calls. us-east-1 has the widest model selection."
 
   validation {
     condition     = contains(["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "eu-north-1", "ap-northeast-1", "ap-southeast-1"], var.bedrock_region)
@@ -91,56 +91,56 @@ variable "bedrock_region" {
 variable "default_model" {
   type        = string
   default     = "us.anthropic.claude-opus-4-6-v1"
-  description = "Default Bedrock model ID for OpenClaw"
+  description = "The primary AI model. Claude Opus 4.6 is recommended for best performance. Used when ModelMode is 'bedrock'."
 }
 
 variable "model_mode" {
   type        = string
   default     = "bedrock"
-  description = "Model access mode: litellm, api-key, or bedrock"
+  description = "How OpenClaw connects to AI models. 'bedrock' uses AWS Bedrock (recommended, no extra keys needed). 'litellm' routes through a LiteLLM proxy. 'api-key' uses a provider API key directly."
 
   validation {
-    condition     = contains(["litellm", "api-key", "bedrock"], var.model_mode)
-    error_message = "Must be litellm, api-key, or bedrock."
+    condition     = contains(["bedrock", "litellm", "api-key"], var.model_mode)
+    error_message = "Model mode must be 'bedrock', 'litellm', or 'api-key'."
   }
 }
 
 variable "litellm_base_url" {
   type        = string
   default     = ""
-  description = "LiteLLM proxy base URL (used when model_mode=litellm)"
+  description = "URL of your LiteLLM proxy server. Only needed when Model Access Mode is 'litellm'. Leave empty otherwise."
 }
 
 variable "litellm_api_key" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "LiteLLM virtual API key (used when model_mode=litellm)"
+  description = "API key for authenticating with the LiteLLM proxy. Only needed when Model Access Mode is 'litellm'."
 }
 
 variable "litellm_model" {
   type        = string
   default     = "claude-opus-4-6"
-  description = "Default model alias on the LiteLLM proxy"
+  description = "Default model alias on your LiteLLM proxy (e.g. 'claude-opus-4-6'). Only used when Model Access Mode is 'litellm'."
 }
 
 variable "provider_api_key" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Direct provider API key (used when model_mode=api-key)"
+  description = "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
 }
 
 variable "bootstrap_script_url" {
   type        = string
   default     = "https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/openclaw-bootstrap.sh"
-  description = "URL to the bootstrap script"
+  description = "URL to the EC2 bootstrap script. Uses the official script by default. Override only for custom installations."
 }
 
 variable "request_quota_increases" {
   type        = string
   default     = "false"
-  description = "Automatically request Bedrock quota increases at deploy time"
+  description = "Automatically request higher Bedrock rate limits during deployment. Set to 'true' if you expect heavy usage."
 
   validation {
     condition     = contains(["true", "false"], var.request_quota_increases)
