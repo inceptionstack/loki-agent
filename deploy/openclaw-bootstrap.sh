@@ -140,6 +140,8 @@ if [ -d /mnt/ebs-data/.openclaw ]; then
   fi
   ln -sfn /mnt/ebs-data/.openclaw ~/.openclaw
   ok "Symlinked .openclaw -> /mnt/ebs-data/.openclaw"
+chmod 700 ~/.openclaw
+ok "State dir secured (700)"
 else
   info "No data volume, using local .openclaw"
 fi
@@ -147,12 +149,15 @@ fi
 step "Workspace"
 mkdir -p ~/.openclaw/workspace
 ok "Workspace ready"
+chmod 700 ~/.openclaw/workspace
 
 step "OpenClaw Config"
 curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/openclaw-config-gen.py -o /tmp/oc-cfggen.py
 GW_TOKEN=$(openssl rand -hex 24)
 python3 /tmp/oc-cfggen.py "$BEDROCK_REGION" "$DEFAULT_MODEL" "$GW_PORT" "$GW_TOKEN" "$MODEL_MODE" "$LITELLM_BASE_URL" "$LITELLM_API_KEY" "$LITELLM_MODEL" "$PROVIDER_API_KEY"
 ok "Config written (mode=$MODEL_MODE)"
+chmod 600 ~/.openclaw/openclaw.json
+ok "Config file secured (600)"
 
 step "Bedrock Model Access"
 if aws bedrock get-use-case-for-model-access --region us-east-1 >/dev/null 2>&1; then
