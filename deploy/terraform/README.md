@@ -1,6 +1,6 @@
 # Terraform Deployment
 
-Deploy OpenClaw using Terraform.
+Deploy Loki using Terraform.
 
 ## Prerequisites
 
@@ -53,5 +53,5 @@ terraform destroy -var="environment_name=my-openclaw"
 ## Notes
 
 - `terraform apply` takes ~8–10 minutes (EC2 bootstrap runs in the background)
-- Terraform won't wait for the bootstrap to finish — the instance will be "running" before OpenClaw setup completes
+- Terraform won't wait for the bootstrap to finish — the instance will be "running" before Loki setup completes
 - Check progress: `aws ssm get-parameter --name /openclaw/setup-status --query Parameter.Value --output text`

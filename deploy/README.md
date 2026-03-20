@@ -1,6 +1,6 @@
-# Deploy OpenClaw on AWS
+# Deploy Loki on AWS
 
-Deploy a fully configured [OpenClaw](https://github.com/openclaw/openclaw) AI assistant on your own AWS account. Choose your preferred IaC tool — all three options deploy identical infrastructure.
+Deploy a fully configured [Loki](https://github.com/inceptionstack/loki-bootstrap) (powered by [OpenClaw](https://github.com/openclaw/openclaw)) AI assistant on your own AWS account. Choose your preferred IaC tool — all three options deploy identical infrastructure.
 
 ## Prerequisites
 
@@ -76,7 +76,7 @@ aws secretsmanager get-secret-value --secret-id openclaw/admin-password \
 Files at the `deploy/` level are used by all deployment methods:
 
 - `openclaw-bootstrap.sh` — main EC2 bootstrap script (installs Node, OpenClaw, Claude Code, etc.)
-- `openclaw-config-gen.py` — generates OpenClaw config based on model mode
+- `openclaw-config-gen.py` — generates Loki config based on model mode
 - `bedrock-motd.sh` — writes MOTD + fix script if Bedrock form submission fails
-- `litellm-setup.sh` — helper to patch an existing OpenClaw config with LiteLLM proxy settings
+- `litellm-setup.sh` — helper to patch an existing Loki config with LiteLLM proxy settings
 - `brain/` — template workspace files (SOUL.md, AGENTS.md, etc.) copied to each new instance

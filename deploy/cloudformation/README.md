@@ -1,6 +1,6 @@
 # CloudFormation Deployment
 
-Deploy OpenClaw using a standard AWS CloudFormation template.
+Deploy Loki using a standard AWS CloudFormation template.
 
 ## Quick Start (Console)
 
@@ -58,6 +58,6 @@ aws cloudformation create-stack-instances \
 
 ## Notes
 
-- Stack creation takes ~8–10 minutes (EC2 bootstrap installs Node.js, OpenClaw, and configures the gateway)
+- Stack creation takes ~8–10 minutes (EC2 bootstrap installs Node.js, Loki, and configures the gateway)
 - The `CreationPolicy` with `ResourceSignal` ensures the stack only completes when the instance is fully bootstrapped
 - Requires `CAPABILITY_NAMED_IAM` due to named IAM roles and users
