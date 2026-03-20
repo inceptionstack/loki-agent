@@ -246,5 +246,7 @@ step "Setup Complete"
 ok "All done at $(date -u)"
 touch /tmp/openclaw-setup-done
 
-# ---- Signal CloudFormation ----
-/opt/aws/bin/cfn-signal -e 0 --stack $STACK_NAME --resource Instance --region $REGION
+# ---- Signal CloudFormation (skip if no CFN stack) ----
+if aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" &>/dev/null; then
+  /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION"
+fi
