@@ -585,7 +585,7 @@ Resources:
   AdminUser:
     Type: AWS::IAM::User
     Properties:
-      UserName: inceptionstack-admin
+      UserName: !Sub '${EnvironmentName}-admin'
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AdministratorAccess
       Tags:
@@ -686,14 +686,14 @@ Resources:
                 iam = boto3.client('iam')
                 try:
                     iam.create_login_profile(
-                        UserName='admin',
+                        UserName=props['AdminUsername'],
                         Password=password,
                         PasswordResetRequired=True
                     )
                     print("[OK] Login profile created")
                 except iam.exceptions.EntityAlreadyExistsException:
                     iam.update_login_profile(
-                        UserName='admin',
+                        UserName=props['AdminUsername'],
                         Password=password,
                         PasswordResetRequired=True
                     )
@@ -703,7 +703,7 @@ Resources:
                 sm = boto3.client('secretsmanager', region_name=region)
                 secret_name = 'openclaw/admin-password'
                 secret_value = json.dumps({
-                    'username': 'admin',
+                    'username': props['AdminUsername'],
                     'password': password,
                     'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
                 })
@@ -748,6 +748,7 @@ Resources:
       ServiceToken: !GetAtt AdminPasswordFunction.Arn
       AccountId: !Ref 'AWS::AccountId'
       Region: !Ref 'AWS::Region'
+      AdminUsername: !Sub '${EnvironmentName}-admin'
 
   # --------------------------------------------------------------------------
   # EC2 Instance

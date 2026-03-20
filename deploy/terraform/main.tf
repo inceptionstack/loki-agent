@@ -485,7 +485,7 @@ resource "null_resource" "security_enablement_invoke" {
 # Admin Console User
 # ============================================================================
 resource "aws_iam_user" "admin" {
-  name = "inceptionstack-admin"
+  name = "${var.environment_name}-admin"
 
   tags = {
     Name      = "${var.environment_name}-admin"
@@ -567,14 +567,14 @@ def handler(event, context):
         iam = boto3.client('iam')
         try:
             iam.create_login_profile(
-                UserName='inceptionstack-admin',
+                UserName=event.get('admin_username', 'admin'),
                 Password=password,
                 PasswordResetRequired=True
             )
             print("[OK] Login profile created")
         except iam.exceptions.EntityAlreadyExistsException:
             iam.update_login_profile(
-                UserName='inceptionstack-admin',
+                UserName=event.get('admin_username', 'admin'),
                 Password=password,
                 PasswordResetRequired=True
             )
@@ -583,7 +583,7 @@ def handler(event, context):
         sm = boto3.client('secretsmanager', region_name=region)
         secret_name = 'openclaw/admin-password'
         secret_value = json.dumps({
-            'username': 'inceptionstack-admin',
+            'username': event.get('admin_username', 'admin'),
             'password': password,
             'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
         })
@@ -638,7 +638,7 @@ resource "null_resource" "admin_password_invoke" {
     command = <<-EOT
       aws lambda invoke \
         --function-name "${var.environment_name}-admin-password" \
-        --payload '${jsonencode({ account_id = data.aws_caller_identity.current.account_id, region = data.aws_region.current.name })}' \
+        --payload '${jsonencode({ account_id = data.aws_caller_identity.current.account_id, region = data.aws_region.current.name, admin_username = "${var.environment_name}-admin" })}' \
         --cli-binary-format raw-in-base64-out \
         --region us-east-1 \
         /tmp/admin_password_response.json && cat /tmp/admin_password_response.json
