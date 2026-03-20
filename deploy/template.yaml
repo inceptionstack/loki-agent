@@ -1,0 +1,901 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OpenClaw Instance - Deploys a fully configured OpenClaw AI assistant on EC2
+  within its own VPC. Designed for StackSet deployment across AWS Organization accounts.
+
+# ============================================================================
+# PARAMETERS
+# ============================================================================
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: openclaw
+    Description: Name prefix for all resources
+    AllowedPattern: '[a-z0-9-]+'
+    MaxLength: 24
+
+  InstanceType:
+    Type: String
+    Default: t4g.xlarge
+    Description: EC2 instance type (must be arm64/Graviton)
+    AllowedValues:
+      - t4g.medium
+      - t4g.large
+      - t4g.xlarge
+      - t4g.2xlarge
+      - m7g.medium
+      - m7g.large
+      - m7g.xlarge
+      - c7g.large
+      - c7g.xlarge
+
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: CIDR block for the VPC
+    AllowedPattern: '(\d{1,3}\.){3}\d{1,3}/\d{1,2}'
+
+  PublicSubnetCidr:
+    Type: String
+    Default: '10.0.1.0/24'
+    Description: CIDR block for the public subnet
+    AllowedPattern: '(\d{1,3}\.){3}\d{1,3}/\d{1,2}'
+
+  SSHAllowedCidr:
+    Type: String
+    Default: '127.0.0.1/32'
+    Description: >
+      CIDR block allowed to SSH. Default disables SSH (use SSM instead).
+      Set to your IP/32 for SSH access.
+    AllowedPattern: '(\d{1,3}\.){3}\d{1,3}/\d{1,2}'
+
+  RootVolumeSize:
+    Type: Number
+    Default: 40
+    MinValue: 20
+    MaxValue: 200
+    Description: Root EBS volume size in GB (gp3)
+
+  DataVolumeSize:
+    Type: Number
+    Default: 80
+    MinValue: 20
+    MaxValue: 500
+    Description: Data EBS volume size in GB (gp3) mounted at /mnt/ebs-data
+
+  KeyPairName:
+    Type: String
+    Default: ''
+    Description: EC2 key pair name for SSH access (leave blank to skip)
+
+  OpenClawGatewayPort:
+    Type: Number
+    Default: 18789
+    MinValue: 1024
+    MaxValue: 65535
+    Description: Port for the OpenClaw gateway service
+
+  BedrockRegion:
+    Type: String
+    Default: us-east-1
+    Description: AWS region for Bedrock API calls
+    AllowedValues:
+      - us-east-1
+      - us-west-2
+      - eu-west-1
+      - eu-central-1
+      - eu-north-1
+      - ap-northeast-1
+      - ap-southeast-1
+
+  DefaultModel:
+    Type: String
+    Default: 'us.anthropic.claude-opus-4-6-v1'
+    Description: Default Bedrock model ID for OpenClaw (used as fallback or primary depending on ModelMode)
+
+  ModelMode:
+    Type: String
+    Default: 'bedrock'
+    AllowedValues:
+      - litellm
+      - api-key
+      - bedrock
+    Description: >
+      Model access mode:
+        litellm  ? Route through central LiteLLM proxy (requires LiteLLMApiKey)
+        api-key  ? Use a long-term provider API key directly (requires ProviderApiKey)
+        bedrock  ? Use Bedrock directly via IAM role (no extra keys needed)
+
+  LiteLLMBaseUrl:
+    Type: String
+    Default: ''
+    Description: LiteLLM proxy base URL (used when ModelMode=litellm). Leave empty if not using LiteLLM.
+
+  LiteLLMApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: LiteLLM virtual API key (used when ModelMode=litellm)
+
+  LiteLLMModel:
+    Type: String
+    Default: 'claude-opus-4-6'
+    Description: Default model alias on the LiteLLM proxy (used when ModelMode=litellm)
+
+  ProviderApiKey:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Direct provider API key e.g. Anthropic (used when ModelMode=api-key)
+
+  BootstrapScriptUrl:
+    Type: String
+    Default: 'https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/openclaw-bootstrap.sh'
+    Description: URL to the bootstrap script downloaded and executed during instance setup
+
+  RequestQuotaIncreases:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Automatically request Bedrock quota increases at deploy time (disabled - org template handles this)
+
+# ============================================================================
+# CONDITIONS
+# ============================================================================
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+  IsLiteLLM: !Equals [!Ref ModelMode, 'litellm']
+  IsApiKey: !Equals [!Ref ModelMode, 'api-key']
+  IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
+
+# ============================================================================
+# RESOURCES
+# ============================================================================
+Resources:
+
+  # --------------------------------------------------------------------------
+  # VPC & Networking
+  # --------------------------------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-igw'
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-public'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-public-routes'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # --------------------------------------------------------------------------
+  # Security Group
+  # --------------------------------------------------------------------------
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-sg'
+      GroupDescription: !Sub 'Security group for ${EnvironmentName} EC2 instance'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHAllowedCidr
+          Description: SSH access
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+          Description: All outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-sg'
+
+  # --------------------------------------------------------------------------
+  # IAM Role & Instance Profile
+  # --------------------------------------------------------------------------
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-role'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-profile'
+      Roles:
+        - !Ref InstanceRole
+
+  # --------------------------------------------------------------------------
+  # Bedrock Model Access (Lambda Custom Resource)
+  # --------------------------------------------------------------------------
+  BedrockFormLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-bedrock-form-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: bedrock-form
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:PutUseCaseForModelAccess
+                  - bedrock:GetUseCaseForModelAccess
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - servicequotas:RequestServiceQuotaIncrease
+                  - servicequotas:GetServiceQuota
+                  - servicequotas:ListRequestedServiceQuotaChangeHistory
+                Resource: '*'
+
+  BedrockFormFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-bedrock-form'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      Role: !GetAtt BedrockFormLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json, time, urllib.request, boto3, traceback
+
+          def send_response(event, context, status, reason='', data={}):
+              # CFN responses must be under 4096 bytes total
+              reason_str = (reason or f'See CW: {context.log_stream_name}')[:256]
+              phys_id = (context.log_stream_name or 'custom-resource')[-64:]
+              safe_data = {k: str(v)[:128] for k, v in (data or {}).items()}
+              body = json.dumps({
+                  'Status': status, 'Reason': reason_str,
+                  'PhysicalResourceId': phys_id,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': safe_data if len(json.dumps(safe_data)) < 1024 else {}
+              }).encode()
+              req = urllib.request.Request(event['ResponseURL'], data=body,
+                  headers={'Content-Type': 'application/json', 'Content-Length': len(body)},
+                  method='PUT')
+              urllib.request.urlopen(req)
+
+          def request_quota_increases():
+              """Request higher Bedrock quotas for Opus 4.6 cross-region inference."""
+              sq = boto3.client('servicequotas', region_name='us-east-1')
+              quotas = [
+                  ('L-11DFF789', 1000, 'Cross-region RPM Opus 4.6'),
+                  ('L-0AD9BBE8', 4000000, 'Cross-region TPM Opus 4.6'),
+              ]
+              for code, desired, name in quotas:
+                  try:
+                      current = sq.get_service_quota(ServiceCode='bedrock', QuotaCode=code)
+                      current_val = current['Quota']['Value']
+                      if current_val >= desired:
+                          print(f"[OK] {name}: already at {current_val}")
+                          continue
+                      sq.request_service_quota_increase(
+                          ServiceCode='bedrock', QuotaCode=code, DesiredValue=desired
+                      )
+                      print(f"[OK] {name}: requested {current_val} -> {desired}")
+                  except Exception as e:
+                      print(f"[WARN] {name} quota request failed: {e}")
+
+          def handler(event, context):
+              print(f"[INFO] Event: {json.dumps(event)}")
+              if event['RequestType'] == 'Delete':
+                  send_response(event, context, 'SUCCESS', 'Delete is a no-op')
+                  return
+
+              client = boto3.client('bedrock', region_name='us-east-1')
+              form_payload = json.dumps({
+                  "companyName": "My Company",
+                  "companyWebsite": "https://example.com",
+                  "intendedUsers": "0",
+                  "industryOption": "Education",
+                  "otherIndustryOption": "",
+                  "useCases": "AI development"
+              }).encode()
+
+              try:
+                  # Check if already submitted
+                  try:
+                      existing = client.get_use_case_for_model_access()
+                      print(f"[OK] Form already submitted: {existing.get('formData', '')[:50]}...")
+                      if event.get('ResourceProperties', {}).get('RequestQuotas') == 'true':
+                          request_quota_increases()
+                      send_response(event, context, 'SUCCESS', 'Form already submitted',
+                          {'FormStatus': 'ALREADY_SUBMITTED'})
+                      return
+                  except client.exceptions.ResourceNotFoundException:
+                      print("[INFO] Form not yet submitted, submitting now...")
+
+                  # Submit the form
+                  print(f"[INFO] Submitting form ({len(form_payload)} bytes)")
+                  client.put_use_case_for_model_access(formData=form_payload)
+                  print("[OK] Form submitted successfully")
+
+                  # Verify it was accepted
+                  time.sleep(2)
+                  try:
+                      verify = client.get_use_case_for_model_access()
+                      print(f"[OK] Form verified: {verify.get('formData', '')[:50]}...")
+                  except client.exceptions.ResourceNotFoundException:
+                      print("[WARN] Form not found after submission ? may need manual action")
+
+                  # Request Bedrock quota increases if enabled
+                  if event.get('ResourceProperties', {}).get('RequestQuotas') == 'true':
+                      request_quota_increases()
+
+                  send_response(event, context, 'SUCCESS', 'Form submitted',
+                      {'FormStatus': 'SUBMITTED'})
+
+              except Exception as e:
+                  tb = traceback.format_exc()
+                  print(f"[FAIL] {e}\n{tb}")
+                  # Always succeed so stack doesn't rollback
+                  send_response(event, context, 'SUCCESS',
+                      f'Form submission failed: {e} ? manual action required',
+                      {'FormStatus': 'FAILED', 'Error': str(e)})
+
+  BedrockFormCustomResource:
+    Type: Custom::BedrockForm
+    DependsOn: BedrockFormLambdaRole
+    Properties:
+      ServiceToken: !GetAtt BedrockFormFunction.Arn
+      RequestQuotas: !Ref RequestQuotaIncreases
+
+  # --------------------------------------------------------------------------
+  # Security Services Enablement
+  # --------------------------------------------------------------------------
+  SecurityEnablementRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-security-enable-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: security-services
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - securityhub:EnableSecurityHub
+                  - securityhub:DescribeHub
+                  - securityhub:BatchEnableStandards
+                  - guardduty:CreateDetector
+                  - guardduty:ListDetectors
+                  - inspector2:Enable
+                  - inspector2:BatchGetAccountStatus
+                  - access-analyzer:CreateAnalyzer
+                  - access-analyzer:ListAnalyzers
+                  - config:PutConfigurationRecorder
+                  - config:PutDeliveryChannel
+                  - config:StartConfigurationRecorder
+                  - config:DescribeConfigurationRecorders
+                  - config:DescribeDeliveryChannels
+                  - s3:CreateBucket
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                  - iam:CreateServiceLinkedRole
+                  - iam:GetRole
+                Resource: '*'
+
+  SecurityEnablementFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-security-enable'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      Role: !GetAtt SecurityEnablementRole.Arn
+      Code:
+        ZipFile: |
+          import json, urllib.request, boto3, traceback
+
+          def send_response(event, context, status, reason='', data={}):
+              # CFN responses must be under 4096 bytes total
+              reason_str = (reason or f'See CW: {context.log_stream_name}')[:256]
+              phys_id = (context.log_stream_name or 'custom-resource')[-64:]
+              safe_data = {k: str(v)[:128] for k, v in (data or {}).items()}
+              body = json.dumps({
+                  'Status': status, 'Reason': reason_str,
+                  'PhysicalResourceId': phys_id,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': safe_data if len(json.dumps(safe_data)) < 1024 else {}
+              }).encode()
+              req = urllib.request.Request(event['ResponseURL'], data=body,
+                  headers={'Content-Type': 'application/json', 'Content-Length': len(body)},
+                  method='PUT')
+              urllib.request.urlopen(req)
+
+          def handler(event, context):
+              print(f"[INFO] Event: {json.dumps(event)}")
+              if event['RequestType'] == 'Delete':
+                  send_response(event, context, 'SUCCESS', 'Delete is a no-op')
+                  return
+
+              region = 'us-east-1'
+              account_id = context.invoked_function_arn.split(':')[4]
+              results = []
+
+              # 1. Security Hub
+              try:
+                  sh = boto3.client('securityhub', region_name=region)
+                  try:
+                      sh.describe_hub()
+                      print("[OK] Security Hub already enabled")
+                  except:
+                      sh.enable_security_hub(EnableDefaultStandards=True)
+                      print("[OK] Security Hub enabled")
+                  results.append('SecurityHub:OK')
+              except Exception as e:
+                  print(f"[WARN] Security Hub: {e}")
+                  results.append(f'SecurityHub:WARN')
+
+              # 2. GuardDuty
+              try:
+                  gd = boto3.client('guardduty', region_name=region)
+                  detectors = gd.list_detectors()['DetectorIds']
+                  if detectors:
+                      print(f"[OK] GuardDuty already enabled: {detectors[0]}")
+                  else:
+                      resp = gd.create_detector(Enable=True, FindingPublishingFrequency='FIFTEEN_MINUTES')
+                      print(f"[OK] GuardDuty enabled: {resp['DetectorId']}")
+                  results.append('GuardDuty:OK')
+              except Exception as e:
+                  print(f"[WARN] GuardDuty: {e}")
+                  results.append('GuardDuty:WARN')
+
+              # 3. Inspector
+              try:
+                  insp = boto3.client('inspector2', region_name=region)
+                  insp.enable(
+                      resourceTypes=['EC2', 'ECR', 'LAMBDA', 'LAMBDA_CODE'],
+                      accountIds=[account_id]
+                  )
+                  print("[OK] Inspector enabled (EC2, ECR, Lambda)")
+                  results.append('Inspector:OK')
+              except Exception as e:
+                  print(f"[WARN] Inspector: {e}")
+                  results.append('Inspector:WARN')
+
+              # 4. IAM Access Analyzer
+              try:
+                  aa = boto3.client('accessanalyzer', region_name=region)
+                  analyzers = aa.list_analyzers(type='ACCOUNT')['analyzers']
+                  if analyzers:
+                      print(f"[OK] Access Analyzer already exists: {analyzers[0]['name']}")
+                  else:
+                      aa.create_analyzer(
+                          analyzerName='account-analyzer',
+                          type='ACCOUNT'
+                      )
+                      print("[OK] Access Analyzer created")
+                  results.append('AccessAnalyzer:OK')
+              except Exception as e:
+                  print(f"[WARN] Access Analyzer: {e}")
+                  results.append('AccessAnalyzer:WARN')
+
+              # 5. Config Recorder
+              try:
+                  cfg = boto3.client('config', region_name=region)
+                  recorders = cfg.describe_configuration_recorders()['ConfigurationRecorders']
+                  if recorders:
+                      print(f"[OK] Config recorder already exists: {recorders[0]['name']}")
+                  else:
+                      # Create S3 bucket for Config
+                      s3 = boto3.client('s3', region_name=region)
+                      bucket_name = f'config-bucket-{account_id}-{region}'
+                      try:
+                          s3.create_bucket(Bucket=bucket_name)
+                          s3.put_bucket_policy(Bucket=bucket_name, Policy=json.dumps({
+                              'Version': '2012-10-17',
+                              'Statement': [{
+                                  'Sid': 'AWSConfigBucketPermissionsCheck',
+                                  'Effect': 'Allow',
+                                  'Principal': {'Service': 'config.amazonaws.com'},
+                                  'Action': 's3:GetBucketAcl',
+                                  'Resource': f'arn:aws:s3:::{bucket_name}'
+                              }, {
+                                  'Sid': 'AWSConfigBucketDelivery',
+                                  'Effect': 'Allow',
+                                  'Principal': {'Service': 'config.amazonaws.com'},
+                                  'Action': 's3:PutObject',
+                                  'Resource': f'arn:aws:s3:::{bucket_name}/*',
+                                  'Condition': {'StringEquals': {'s3:x-amz-acl': 'bucket-owner-full-control'}}
+                              }]
+                          }))
+                      except s3.exceptions.BucketAlreadyOwnedByYou:
+                          pass
+                      except Exception as be:
+                          print(f"[WARN] Config bucket: {be}")
+
+                      try:
+                          cfg.put_configuration_recorder(ConfigurationRecorder={
+                              'name': 'default',
+                              'roleARN': f'arn:aws:iam::{account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig',
+                              'recordingGroup': {'allSupported': True, 'includeGlobalResourceTypes': True}
+                          })
+                          cfg.put_delivery_channel(DeliveryChannel={
+                              'name': 'default',
+                              's3BucketName': bucket_name,
+                          })
+                          cfg.start_configuration_recorder(ConfigurationRecorderName='default')
+                          print("[OK] Config recorder started")
+                      except Exception as ce:
+                          print(f"[WARN] Config recorder: {ce}")
+                  results.append('Config:OK')
+              except Exception as e:
+                  print(f"[WARN] Config: {e}")
+                  results.append('Config:WARN')
+
+              send_response(event, context, 'SUCCESS',
+                  f'Security services: {", ".join(results)}',
+                  {'Results': ', '.join(results)})
+
+  SecurityEnablementCustomResource:
+    Type: Custom::SecurityEnablement
+    DependsOn: SecurityEnablementRole
+    Properties:
+      ServiceToken: !GetAtt SecurityEnablementFunction.Arn
+
+  # --------------------------------------------------------------------------
+  # Admin Console User
+  # --------------------------------------------------------------------------
+  AdminUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: inceptionstack-admin
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-admin'
+        - Key: ManagedBy
+          Value: StackSet
+
+  AdminAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref AdminUser
+
+  AdminPasswordLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-admin-pw-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: admin-password
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:CreateLoginProfile
+                  - iam:UpdateLoginProfile
+                  - iam:GetLoginProfile
+                Resource: !GetAtt AdminUser.Arn
+              - Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:TagResource
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:openclaw/admin-password-*'
+              - Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/openclaw/admin-console-url'
+
+  AdminPasswordFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-admin-password'
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt AdminPasswordLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json, string, secrets, urllib.request, boto3
+
+          def send_response(event, context, status, reason='', data={}):
+              # CFN responses must be under 4096 bytes total
+              reason_str = (reason or f'See CW: {context.log_stream_name}')[:256]
+              phys_id = (context.log_stream_name or 'custom-resource')[-64:]
+              safe_data = {k: str(v)[:128] for k, v in (data or {}).items()}
+              body = json.dumps({
+                  'Status': status, 'Reason': reason_str,
+                  'PhysicalResourceId': phys_id,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': safe_data if len(json.dumps(safe_data)) < 1024 else {}
+              }).encode()
+              req = urllib.request.Request(event['ResponseURL'], data=body,
+                  headers={'Content-Type': 'application/json', 'Content-Length': len(body)},
+                  method='PUT')
+              urllib.request.urlopen(req)
+
+          def request_quota_increases():
+              """Request higher Bedrock quotas for Opus 4.6 cross-region inference."""
+              sq = boto3.client('servicequotas', region_name='us-east-1')
+              quotas = [
+                  ('L-11DFF789', 1000, 'Cross-region RPM Opus 4.6'),
+                  ('L-0AD9BBE8', 4000000, 'Cross-region TPM Opus 4.6'),
+              ]
+              for code, desired, name in quotas:
+                  try:
+                      current = sq.get_service_quota(ServiceCode='bedrock', QuotaCode=code)
+                      current_val = current['Quota']['Value']
+                      if current_val >= desired:
+                          print(f"[OK] {name}: already at {current_val}")
+                          continue
+                      sq.request_service_quota_increase(
+                          ServiceCode='bedrock', QuotaCode=code, DesiredValue=desired
+                      )
+                      print(f"[OK] {name}: requested {current_val} -> {desired}")
+                  except Exception as e:
+                      print(f"[WARN] {name} quota request failed: {e}")
+
+          def handler(event, context):
+              print(f"[INFO] Event type: {event['RequestType']}")
+              if event['RequestType'] == 'Delete':
+                  send_response(event, context, 'SUCCESS', 'Delete is a no-op')
+                  return
+
+              props = event['ResourceProperties']
+              account_id = props['AccountId']
+              region = props['Region']
+
+              try:
+                  # Generate a strong random password
+                  alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
+                  password = ''.join(secrets.choice(alphabet) for _ in range(24))
+
+                  # Create console login profile (password must be changed on first login)
+                  iam = boto3.client('iam')
+                  try:
+                      iam.create_login_profile(
+                          UserName='admin',
+                          Password=password,
+                          PasswordResetRequired=True
+                      )
+                      print("[OK] Login profile created")
+                  except iam.exceptions.EntityAlreadyExistsException:
+                      iam.update_login_profile(
+                          UserName='admin',
+                          Password=password,
+                          PasswordResetRequired=True
+                      )
+                      print("[OK] Login profile updated")
+
+                  # Store password in Secrets Manager
+                  sm = boto3.client('secretsmanager', region_name=region)
+                  secret_name = 'openclaw/admin-password'
+                  secret_value = json.dumps({
+                      'username': 'admin',
+                      'password': password,
+                      'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
+                  })
+                  try:
+                      sm.create_secret(
+                          Name=secret_name,
+                          SecretString=secret_value,
+                          Tags=[{'Key': 'ManagedBy', 'Value': 'StackSet'}]
+                      )
+                      print("[OK] Secret created")
+                  except sm.exceptions.ResourceExistsException:
+                      sm.put_secret_value(
+                          SecretId=secret_name,
+                          SecretString=secret_value
+                      )
+                      print("[OK] Secret updated")
+
+                  # Also write console URL to SSM for easy access
+                  ssm = boto3.client('ssm', region_name=region)
+                  ssm.put_parameter(
+                      Name='/openclaw/admin-console-url',
+                      Value=f'https://{account_id}.signin.aws.amazon.com/console',
+                      Type='String',
+                      Overwrite=True
+                  )
+                  print("[OK] Console URL written to SSM")
+
+                  send_response(event, context, 'SUCCESS', 'Admin password configured',
+                      {'ConsoleUrl': f'https://{account_id}.signin.aws.amazon.com/console'})
+
+              except Exception as e:
+                  print(f"[FAIL] {e}")
+                  send_response(event, context, 'SUCCESS',
+                      f'Admin password setup failed: {e}',
+                      {'ConsoleUrl': 'FAILED'})
+
+  AdminPasswordCustomResource:
+    Type: Custom::AdminPassword
+    DependsOn:
+      - AdminUser
+      - AdminPasswordLambdaRole
+    Properties:
+      ServiceToken: !GetAtt AdminPasswordFunction.Arn
+      AccountId: !Ref 'AWS::AccountId'
+      Region: !Ref 'AWS::Region'
+
+  # --------------------------------------------------------------------------
+  # SSM Session Manager Preferences (auto-login as ec2-user with welcome)
+  # --------------------------------------------------------------------------
+  # --------------------------------------------------------------------------
+  # EC2 Instance
+  # --------------------------------------------------------------------------
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn:
+      - VPCGatewayAttachment
+      - BedrockFormCustomResource
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64}}'
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      EbsOptimized: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
+            Encrypted: true
+        - DeviceName: /dev/sdb
+          Ebs:
+            VolumeSize: !Ref DataVolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: false
+            Encrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-instance'
+        - Key: Application
+          Value: OpenClaw
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          # Export all params as env vars for the bootstrap script
+          export ACCT_ID="${AWS::AccountId}"
+          export REGION="${AWS::Region}"
+          export STACK_NAME="${AWS::StackName}"
+          export DEFAULT_MODEL="${DefaultModel}"
+          export BEDROCK_REGION="${BedrockRegion}"
+          export GW_PORT="${OpenClawGatewayPort}"
+          export MODEL_MODE="${ModelMode}"
+          export LITELLM_BASE_URL="${LiteLLMBaseUrl}"
+          export LITELLM_API_KEY="${LiteLLMApiKey}"
+          export LITELLM_MODEL="${LiteLLMModel}"
+          export PROVIDER_API_KEY="${ProviderApiKey}"
+          # Download and run bootstrap from S3
+          curl -sfL ${BootstrapScriptUrl} -o /tmp/openclaw-bootstrap.sh
+          chmod +x /tmp/openclaw-bootstrap.sh
+          bash /tmp/openclaw-bootstrap.sh
+# ============================================================================
+# OUTPUTS
+# ============================================================================
+Outputs:
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref Instance
+
+  PublicIp:
+    Description: Public IP address
+    Value: !GetAtt Instance.PublicIp
+
+  PrivateIp:
+    Description: Private IP address
+    Value: !GetAtt Instance.PrivateIp
+
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref InstanceSecurityGroup
+
+  RoleArn:
+    Description: IAM Role ARN
+    Value: !GetAtt InstanceRole.Arn
+
+  SSMConnect:
+    Description: Connect via SSM Session Manager
+    Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
+
+
