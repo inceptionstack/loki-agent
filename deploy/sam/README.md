@@ -1,6 +1,6 @@
 # SAM Deployment
 
-Deploy OpenClaw using the AWS Serverless Application Model (SAM) CLI.
+Deploy Loki using the AWS Serverless Application Model (SAM) CLI.
 
 ## Prerequisites
 

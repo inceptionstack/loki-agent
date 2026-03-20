@@ -1,6 +1,6 @@
-# Deploy Your Own OpenClaw on AWS
+# Deploy Your Own Loki on AWS
 
-A complete guide to deploying an always-on AI assistant in your own AWS account. Covers everything from zero to a running OpenClaw instance you can chat with.
+A complete guide to deploying an always-on AI ops assistant builder in your own AWS account. Covers everything from zero to a running Loki instance you can build with.
 
 ---
 
@@ -48,11 +48,13 @@ openclaw tui
 
 ---
 
+> **What is Loki?** Loki is an AI ops assistant builder powered by [OpenClaw](https://github.com/openclaw/openclaw) under the hood. You use the `openclaw` CLI to manage it, but the brain, skills, and personality are all Loki. Think of OpenClaw as the engine, Loki as the car.
+
 ## Before You Start
 
 ### ⚠️ Important Warnings
 
-1. **Use a dedicated AWS account.** OpenClaw gets `AdministratorAccess` on the EC2 instance. This is intentional — it needs broad access to manage AWS resources on your behalf. But it means you should **never deploy this in a production account with existing workloads.** Use a clean sandbox account, ideally inside an AWS Organizations setup with SCPs limiting blast radius.
+1. **Use a dedicated AWS account.** Loki gets `AdministratorAccess` on the EC2 instance. This is intentional — it needs broad access to manage AWS resources on your behalf. But it means you should **never deploy this in a production account with existing workloads.** Use a clean sandbox account, ideally inside an AWS Organizations setup with SCPs limiting blast radius.
 
 2. **Set budget alerts before deploying.** AI model API calls (Bedrock) can add up. A busy Opus 4 session can cost $5-20/day. Set a $100/month alert at minimum. See [Step 6](#step-6-set-budget-alerts).
 
@@ -74,7 +76,7 @@ The safest deployment pattern:
 1. Create an AWS Organization (if you don't have one)
 2. Create a **Sandbox OU** (Organizational Unit) with restrictive SCPs
 3. Provision a new account inside the Sandbox OU
-4. Deploy OpenClaw in that account
+4. Deploy Loki in that account
 
 This way, even if something goes wrong, the blast radius is limited to a throwaway sandbox account. The rest of your organization is protected by SCPs.
 
@@ -198,7 +200,7 @@ aws ssm start-session --target <instance-id> --region us-east-1
 
 > **Why SSM, not SSH?** SSH requires opening port 22 to the internet (security risk) and managing key pairs. SSM works through the AWS API — no open ports, no keys to manage, full audit trail in CloudTrail. The template disables SSH by default for this reason.
 
-### Check OpenClaw Status
+### Check Loki Status
 
 Once connected:
 ```bash
@@ -213,13 +215,13 @@ You should see the gateway as `running` and the model configured.
 openclaw tui
 ```
 
-This opens the terminal UI where you can chat directly with your OpenClaw instance.
+This opens the terminal UI where you can chat directly with your Loki instance.
 
 ---
 
 ## Step 5: Set Up a Chat Channel
 
-OpenClaw supports Telegram, Discord, Slack, Signal, and more. To connect a chat channel:
+Loki supports Telegram, Discord, Slack, Signal, and more. To connect a chat channel:
 
 ```bash
 openclaw configure
@@ -241,7 +243,7 @@ openclaw configure
 aws budgets create-budget \
   --account-id $(aws sts get-caller-identity --query Account --output text) \
   --budget '{
-    "BudgetName": "OpenClaw Monthly",
+    "BudgetName": "Loki Monthly",
     "BudgetLimit": {"Amount": "100", "Unit": "USD"},
     "TimeUnit": "MONTHLY",
     "BudgetType": "COST"
@@ -279,7 +281,7 @@ Replace `YOUR-EMAIL@EXAMPLE.COM` with your actual email.
 
 ### Why AdministratorAccess?
 
-OpenClaw's value comes from being able to manage AWS resources on your behalf — creating Lambda functions, deploying CloudFormation stacks, managing IAM, etc. This requires broad permissions.
+Loki's value comes from being able to manage AWS resources on your behalf — creating Lambda functions, deploying CloudFormation stacks, managing IAM, etc. This requires broad permissions.
 
 **Mitigations the template provides:**
 - Deploys in an **isolated VPC** — no access to your other networks
@@ -287,7 +289,7 @@ OpenClaw's value comes from being able to manage AWS resources on your behalf �
 - **Security services auto-enabled** — GuardDuty, SecurityHub, Inspector, Access Analyzer, and Config are all turned on by the deployment
 - **Encrypted EBS volumes** — both root and data volumes use EBS encryption
 - **Config files secured** — `chmod 600` on config, `chmod 700` on state directories
-- **Gateway binds to localhost** — the OpenClaw API is not exposed to the network
+- **Gateway binds to localhost** — the Loki API is not exposed to the network
 
 ### What You Should Do
 
@@ -295,13 +297,13 @@ OpenClaw's value comes from being able to manage AWS resources on your behalf �
 2. **Use AWS Organizations with SCPs** — limit what the account can do (e.g. prevent creating new IAM users outside the account, restrict regions)
 3. **Set budget alerts** — see [Step 6](#step-6-set-budget-alerts)
 4. **Review GuardDuty findings** — the template enables GuardDuty. Check the console periodically for suspicious activity
-5. **Don't install unknown skills** — OpenClaw's [ClawhHub](https://clawhub.com) marketplace has community skills. Treat them like npm packages — review before installing, don't blindly trust them
-6. **Keep OpenClaw updated** — run `openclaw update` periodically for security patches
+5. **Don't install unknown skills** — Loki's [ClawhHub](https://clawhub.com) marketplace has community skills. Treat them like npm packages — review before installing, don't blindly trust them
+6. **Keep Loki updated** — run `openclaw update` periodically for security patches
 
 ### Why Is It Locked Down by Default?
 
 - **No SSH** — reduces attack surface. SSM is more secure (no open ports, IAM-authenticated, CloudTrail logged)
-- **No public API** — the OpenClaw gateway only listens on localhost. To expose it, you'd need to explicitly configure a reverse proxy
+- **No public API** — the Loki gateway only listens on localhost. To expose it, you'd need to explicitly configure a reverse proxy
 - **No ClawhHub skills pre-installed** — the base install has no third-party code. You choose what to add
 - **Security services enabled** — GuardDuty and Inspector are watching from minute one
 
@@ -310,7 +312,7 @@ OpenClaw's value comes from being able to manage AWS resources on your behalf �
 ## FAQ
 
 ### How long does deployment take?
-About 8-10 minutes. The stack creates in ~3 minutes, then the EC2 instance takes another 5-7 minutes to bootstrap (install Node.js, OpenClaw, configure the gateway).
+About 8-10 minutes. The stack creates in ~3 minutes, then the EC2 instance takes another 5-7 minutes to bootstrap (install Node.js, Loki (via OpenClaw), configure the gateway).
 
 ### Can I deploy in a region other than us-east-1?
 Yes — change the `BedrockRegion` parameter. However, `us-east-1` has the widest Bedrock model selection. The EC2 instance can be in any region, but Bedrock API calls go to the region you specify.
@@ -328,12 +330,12 @@ Yes — set `ModelMode` to `api-key` and provide your key in `ProviderApiKey`. T
 ### Can I use a LiteLLM proxy?
 Yes — set `ModelMode` to `litellm`, provide the proxy URL in `LiteLLMBaseUrl`, and the API key in `LiteLLMApiKey`.
 
-### How do I update OpenClaw?
+### How do I update Loki?
 SSH/SSM into the instance and run:
 ```bash
 openclaw update
 ```
-Or from within a chat session, ask OpenClaw to update itself.
+Or from within a chat session, ask Loki to update itself.
 
 ### How do I stop/start the instance to save costs?
 ```bash
@@ -344,7 +346,7 @@ aws ec2 stop-instances --instance-ids <id> --region us-east-1
 aws ec2 start-instances --instance-ids <id> --region us-east-1
 ```
 
-The data volume persists across stop/start. OpenClaw's gateway auto-starts on boot.
+The data volume persists across stop/start. Loki's gateway auto-starts on boot.
 
 ### How do I delete everything?
 **CloudFormation/SAM:**
@@ -363,7 +365,7 @@ This removes all resources. The data volume has `DeleteOnTermination: false` —
 - EBS volumes are encrypted at rest
 - The gateway only listens on localhost (not exposed to the internet)
 - No data is sent anywhere except to the AI model provider you configure (Bedrock, Anthropic, or LiteLLM)
-- OpenClaw stores conversation history locally on the instance
+- Loki stores conversation history locally on the instance
 
 ### What security services are enabled?
 - **GuardDuty** — threat detection for malicious activity
@@ -393,7 +395,7 @@ Common causes:
 - **IAM name conflict** — the admin user name already exists from a previous deployment. Delete the old stack first.
 - **Bedrock not available** — some regions don't have Bedrock. Use `us-east-1`.
 
-### Instance is running but OpenClaw isn't responding
+### Instance is running but Loki isn't responding
 
 Check the setup log:
 ```bash

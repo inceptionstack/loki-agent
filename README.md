@@ -1,8 +1,8 @@
 # loki-bootstrap
 
-Bootstrap prompts and deployment templates for running [OpenClaw](https://github.com/inceptionstack/openclaw) on AWS. Deploy a fully configured AI agent environment with a single command.
+Bootstrap prompts and deployment templates for running Loki (powered by [OpenClaw](https://github.com/inceptionstack/openclaw) on AWS. Deploy a fully configured Loki AI ops assistant with a single command).
 
-> **📖 New to this?** Read the [complete deployment guide](wiki/Deploying-OpenClaw-on-AWS.md) — covers account setup, security, budgets, and FAQ.
+> **📖 New to this?** Read the [complete deployment guide](wiki/Deploying-Loki-on-AWS.md) — covers account setup, security, budgets, and FAQ.
 
 ---
 
@@ -57,13 +57,13 @@ Override variables in a `terraform.tfvars` file or with `-var` flags.
 
 ## What Gets Deployed
 
-The stack provisions a self-contained OpenClaw environment:
+The stack provisions a self-contained Loki environment:
 
 ```
 ┌──────────────────────────────────────────────────┐
 │  VPC (10.0.0.0/16)                               │
 │  ├─ Public Subnet + Internet Gateway             │
-│  ├─ EC2 Instance (OpenClaw runtime)              │
+│  ├─ EC2 Instance (Loki runtime)              │
 │  │   ├─ openclaw-bootstrap.sh (first boot)       │
 │  │   ├─ openclaw-config-gen.py (config setup)    │
 │  │   ├─ bedrock-motd.sh (Bedrock helper)         │
@@ -85,7 +85,7 @@ The stack provisions a self-contained OpenClaw environment:
 **Key components:**
 
 - **VPC** — Isolated network with public subnet and internet gateway
-- **EC2 Instance** — Runs the OpenClaw agent runtime; bootstrapped on first boot via `openclaw-bootstrap.sh`
+- **EC2 Instance** — Runs the Loki agent runtime (via OpenClaw); bootstrapped on first boot via `openclaw-bootstrap.sh`
 - **Lambda Custom Resources** — Handle config generation and post-deploy validation during stack creation
 - **Security Services** — Security Hub, Inspector, and budgets enabled by default
 - **IAM Roles** — Least-privilege roles for EC2 (Bedrock access, SSM, CloudWatch) and Lambda
@@ -112,7 +112,7 @@ The stack provisions a self-contained OpenClaw environment:
 
 ## Model Modes
 
-The `ModelMode` parameter controls how OpenClaw connects to language models.
+The `ModelMode` parameter controls how Loki connects to language models.
 
 ### `bedrock` (default)
 
@@ -132,7 +132,7 @@ Routes requests through a [LiteLLM](https://github.com/BerriAI/litellm) proxy, a
 
 ### `api-key`
 
-Uses a provider API key directly (e.g. Anthropic API key). Configure the key and endpoint in the OpenClaw config after deployment.
+Uses a provider API key directly (e.g. Anthropic API key). Configure the key and endpoint in the Loki config after deployment.
 
 ---
 
@@ -161,16 +161,16 @@ Once connected, check that the bootstrap completed successfully:
 # View bootstrap log
 cat /var/log/openclaw-bootstrap.log
 
-# Check OpenClaw service status
+# Check Loki service status
 systemctl status openclaw
 ```
 
 ### Configure Channels
 
-After deployment, configure messaging channels (Telegram, Slack, etc.) by following the relevant optional bootstrap prompts or editing the OpenClaw config directly:
+After deployment, configure messaging channels (Telegram, Slack, etc.) by following the relevant optional bootstrap prompts or editing the Loki config directly:
 
 ```bash
-# OpenClaw config location
+# Loki config location
 cat /opt/openclaw/config.yaml
 ```
 
@@ -178,7 +178,7 @@ cat /opt/openclaw/config.yaml
 
 ## Bootstrap Prompts
 
-Bootstrap prompts are instruction files that OpenClaw executes on first boot (or on demand) to configure its environment. Each creates a marker file in `memory/` to prevent re-running.
+Bootstrap prompts are instruction files that Loki executes on first boot (or on demand) to configure its environment. Each creates a marker file in `memory/` to prevent re-running.
 
 ### Essential (`essential/`)
 
@@ -201,20 +201,20 @@ Add as needed:
 | File | Purpose |
 |------|---------|
 | [BOOTSTRAP-MODEL-CONFIG.md](optional/BOOTSTRAP-MODEL-CONFIG.md) | Configure AI models (Sonnet default, Opus fallback) to save tokens |
-| [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Telegram bot setup, OpenClaw wiring, formatting/reaction rules |
+| [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Telegram bot setup, Loki wiring, formatting/reaction rules |
 | [BOOTSTRAP-OUTLINE-NOTES.md](optional/BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions alerts to Telegram + OpenClaw |
+| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions alerts to Telegram + Loki |
 | [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Automatic Claude Code PR + commit review via GitHub Actions |
 | [BOOTSTRAP-WEB-UI.md](optional/BOOTSTRAP-WEB-UI.md) | Control UI via CloudFront + Cognito — ALB, proxy, WebSocket |
 | [OPTIMIZE-TOO-LARGE-CONTEXT.md](optional/OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window usage, memory management, compaction |
 
-> **Built-in (no bootstrap needed):** Heartbeat monitoring, daily memory logging, and long-term recall are part of the OpenClaw runtime.
+> **Built-in (no bootstrap needed):** Heartbeat monitoring, daily memory logging, and long-term recall are part of the Loki runtime.
 
 ---
 
 ## Brain Files
 
-The `deploy/brain/` directory contains template workspace files that define the agent's personality, behavior, and team structure. These are copied into the OpenClaw workspace during bootstrap.
+The `deploy/brain/` directory contains template workspace files that define the agent's personality, behavior, and team structure. These are copied into the Loki workspace during bootstrap.
 
 | File | Purpose |
 |------|---------|
@@ -252,7 +252,7 @@ The deployment enables several AWS security services:
 
 ### Admin User
 
-The bootstrap creates an admin user for the OpenClaw runtime. Credentials are stored in AWS Secrets Manager and can be retrieved via the AWS Console or CLI:
+The bootstrap creates an admin user for the Loki runtime. Credentials are stored in AWS Secrets Manager and can be retrieved via the AWS Console or CLI:
 
 ```bash
 aws secretsmanager get-secret-value --secret-id <environment-name>/openclaw/admin
