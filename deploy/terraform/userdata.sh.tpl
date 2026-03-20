@@ -2,7 +2,6 @@
 set -euo pipefail
 export ACCT_ID="${acct_id}"
 export REGION="${region}"
-export STACK_NAME=""
 export DEFAULT_MODEL="${default_model}"
 export BEDROCK_REGION="${bedrock_region}"
 export GW_PORT="${gw_port}"
