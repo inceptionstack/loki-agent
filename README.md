@@ -2,6 +2,8 @@
 
 Bootstrap prompts and deployment templates for running [OpenClaw](https://github.com/inceptionstack/openclaw) on AWS. Deploy a fully configured AI agent environment with a single command.
 
+> **📖 New to this?** Read the [complete deployment guide](wiki/Deploying-OpenClaw-on-AWS.md) — covers account setup, security, budgets, and FAQ.
+
 ---
 
 ## Table of Contents
