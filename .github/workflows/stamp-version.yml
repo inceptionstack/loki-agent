@@ -1,0 +1,34 @@
+name: Stamp installer version
+on:
+  push:
+    branches: [main]
+    paths: [install.sh]
+
+permissions:
+  contents: write
+
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stamp commit hash and date
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(git log -1 --format='%ci' | cut -d: -f1,2)
+          sed -i "s/__COMMIT__/${COMMIT}/; s/__DATE__/${DATE}/" install.sh
+
+          # Only commit if there are actual changes (avoid loop)
+          if git diff --quiet install.sh; then
+            echo "No changes to stamp"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add install.sh
+          git commit -m "ci: stamp installer v$(grep INSTALLER_VERSION install.sh | head -1 | cut -d'"' -f2) @ ${COMMIT} ${DATE} [skip ci]"
+          git push

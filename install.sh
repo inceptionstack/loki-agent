@@ -5,6 +5,10 @@ set -euo pipefail
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
+INSTALLER_VERSION="0.3.0"
+# Stamped at release; fall back to git info at runtime
+INSTALLER_COMMIT="${INSTALLER_COMMIT:-__COMMIT__}"
+INSTALLER_DATE="${INSTALLER_DATE:-__DATE__}"
 
 # ============================================================================
 # UI helpers
@@ -97,9 +101,21 @@ run_or_fail() {
 # Phase: Banner
 # ============================================================================
 show_banner() {
+  # Resolve commit/date from git if running from a clone, otherwise use stamped values
+  local commit="$INSTALLER_COMMIT" date="$INSTALLER_DATE"
+  if [[ "$commit" == "__COMMIT__" ]] && command -v git &>/dev/null; then
+    local script_dir; script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+    if [[ -d "$script_dir/.git" ]]; then
+      commit=$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+      date=$(git -C "$script_dir" log -1 --format='%ci' 2>/dev/null | cut -d: -f1,2 || echo "unknown")
+    fi
+  fi
+  local version_line="v${INSTALLER_VERSION} · ${commit} · ${date}"
+
   echo ""
   echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
   echo -e "${BOLD}║       🤖 Loki Agent — AWS Installer         ║${NC}"
+  printf "${BOLD}║${NC}  %-42s${BOLD}║${NC}\n" "$version_line"
   echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
   echo ""
 }
