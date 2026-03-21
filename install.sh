@@ -467,11 +467,29 @@ terraform {
 EOF
     fi
 
-    info "Initializing Terraform..."
-    terraform init -input=false >/dev/null 2>&1
+    info "Initializing Terraform (downloading providers, may take a minute)..."
+    TF_INIT_LOG=$(mktemp)
+    set +e
+    terraform init -input=false > "$TF_INIT_LOG" 2>&1
+    TF_INIT_RC=$?
+    set -e
+    if [[ $TF_INIT_RC -ne 0 ]]; then
+      echo ""
+      warn "Terraform init failed:"
+      cat "$TF_INIT_LOG"
+      rm -f "$TF_INIT_LOG"
+      fail "terraform init exited with code $TF_INIT_RC"
+    fi
+    # Show key progress lines
+    grep -E 'Initializing|Installing|Installed' "$TF_INIT_LOG" | while IFS= read -r line; do
+      echo -e "  ${BLUE}…${NC} ${line}"
+    done
+    rm -f "$TF_INIT_LOG"
     ok "Terraform initialized"
 
     info "Deploying (~2-3 minutes)..."
+    TF_APPLY_LOG=$(mktemp)
+    set +e
     terraform apply -auto-approve \
       -var="environment_name=${ENV_NAME}" \
       -var="instance_type=${INSTANCE_TYPE}" \
@@ -483,17 +501,29 @@ EOF
       -var="enable_access_analyzer=${ACCESS_ANALYZER}" \
       -var="enable_config_recorder=${CONFIG_RECORDER}" \
       -var="loki_watermark=${LOKI_WATERMARK}" \
-      2>&1 | while IFS= read -r line; do
-        if [[ "$line" == *": Creating..."* ]]; then
-          echo -e "  ${BLUE}+${NC} ${line##*] }"
-        elif [[ "$line" == *": Creation complete"* ]]; then
-          echo -e "  ${GREEN}✓${NC} ${line##*] }"
-        elif [[ "$line" == *"Apply complete"* ]]; then
-          echo -e "\n  ${GREEN}${line}${NC}"
-        elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then
-          echo "  $line"
-        fi
-      done
+      > "$TF_APPLY_LOG" 2>&1
+    TF_APPLY_RC=$?
+    set -e
+    # Show progress lines
+    grep -E 'Creating\.\.\.|Creation complete|Apply complete|Outputs:|= ' "$TF_APPLY_LOG" | while IFS= read -r line; do
+      if [[ "$line" == *": Creating..."* ]]; then
+        echo -e "  ${BLUE}+${NC} ${line##*] }"
+      elif [[ "$line" == *": Creation complete"* ]]; then
+        echo -e "  ${GREEN}✓${NC} ${line##*] }"
+      elif [[ "$line" == *"Apply complete"* ]]; then
+        echo -e "\n  ${GREEN}${line}${NC}"
+      elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then
+        echo "  $line"
+      fi
+    done
+    if [[ $TF_APPLY_RC -ne 0 ]]; then
+      echo ""
+      warn "Terraform apply failed. Full output:"
+      cat "$TF_APPLY_LOG"
+      rm -f "$TF_APPLY_LOG"
+      fail "terraform apply exited with code $TF_APPLY_RC"
+    fi
+    rm -f "$TF_APPLY_LOG"
 
     INSTANCE_ID=$(terraform output -raw instance_id)
     PUBLIC_IP=$(terraform output -raw public_ip)
