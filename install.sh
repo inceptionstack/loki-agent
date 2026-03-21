@@ -3,6 +3,9 @@
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
 set -euo pipefail
 
+# When piped via curl, stdin is the script itself. Reopen stdin from /dev/tty for interactive prompts.
+exec < /dev/tty
+
 # ============================================================================
 # Colors & Helpers
 # ============================================================================
