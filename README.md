@@ -139,6 +139,16 @@ openclaw tui
 
 Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack/loki-agent/wiki/Deploying-Loki-on-AWS)
 
+### Uninstall
+
+Remove one or all Loki deployments from your account:
+
+```bash
+bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh)
+```
+
+Finds deployments by tag, lets you pick which to remove, deletes CloudFormation stacks or cleans up resources manually (Terraform deploys), and optionally removes state buckets/lock tables.
+
 
 ---
 
