@@ -4,9 +4,17 @@
 >
 > **Easiest — deploy from your browser (no tools needed):**
 >
-> [☁️ Launch Stack in AWS Console (us-east-1)](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent)
+> <a href="https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent" target="_blank">☁️ Launch Stack in AWS Console (us-east-1)</a>
 >
-> > For a different region, replace both `us-east-1` in the URL with your region (e.g. `eu-west-1`).
+> **us-east-1:**
+> ```
+> https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
+> ```
+>
+> **Other regions** — replace `us-east-1` with your region:
+> ```
+> https://<your-region>.console.aws.amazon.com/cloudformation/home?region=<your-region>#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
+> ```
 >
 > **Or use the interactive installer (requires AWS CLI):**
 > ```
@@ -118,9 +126,17 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 
 Click the link to open the CloudFormation stack wizard in your browser. Review the parameters (defaults work out of the box), check the IAM acknowledgement box, and click **Create stack**.
 
-**[☁️ Launch Stack in us-east-1](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent)**
+<a href="https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent" target="_blank"><strong>☁️ Launch Stack in us-east-1</strong></a>
 
-> For a different region, replace both `us-east-1` in the URL with your region (e.g. `eu-west-1`).
+**us-east-1:**
+```
+https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
+```
+
+**Other regions** — replace `us-east-1` with your region:
+```
+https://<your-region>.console.aws.amazon.com/cloudformation/home?region=<your-region>#/stacks/create/review?templateURL=https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml&stackName=loki-agent
+```
 
 After ~10 minutes, find the Instance ID in the stack **Outputs** tab, then:
 
