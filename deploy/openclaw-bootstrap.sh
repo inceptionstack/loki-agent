@@ -86,6 +86,13 @@ ok "Master SSH key added"
 step "mise"
 curl -fsSL https://mise.run | sh
 echo 'eval "$(/home/ec2-user/.local/bin/mise activate bash)"' >> ~/.bashrc
+
+# Loki aliases
+cat >> ~/.bashrc << 'ALIASES'
+alias loki='openclaw'
+alias lt='openclaw tui'
+alias gr='openclaw gateway restart'
+ALIASES
 export PATH="/home/ec2-user/.local/bin:$PATH"
 eval "$(mise activate bash)"
 ok "mise installed: $(mise --version 2>/dev/null || echo unknown)"
@@ -213,7 +220,7 @@ USEREOF
 
 # ---- SSM Session Preferences ----
 step "SSM Session Preferences"
-SSM_DOC_CONTENT='{"schemaVersion":"1.0","description":"SSM prefs","sessionType":"Standard_Stream","inputs":{"runAsEnabled":false,"shellProfile":{"linux":"stty -echo 2>/dev/null; clear; printf '"'"'\\n\\033[1;35m? InceptionStack OpenClaw Environment\\033[0m\\n\\n  openclaw tui    ? Launch TUI\\n  openclaw status ? Gateway status\\n\\n'"'"'; stty echo 2>/dev/null; exec sudo -iu ec2-user"}}}'
+SSM_DOC_CONTENT='{"schemaVersion":"1.0","description":"SSM prefs","sessionType":"Standard_Stream","inputs":{"runAsEnabled":false,"shellProfile":{"linux":"stty -echo 2>/dev/null; clear; printf '"'"'\\n\\033[1;35m🤖 InceptionStack Loki Environment (Based on OpenClaw)\\033[0m\\n\\n  loki tui    → Launch Loki terminal UI\\n  loki status → Gateway status\\n\\n'"'"'; stty echo 2>/dev/null; exec sudo -iu ec2-user"}}}'
 if aws ssm get-document --name SSM-SessionManagerRunShell --region $REGION >/dev/null 2>&1; then
   aws ssm update-document --name SSM-SessionManagerRunShell --content "$SSM_DOC_CONTENT" --document-version '$LATEST' --region $REGION >/dev/null 2>&1 || true
 else
