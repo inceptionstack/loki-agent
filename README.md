@@ -1,6 +1,7 @@
 # Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
-> **TL;DR — Deploy Loki in one command:**
+> **TL;DR:**
+> What if you gave OpenClaw its own AWS account to manage and control, and ask it to build stuff for you?
 > ```bash
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
