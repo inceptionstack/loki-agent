@@ -1,6 +1,7 @@
 # Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
-> **TL;DR: One line Install**
+> **TL;DR: One line install**
+> ```
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
