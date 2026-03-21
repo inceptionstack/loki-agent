@@ -149,7 +149,7 @@ Wrap multiple links in `<>` to prevent Telegram from generating large previews:
 
 ```
 <https://github.com/inceptionstack/embedrock>
-<https://github.com/inceptionstack/loki-bootstrap>
+<https://github.com/inceptionstack/loki-agent>
 ```
 
 Single important links can be left unwrapped if the preview is useful.

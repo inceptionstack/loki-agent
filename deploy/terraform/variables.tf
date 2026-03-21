@@ -133,7 +133,7 @@ variable "provider_api_key" {
 
 variable "bootstrap_script_url" {
   type        = string
-  default     = "https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/openclaw-bootstrap.sh"
+  default     = "https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/openclaw-bootstrap.sh"
   description = "URL to the EC2 bootstrap script. Uses the official script by default. Override only for custom installations."
 }
 

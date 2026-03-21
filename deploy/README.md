@@ -1,6 +1,6 @@
 # Deploy Loki on AWS
 
-Deploy a fully configured [Loki](https://github.com/inceptionstack/loki-bootstrap) (powered by [OpenClaw](https://github.com/openclaw/openclaw)) AI assistant on your own AWS account. Choose your preferred IaC tool — all three options deploy identical infrastructure.
+Deploy a fully configured [Loki](https://github.com/inceptionstack/loki-agent) (powered by [OpenClaw](https://github.com/openclaw/openclaw)) AI assistant on your own AWS account. Choose your preferred IaC tool — all three options deploy identical infrastructure.
 
 ## Prerequisites
 

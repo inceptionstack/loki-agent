@@ -1,5 +1,13 @@
 # Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
+> **TL;DR — Deploy Loki in one command:**
+> ```bash
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+> ```
+> Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
+
+---
+
 ## The Problem: Infrastructure Eats Your Time
 
 Building a prototype has never been faster. Tools like Lovable, Base44, and Bolt let any developer go from idea to working demo in minutes. For simple frontend apps with basic CRUD, these platforms deliver genuine speed. The prototype side of the equation is largely solved.
@@ -65,7 +73,7 @@ It does not bundle any clawhub skills (huge security risk there), but comes with
 
 ## How It Works
 
-Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-bootstrap](https://github.com/inceptionstack/loki-bootstrap) repository packages everything needed to deploy a production-ready Loki instance:
+Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-agent](https://github.com/inceptionstack/loki-agent) repository packages everything needed to deploy a production-ready Loki instance:
 
 **1. One-click deployment.** Choose your IaC tool  (CloudFormation, SAM, or Terraform) and deploy. The template creates an isolated VPC, a T4g.xlarge EC2 instance by default (recommended so it can really do things like build run tests, build code, dockerize things and more, as a real dev machine), IAM roles, security services, and installs Loki with a pre-configured workspace. Total deploy time: \~4-10 minutes.
 
@@ -95,10 +103,20 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 
 ## Getting Started
 
+### Option 1: One-command install (recommended)
+
+```bash
+curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+```
+
+The installer verifies your AWS credentials, checks permissions, lets you pick an instance size and deployment method (CloudFormation/SAM/Terraform), deploys everything, and monitors progress until Loki is ready.
+
+### Option 2: Manual deploy
+
 ```bash
 # Clone
-git clone https://github.com/inceptionstack/loki-bootstrap.git
-cd loki-bootstrap/deploy/cloudformation
+git clone https://github.com/inceptionstack/loki-agent.git
+cd loki-agent/deploy/cloudformation
 
 # Deploy
 aws cloudformation create-stack \
@@ -115,7 +133,7 @@ aws ssm start-session --target <instance-id>
 openclaw tui
 ```
 
-Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack/loki-bootstrap/wiki/Deploying-Loki-on-AWS)
+Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack/loki-agent/wiki/Deploying-Loki-on-AWS)
 
 
 ---
@@ -163,7 +181,7 @@ Loki is:
 
 ## Open Source
 
-Loki is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-bootstrap](https://github.com/inceptionstack/loki-bootstrap).
+Loki is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-agent](https://github.com/inceptionstack/loki-agent).
 
 Built on [OpenClaw](https://github.com/openclaw/openclaw) — the engine that powers the agent runtime, tool execution, and memory system.
 

@@ -155,7 +155,7 @@ ok "Workspace ready"
 chmod 700 ~/.openclaw/workspace
 
 step "OpenClaw Config"
-curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/openclaw-config-gen.py -o /tmp/oc-cfggen.py
+curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/openclaw-config-gen.py -o /tmp/oc-cfggen.py
 GW_TOKEN=$(openssl rand -hex 24)
 python3 /tmp/oc-cfggen.py "$BEDROCK_REGION" "$DEFAULT_MODEL" "$GW_PORT" "$GW_TOKEN" "$MODEL_MODE" "$LITELLM_BASE_URL" "$LITELLM_API_KEY" "$LITELLM_MODEL" "$PROVIDER_API_KEY"
 ok "Config written (mode=$MODEL_MODE)"
@@ -167,7 +167,7 @@ if aws bedrock get-use-case-for-model-access --region us-east-1 >/dev/null 2>&1;
   ok "Bedrock form verified"
 else
   fail "Bedrock form not submitted"
-  curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/bedrock-motd.sh -o /tmp/bedrock-motd.sh
+  curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/bedrock-motd.sh -o /tmp/bedrock-motd.sh
   bash /tmp/bedrock-motd.sh 2>/dev/null || true
 fi
 
@@ -223,7 +223,7 @@ ok "SSM Session doc configured"
 
 # ---- InceptionStack Brain ----
 step "InceptionStack Brain"
-BRAIN_REPO="https://raw.githubusercontent.com/inceptionstack/loki-bootstrap/main/deploy/brain"
+BRAIN_REPO="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/brain"
 BRAIN_DEST="/home/ec2-user/.openclaw/workspace"
 for bf in SOUL.md IDENTITY.md USER.md TOOLS.md AGENTS.md CLAUDE.md PROJECT-GUIDELINES.md HEARTBEAT.md APP-REGISTRY.md; do
   curl -fsSL "$BRAIN_REPO/$bf" -o "$BRAIN_DEST/$bf" 2>/dev/null && info "  + $bf" || info "  - $bf (skip)"

@@ -26,8 +26,8 @@ If you know what you're doing:
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/inceptionstack/loki-bootstrap.git
-cd loki-bootstrap/deploy/cloudformation
+git clone https://github.com/inceptionstack/loki-agent.git
+cd loki-agent/deploy/cloudformation
 
 # 2. Deploy (change region/instance as needed)
 aws cloudformation create-stack \
