@@ -533,7 +533,7 @@ resource "aws_iam_access_key" "admin" {
 }
 
 # Admin password Lambda
-resource "aws_iam_role" "admin_password_lambda" {
+resource "aws_iam_role" "admin_setup_lambda" {
   name = "${var.environment_name}-admin-pw-role"
 
   assume_role_policy = jsonencode({
@@ -546,14 +546,14 @@ resource "aws_iam_role" "admin_password_lambda" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "admin_password_basic" {
-  role       = aws_iam_role.admin_password_lambda.name
+resource "aws_iam_role_policy_attachment" "admin_setup_basic" {
+  role       = aws_iam_role.admin_setup_lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-data "archive_file" "admin_password" {
+data "archive_file" "admin_setup" {
   type        = "zip"
-  output_path = "${path.module}/.lambda_zips/admin_password.zip"
+  output_path = "${path.module}/.lambda_zips/admin_setup.zip"
 
   source {
     content  = <<-PYTHON
@@ -568,29 +568,29 @@ def handler(event, context):
   }
 }
 
-resource "aws_lambda_function" "admin_password" {
-  function_name    = "${var.environment_name}-admin-password"
-  role             = aws_iam_role.admin_password_lambda.arn
+resource "aws_lambda_function" "admin_setup" {
+  function_name    = "${var.environment_name}-admin-setup"
+  role             = aws_iam_role.admin_setup_lambda.arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 30
-  filename         = data.archive_file.admin_password.output_path
-  source_code_hash = data.archive_file.admin_password.output_base64sha256
+  filename         = data.archive_file.admin_setup.output_path
+  source_code_hash = data.archive_file.admin_setup.output_base64sha256
 
-  depends_on = [aws_iam_role_policy_attachment.admin_password_basic]
+  depends_on = [aws_iam_role_policy_attachment.admin_setup_basic]
 }
 
-resource "null_resource" "admin_password_invoke" {
-  depends_on = [aws_lambda_function.admin_password, aws_iam_user.admin]
+resource "null_resource" "admin_setup_invoke" {
+  depends_on = [aws_lambda_function.admin_setup, aws_iam_user.admin]
 
   provisioner "local-exec" {
     command = <<-EOT
       aws lambda invoke \
-        --function-name "${var.environment_name}-admin-password" \
+        --function-name "${var.environment_name}-admin-setup" \
         --payload '${jsonencode({ account_id = data.aws_caller_identity.current.account_id, region = data.aws_region.current.name, admin_username = "${var.environment_name}-admin" })}' \
         --cli-binary-format raw-in-base64-out \
         --region us-east-1 \
-        /tmp/admin_password_response.json && cat /tmp/admin_password_response.json
+        /tmp/admin_setup_response.json && cat /tmp/admin_setup_response.json
     EOT
   }
 }

@@ -792,10 +792,10 @@ Resources:
     Properties:
       UserName: !Ref AdminUser
 
-  AdminPasswordFunction:
+  AdminSetupFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-admin-password'
+      FunctionName: !Sub '${EnvironmentName}-admin-setup'
       Runtime: python3.12
       Handler: index.handler
       Timeout: 30
@@ -825,12 +825,12 @@ Resources:
             print(f"[INFO] Event type: {event['RequestType']}")
             send_response(event, context, 'SUCCESS', 'No-op — admin user has API keys only')
 
-  AdminPasswordCustomResource:
-    Type: Custom::AdminPassword
+  AdminSetupCustomResource:
+    Type: Custom::AdminSetup
     DependsOn:
       - AdminUser
     Properties:
-      ServiceToken: !GetAtt AdminPasswordFunction.Arn
+      ServiceToken: !GetAtt AdminSetupFunction.Arn
       AccountId: !Ref 'AWS::AccountId'
       Region: !Ref 'AWS::Region'
       AdminUsername: !Sub '${EnvironmentName}-admin'

@@ -829,7 +829,7 @@ Resources:
     Properties:
       UserName: !Ref AdminUser
 
-  AdminPasswordLambdaRole:
+  AdminSetupRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${EnvironmentName}-admin-pw-role'
@@ -843,14 +843,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
-  AdminPasswordFunction:
+  AdminSetupFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub '${EnvironmentName}-admin-password'
+      FunctionName: !Sub '${EnvironmentName}-admin-setup'
       Runtime: python3.12
       Handler: index.handler
       Timeout: 30
-      Role: !GetAtt AdminPasswordLambdaRole.Arn
+      Role: !GetAtt AdminSetupRole.Arn
       Code:
         ZipFile: |
           import json, urllib.request
@@ -878,13 +878,13 @@ Resources:
               print(f"[INFO] Event type: {event['RequestType']}")
               send_response(event, context, 'SUCCESS', 'No-op — admin user has API keys only')
 
-  AdminPasswordCustomResource:
-    Type: Custom::AdminPassword
+  AdminSetupCustomResource:
+    Type: Custom::AdminSetup
     DependsOn:
       - AdminUser
-      - AdminPasswordLambdaRole
+      - AdminSetupRole
     Properties:
-      ServiceToken: !GetAtt AdminPasswordFunction.Arn
+      ServiceToken: !GetAtt AdminSetupFunction.Arn
       AccountId: !Ref 'AWS::AccountId'
       Region: !Ref 'AWS::Region'
       AdminUsername: !Sub '${EnvironmentName}-admin'
