@@ -551,99 +551,18 @@ resource "aws_iam_role_policy_attachment" "admin_password_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-resource "aws_iam_role_policy" "admin_password" {
-  name = "admin-password"
-  role = aws_iam_role.admin_password_lambda.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["iam:CreateLoginProfile", "iam:UpdateLoginProfile", "iam:GetLoginProfile"]
-        Resource = aws_iam_user.admin.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:CreateSecret", "secretsmanager:PutSecretValue", "secretsmanager:TagResource"]
-        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:openclaw/admin-password-*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["ssm:PutParameter"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/openclaw/admin-console-url"
-      }
-    ]
-  })
-}
-
 data "archive_file" "admin_password" {
   type        = "zip"
   output_path = "${path.module}/.lambda_zips/admin_password.zip"
 
   source {
     content  = <<-PYTHON
-import json, string, secrets, boto3
+import json
 
 def handler(event, context):
+    # No-op: admin user has API access keys only (no console login)
     print(f"[INFO] Event: {json.dumps(event)}")
-    account_id = event['account_id']
-    region = event['region']
-
-    try:
-        alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
-        password = ''.join(secrets.choice(alphabet) for _ in range(24))
-
-        iam = boto3.client('iam')
-        try:
-            iam.create_login_profile(
-                UserName=event.get('admin_username', 'admin'),
-                Password=password,
-                PasswordResetRequired=True
-            )
-            print("[OK] Login profile created")
-        except iam.exceptions.EntityAlreadyExistsException:
-            iam.update_login_profile(
-                UserName=event.get('admin_username', 'admin'),
-                Password=password,
-                PasswordResetRequired=True
-            )
-            print("[OK] Login profile updated")
-
-        sm = boto3.client('secretsmanager', region_name=region)
-        secret_name = 'openclaw/admin-password'
-        secret_value = json.dumps({
-            'username': event.get('admin_username', 'admin'),
-            'password': password,
-            'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
-        })
-        try:
-            sm.create_secret(
-                Name=secret_name,
-                SecretString=secret_value,
-                Tags=[{'Key': 'ManagedBy', 'Value': 'Terraform'}]
-            )
-            print("[OK] Secret created")
-        except sm.exceptions.ResourceExistsException:
-            sm.put_secret_value(
-                SecretId=secret_name,
-                SecretString=secret_value
-            )
-            print("[OK] Secret updated")
-
-        ssm = boto3.client('ssm', region_name=region)
-        ssm.put_parameter(
-            Name='/openclaw/admin-console-url',
-            Value=f'https://{account_id}.signin.aws.amazon.com/console',
-            Type='String',
-            Overwrite=True
-        )
-        print("[OK] Console URL written to SSM")
-
-        return {'status': 'SUCCESS', 'console_url': f'https://{account_id}.signin.aws.amazon.com/console'}
-    except Exception as e:
-        print(f"[FAIL] {e}")
-        return {'status': 'FAILED', 'error': str(e)}
+    return {'status': 'SUCCESS'}
     PYTHON
     filename = "index.py"
   }
@@ -658,7 +577,7 @@ resource "aws_lambda_function" "admin_password" {
   filename         = data.archive_file.admin_password.output_path
   source_code_hash = data.archive_file.admin_password.output_base64sha256
 
-  depends_on = [aws_iam_role_policy.admin_password]
+  depends_on = [aws_iam_role_policy_attachment.admin_password_basic]
 }
 
 resource "null_resource" "admin_password_invoke" {

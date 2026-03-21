@@ -22,7 +22,7 @@ All three methods create the same architecture:
 
 - **VPC** — isolated VPC with public subnet, internet gateway, route table
 - **EC2 Instance** — ARM64 Graviton (AL2023), root + data EBS volumes (gp3, encrypted)
-- **IAM** — instance role (AdministratorAccess + SSM), admin IAM user with console password
+- **IAM** — instance role (AdministratorAccess + SSM), admin IAM user with API access keys (no console login)
 - **Security Services** — SecurityHub, GuardDuty, Inspector, Access Analyzer, Config (individually toggleable via parameters, all enabled by default)
 - **Bedrock** — use case form auto-submitted, optional quota increase requests
 - **OpenClaw** — installed via bootstrap script, systemd gateway service, brain workspace files
@@ -68,14 +68,9 @@ openclaw configure
 # Follow the wizard to set up Telegram, Discord, Slack, etc.
 ```
 
-### Admin Console Access
+### Admin User
 
-The template creates an IAM admin user (`<EnvironmentName>-admin`) with a random password stored in Secrets Manager:
-
-```bash
-aws secretsmanager get-secret-value --secret-id openclaw/admin-password \
-  --region us-east-1 --query SecretString --output text | jq .
-```
+The template creates an IAM admin user (`<EnvironmentName>-admin`) with **API access keys only** (no console login). The access keys are used by the OpenClaw agent for AWS API access. There is no console password — use SSM Session Manager or the EC2 instance role for interactive access.
 
 ## Next Steps After Deployment
 

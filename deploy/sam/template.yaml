@@ -799,27 +799,8 @@ Resources:
       Runtime: python3.12
       Handler: index.handler
       Timeout: 30
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - iam:CreateLoginProfile
-                - iam:UpdateLoginProfile
-                - iam:GetLoginProfile
-              Resource: !GetAtt AdminUser.Arn
-            - Effect: Allow
-              Action:
-                - secretsmanager:CreateSecret
-                - secretsmanager:PutSecretValue
-                - secretsmanager:TagResource
-              Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:openclaw/admin-password-*'
-            - Effect: Allow
-              Action:
-                - ssm:PutParameter
-              Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/openclaw/admin-console-url'
       InlineCode: |
-        import json, string, secrets, urllib.request, boto3
+        import json, urllib.request
 
         def send_response(event, context, status, reason='', data={}):
             # CFN responses must be under 4096 bytes total
@@ -839,99 +820,10 @@ Resources:
                 method='PUT')
             urllib.request.urlopen(req)
 
-        def request_quota_increases():
-            """Request higher Bedrock quotas for Opus 4.6 cross-region inference."""
-            sq = boto3.client('servicequotas', region_name='us-east-1')
-            quotas = [
-                ('L-11DFF789', 1000, 'Cross-region RPM Opus 4.6'),
-                ('L-0AD9BBE8', 4000000, 'Cross-region TPM Opus 4.6'),
-            ]
-            for code, desired, name in quotas:
-                try:
-                    current = sq.get_service_quota(ServiceCode='bedrock', QuotaCode=code)
-                    current_val = current['Quota']['Value']
-                    if current_val >= desired:
-                        print(f"[OK] {name}: already at {current_val}")
-                        continue
-                    sq.request_service_quota_increase(
-                        ServiceCode='bedrock', QuotaCode=code, DesiredValue=desired
-                    )
-                    print(f"[OK] {name}: requested {current_val} -> {desired}")
-                except Exception as e:
-                    print(f"[WARN] {name} quota request failed: {e}")
-
         def handler(event, context):
+            # No-op: admin user has API access keys only (no console login)
             print(f"[INFO] Event type: {event['RequestType']}")
-            if event['RequestType'] == 'Delete':
-                send_response(event, context, 'SUCCESS', 'Delete is a no-op')
-                return
-
-            props = event['ResourceProperties']
-            account_id = props['AccountId']
-            region = props['Region']
-
-            try:
-                # Generate a strong random password
-                alphabet = string.ascii_letters + string.digits + '!@#$%^&*'
-                password = ''.join(secrets.choice(alphabet) for _ in range(24))
-
-                # Create console login profile (password must be changed on first login)
-                iam = boto3.client('iam')
-                try:
-                    iam.create_login_profile(
-                        UserName=props['AdminUsername'],
-                        Password=password,
-                        PasswordResetRequired=True
-                    )
-                    print("[OK] Login profile created")
-                except iam.exceptions.EntityAlreadyExistsException:
-                    iam.update_login_profile(
-                        UserName=props['AdminUsername'],
-                        Password=password,
-                        PasswordResetRequired=True
-                    )
-                    print("[OK] Login profile updated")
-
-                # Store password in Secrets Manager
-                sm = boto3.client('secretsmanager', region_name=region)
-                secret_name = 'openclaw/admin-password'
-                secret_value = json.dumps({
-                    'username': props['AdminUsername'],
-                    'password': password,
-                    'console_url': f'https://{account_id}.signin.aws.amazon.com/console'
-                })
-                try:
-                    sm.create_secret(
-                        Name=secret_name,
-                        SecretString=secret_value,
-                        Tags=[{'Key': 'ManagedBy', 'Value': 'StackSet'}]
-                    )
-                    print("[OK] Secret created")
-                except sm.exceptions.ResourceExistsException:
-                    sm.put_secret_value(
-                        SecretId=secret_name,
-                        SecretString=secret_value
-                    )
-                    print("[OK] Secret updated")
-
-                # Also write console URL to SSM for easy access
-                ssm = boto3.client('ssm', region_name=region)
-                ssm.put_parameter(
-                    Name='/openclaw/admin-console-url',
-                    Value=f'https://{account_id}.signin.aws.amazon.com/console',
-                    Type='String',
-                    Overwrite=True
-                )
-                print("[OK] Console URL written to SSM")
-
-                send_response(event, context, 'SUCCESS', 'Admin password configured',
-                    {'ConsoleUrl': f'https://{account_id}.signin.aws.amazon.com/console'})
-
-            except Exception as e:
-                print(f"[FAIL] {e}")
-                send_response(event, context, 'SUCCESS',
-                    f'Admin password setup failed: {e}',
-                    {'ConsoleUrl': 'FAILED'})
+            send_response(event, context, 'SUCCESS', 'No-op — admin user has API keys only')
 
   AdminPasswordCustomResource:
     Type: Custom::AdminPassword

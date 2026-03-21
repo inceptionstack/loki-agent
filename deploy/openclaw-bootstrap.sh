@@ -239,11 +239,9 @@ sudo -u ec2-user bash -c 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemctl
 sleep 5
 sudo -u ec2-user bash -c 'export XDG_RUNTIME_DIR="/run/user/$(id -u)"; systemctl --user is-active openclaw-gateway.service' 2>/dev/null && ok "Gateway RUNNING" || fail "Gateway may not have started"
 
-# ---- Admin Console Info ----
-step "Admin Console"
-CONSOLE_URL="https://${ACCT_ID}.signin.aws.amazon.com/console"
-info "Console: $CONSOLE_URL"
-{ echo ""; echo "  AWS Console: $CONSOLE_URL"; echo "  User: admin | Password: Secrets Manager (openclaw/admin-password)"; echo ""; } >> /etc/motd
+# ---- Admin User Info ----
+step "Admin User"
+info "Admin user has API access keys only (no console login)"
 
 step "Setup Complete"
 ok "All done at $(date -u)"
