@@ -8,13 +8,14 @@ set -euo pipefail
 # ============================================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
+TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
+
 info() { echo -e "${BLUE}▸${NC} $1"; }
 ok()   { echo -e "${GREEN}✓${NC} $1"; }
 warn() { echo -e "${YELLOW}⚠${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
 
 prompt() {
-  # Usage: prompt "Question text" VARIABLE "default_value"
   local text="$1" var="$2" default="${3:-}"
   local display="$text"
   [[ -n "$default" ]] && display="$text [$default]"
@@ -23,7 +24,6 @@ prompt() {
 }
 
 confirm() {
-  # Usage: confirm "Question" "default_yes|default_no"
   local text="$1" default="${2:-default_no}"
   local hint="[y/N]"; [[ "$default" == "default_yes" ]] && hint="[Y/n]"
   read -rp "$(echo -e "${BOLD}${text} ${hint}:${NC} ")" answer
@@ -35,6 +35,32 @@ confirm() {
 
 require_cmd() {
   command -v "$1" &>/dev/null || fail "$2"
+}
+
+# Toggle a setting on/off interactively
+toggle() {
+  local text="$1" var="$2" default="${3:-true}"
+  local hint="[Y/n]"; [[ "$default" == "false" ]] && hint="[y/N]"
+  read -rp "$(echo -e "    ${text} ${hint}: ")" answer
+  case "$default" in
+    true)  [[ "$answer" =~ ^[Nn]$ ]] && eval "$var=false" || eval "$var=true" ;;
+    false) [[ "$answer" =~ ^[Yy]$ ]] && eval "$var=true"  || eval "$var=false" ;;
+  esac
+}
+
+# Try to open a URL in the user's browser
+open_url() {
+  local url="$1"
+  if command -v open &>/dev/null; then
+    open "$url" 2>/dev/null && return 0
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$url" 2>/dev/null && return 0
+  elif command -v start &>/dev/null; then
+    start "$url" 2>/dev/null && return 0
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v explorer.exe &>/dev/null; then
+    explorer.exe "$url" 2>/dev/null && return 0
+  fi
+  return 1
 }
 
 # Shared: deploy a CFN-based stack (works for both CloudFormation and SAM)
@@ -89,7 +115,7 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 
 # ============================================================================
-# Pre-flight checks
+# Pre-flight checks (required for all options — AWS CLI needed)
 # ============================================================================
 info "Running pre-flight checks..."
 
@@ -157,6 +183,19 @@ else
 fi
 
 # ============================================================================
+# Choose deployment method
+# ============================================================================
+echo ""
+echo "  Deployment methods:"
+echo ""
+echo -e "    ${GREEN}1) CloudFormation Console${NC} -- opens browser wizard to review & launch"
+echo "    2) CloudFormation CLI     -- deploy from terminal"
+echo "    3) SAM                    -- for SAM CLI users"
+echo "    4) Terraform              -- for Terraform shops"
+echo ""
+prompt "Deployment method" DEPLOY_METHOD "1"
+
+# ============================================================================
 # Configuration
 # ============================================================================
 echo ""
@@ -183,27 +222,154 @@ esac
 
 prompt "AWS region" DEPLOY_REGION "$REGION"
 
+# ============================================================================
+# Security services — interactive toggles
+# ============================================================================
 echo ""
-echo "  Security services: SecurityHub, GuardDuty, Inspector, Access Analyzer, Config"
-echo "  Cost: ~\$5/mo total. Disable for test deploys to save costs + faster teardown."
+echo -e "  ${BOLD}Security services${NC} (~\$5/mo total, individually toggleable):"
 echo ""
+
 if confirm "Enable all security services?" "default_yes"; then
   SECURITY_HUB="true"; GUARDDUTY="true"; INSPECTOR="true"; ACCESS_ANALYZER="true"; CONFIG_RECORDER="true"
+  ok "All security services enabled"
 else
-  SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"; ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
+  echo ""
+  echo -e "  Pick which to enable:"
+  echo ""
+  toggle "AWS Security Hub"      SECURITY_HUB    true
+  toggle "Amazon GuardDuty"      GUARDDUTY       true
+  toggle "Amazon Inspector"      INSPECTOR       true
+  toggle "IAM Access Analyzer"   ACCESS_ANALYZER true
+  toggle "AWS Config Recorder"   CONFIG_RECORDER true
+  echo ""
+  ENABLED=""
+  [[ "$SECURITY_HUB"    == "true" ]] && ENABLED="${ENABLED} SecurityHub"
+  [[ "$GUARDDUTY"        == "true" ]] && ENABLED="${ENABLED} GuardDuty"
+  [[ "$INSPECTOR"        == "true" ]] && ENABLED="${ENABLED} Inspector"
+  [[ "$ACCESS_ANALYZER"  == "true" ]] && ENABLED="${ENABLED} AccessAnalyzer"
+  [[ "$CONFIG_RECORDER"  == "true" ]] && ENABLED="${ENABLED} Config"
+  if [[ -n "$ENABLED" ]]; then
+    ok "Enabled:${ENABLED}"
+  else
+    warn "All security services disabled"
+  fi
 fi
 
+# ============================================================================
+# Summary
+# ============================================================================
 echo ""
-echo "  Deployment methods:"
-echo "    1) CloudFormation -- standard AWS, best for beginners"
-echo "    2) SAM            -- for SAM CLI users"
-echo "    3) Terraform      -- for Terraform shops"
+echo -e "  ${BOLD}╭─────────────── Deploy Summary ───────────────╮${NC}"
+echo -e "  ${BOLD}│${NC}  Environment:  ${ENV_NAME}"
+echo -e "  ${BOLD}│${NC}  Instance:     ${INSTANCE_TYPE}"
+echo -e "  ${BOLD}│${NC}  Region:       ${DEPLOY_REGION}"
+echo -e "  ${BOLD}│${NC}  Watermark:    ${LOKI_WATERMARK}"
+echo -e "  ${BOLD}│${NC}  SecurityHub:  ${SECURITY_HUB}  GuardDuty: ${GUARDDUTY}"
+echo -e "  ${BOLD}│${NC}  Inspector:    ${INSPECTOR}  Analyzer:  ${ACCESS_ANALYZER}"
+echo -e "  ${BOLD}│${NC}  Config:       ${CONFIG_RECORDER}"
+echo -e "  ${BOLD}╰───────────────────────────────────────────────╯${NC}"
 echo ""
-prompt "Deployment method" DEPLOY_METHOD "1"
+confirm "Proceed with deployment?" "default_yes" || { echo "Aborted."; exit 0; }
 
 # ============================================================================
-# Clone location
+# Option 1: CloudFormation Console — upload template to S3, open browser
 # ============================================================================
+if [[ "$DEPLOY_METHOD" == "1" ]]; then
+  echo ""
+  info "Preparing CloudFormation Console launch..."
+
+  # Create a private bucket for the template
+  CFN_BUCKET="${ENV_NAME}-cfn-templates-${ACCOUNT_ID}"
+
+  if ! aws s3api head-bucket --bucket "$CFN_BUCKET" --region "$DEPLOY_REGION" 2>/dev/null; then
+    info "Creating template bucket: ${CFN_BUCKET}"
+    if [[ "$DEPLOY_REGION" == "us-east-1" ]]; then
+      aws s3api create-bucket --bucket "$CFN_BUCKET" --region "$DEPLOY_REGION" >/dev/null
+    else
+      aws s3api create-bucket --bucket "$CFN_BUCKET" --region "$DEPLOY_REGION" \
+        --create-bucket-configuration LocationConstraint="$DEPLOY_REGION" >/dev/null
+    fi
+    ok "Bucket created: ${CFN_BUCKET}"
+  else
+    ok "Bucket exists: ${CFN_BUCKET}"
+  fi
+
+  # Download template from GitHub and upload to S3
+  TEMPLATE_TMP=$(mktemp /tmp/loki-cfn-template.XXXXXX.yaml)
+  info "Downloading template..."
+  curl -sfL "$TEMPLATE_RAW_URL" -o "$TEMPLATE_TMP" \
+    || fail "Failed to download template from GitHub"
+  ok "Template downloaded"
+
+  info "Uploading template to S3..."
+  aws s3 cp "$TEMPLATE_TMP" "s3://${CFN_BUCKET}/loki-agent/template.yaml" \
+    --region "$DEPLOY_REGION" >/dev/null
+  rm -f "$TEMPLATE_TMP"
+  ok "Template uploaded"
+
+  # Build the S3 HTTPS URL (CloudFormation-compatible format)
+  TEMPLATE_S3_URL="https://${CFN_BUCKET}.s3.amazonaws.com/loki-agent/template.yaml"
+
+  # URL-encode for console
+  ENCODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${TEMPLATE_S3_URL}', safe=''))" 2>/dev/null \
+    || python -c "import urllib; print(urllib.quote('${TEMPLATE_S3_URL}', safe=''))" 2>/dev/null \
+    || echo "$TEMPLATE_S3_URL")
+
+  # Build console URL with pre-filled parameters
+  CONSOLE_URL="https://${DEPLOY_REGION}.console.aws.amazon.com/cloudformation/home?region=${DEPLOY_REGION}#/stacks/create/review"
+  CONSOLE_URL="${CONSOLE_URL}?templateURL=${ENCODED_URL}"
+  CONSOLE_URL="${CONSOLE_URL}&stackName=${ENV_NAME}-stack"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnvironmentName=${ENV_NAME}"
+  CONSOLE_URL="${CONSOLE_URL}&param_InstanceType=${INSTANCE_TYPE}"
+  CONSOLE_URL="${CONSOLE_URL}&param_BedrockRegion=${DEPLOY_REGION}"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnableSecurityHub=${SECURITY_HUB}"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnableGuardDuty=${GUARDDUTY}"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnableInspector=${INSPECTOR}"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnableAccessAnalyzer=${ACCESS_ANALYZER}"
+  CONSOLE_URL="${CONSOLE_URL}&param_EnableConfigRecorder=${CONFIG_RECORDER}"
+  CONSOLE_URL="${CONSOLE_URL}&param_LokiWatermark=${LOKI_WATERMARK}"
+
+  echo ""
+  echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║  Open this link in your browser to launch the stack wizard  ║${NC}"
+  echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}${CONSOLE_URL}${NC}"
+  echo ""
+
+  if open_url "$CONSOLE_URL"; then
+    ok "Opened in your browser"
+  else
+    info "Copy the link above and paste it into your browser"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}What to do next:${NC}"
+  echo "    1. Log in to AWS if prompted"
+  echo "    2. Review the parameters — your choices are pre-filled"
+  echo "    3. Scroll down and check \"I acknowledge that AWS CloudFormation might create IAM resources with custom names\""
+  echo "    4. Click ${BOLD}Create stack${NC}"
+  echo "    5. Wait ~10 minutes for the stack to finish"
+  echo "    6. Find the Instance ID in the stack ${BOLD}Outputs${NC} tab"
+  echo ""
+  echo -e "  ${BOLD}Connect:${NC}"
+  echo "    aws ssm start-session --target <instance-id> --region ${DEPLOY_REGION}"
+  echo "    openclaw tui"
+  echo ""
+  echo -e "  ${BOLD}Docs:${NC} https://github.com/inceptionstack/loki-agent/wiki"
+  echo ""
+  echo -e "  ${YELLOW}Note:${NC} Template bucket ${CFN_BUCKET} was created in your account."
+  echo "  You can delete it after the stack is created:"
+  echo "    aws s3 rb s3://${CFN_BUCKET} --force --region ${DEPLOY_REGION}"
+  echo ""
+  exit 0
+fi
+
+# ============================================================================
+# Options 2-4: CLI-based deploys — need to clone repo
+# ============================================================================
+
+# Clone location
 echo ""
 CURRENT_DIR=$(pwd)
 echo "  Clone destination:"
@@ -219,9 +385,7 @@ case "$CLONE_CHOICE" in
   *) CLONE_DIR="${CURRENT_DIR}/loki-agent" ;;
 esac
 
-# ============================================================================
 # Clone repo
-# ============================================================================
 echo ""
 info "Cloning loki-agent into ${CLONE_DIR}..."
 
@@ -235,20 +399,18 @@ fi
 cd "$CLONE_DIR"
 ok "Repository ready: ${CLONE_DIR}"
 
-# ============================================================================
 # Deploy
-# ============================================================================
 echo ""
 case "$DEPLOY_METHOD" in
-  1)
+  2)
     info "Deploying with CloudFormation..."
     deploy_cfn_stack "deploy/cloudformation/template.yaml" "CAPABILITY_NAMED_IAM"
     ;;
-  2)
+  3)
     info "Deploying with SAM..."
     deploy_cfn_stack "deploy/sam/template.yaml" "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
     ;;
-  3)
+  4)
     info "Deploying with Terraform..."
     require_cmd terraform "Terraform not found. Install: https://developer.hashicorp.com/terraform/install"
     cd deploy/terraform
@@ -322,7 +484,6 @@ EOF
       -var="enable_config_recorder=${CONFIG_RECORDER}" \
       -var="loki_watermark=${LOKI_WATERMARK}" \
       2>&1 | while IFS= read -r line; do
-        # Show resource creation progress, skip noise
         if [[ "$line" == *": Creating..."* ]]; then
           echo -e "  ${BLUE}+${NC} ${line##*] }"
         elif [[ "$line" == *": Creation complete"* ]]; then
