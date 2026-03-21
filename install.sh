@@ -15,7 +15,7 @@ ask()   { echo -en "${BOLD}$1${NC} "; }
 
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}║       🤖 Loki Agent — AWS Installer         ║${NC}"
+echo -e "${BOLD}║       🤖 Loki Agent — AWS Installer  v2     ║${NC}"
 echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -47,8 +47,7 @@ echo ""
 warn "Loki will get AdministratorAccess on this ENTIRE account."
 warn "Use a dedicated sandbox account — never deploy in production."
 echo ""
-ask "Deploy Loki to account ${ACCOUNT_ID} in ${REGION}? [y/N]"
-read -r CONFIRM
+read -rp "$(echo -e "${BOLD}Deploy Loki to account ${ACCOUNT_ID} in ${REGION}? [y/N]:${NC} ")" CONFIRM
 [[ "$CONFIRM" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 
 # ============================================================================
@@ -71,8 +70,7 @@ if aws iam simulate-principal-policy \
   --action-names "cloudformation:CreateStack" "iam:CreateRole" "ec2:CreateVpc" \
   --query 'EvaluationResults[?EvalDecision!=`allowed`].EvalActionName' --output text 2>/dev/null | grep -q "."; then
   warn "Some permissions may be missing. Deployment might fail if your IAM user/role lacks admin access."
-  ask "Continue anyway? [y/N]"
-  read -r PERM_CONFIRM
+  read -rp "$(echo -e "${BOLD}Continue anyway? [y/N]:${NC} ")" PERM_CONFIRM
   [[ "$PERM_CONFIRM" =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
 else
   ok "Permissions look good"
@@ -86,8 +84,7 @@ info "Configuration"
 echo ""
 
 # Environment name
-ask "Environment name (lowercase, used as resource prefix) [loki]:"
-read -r ENV_NAME
+read -rp "$(echo -e "${BOLD}Environment name (lowercase, used as resource prefix) [loki]:${NC} ")" ENV_NAME
 ENV_NAME="${ENV_NAME:-loki}"
 ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
 
@@ -98,8 +95,7 @@ echo "    1) t4g.medium  — 2 vCPU, 4GB  (~\$25/mo)  — light use, testing"
 echo "    2) t4g.large   — 2 vCPU, 8GB  (~\$50/mo)  — regular use"
 echo "    3) t4g.xlarge  — 4 vCPU, 16GB (~\$100/mo) — recommended for real dev work"
 echo ""
-ask "Instance size [3]:"
-read -r INST_CHOICE
+read -rp "$(echo -e "${BOLD}Instance size [3]:${NC} ")" INST_CHOICE
 case "${INST_CHOICE:-3}" in
   1) INSTANCE_TYPE="t4g.medium" ;;
   2) INSTANCE_TYPE="t4g.large" ;;
@@ -107,8 +103,7 @@ case "${INST_CHOICE:-3}" in
 esac
 
 # Region
-ask "AWS region [${REGION}]:"
-read -r DEPLOY_REGION
+read -rp "$(echo -e "${BOLD}AWS region [${REGION}]:${NC} ")" DEPLOY_REGION
 DEPLOY_REGION="${DEPLOY_REGION:-$REGION}"
 
 # Security services
@@ -118,8 +113,7 @@ echo "    SecurityHub, GuardDuty, Inspector, Access Analyzer, Config"
 echo "    These cost ~\$5/mo total. Disable for test deploys to save costs"
 echo "    and speed up teardown."
 echo ""
-ask "Enable all security services? [Y/n]:"
-read -r SEC_CHOICE
+read -rp "$(echo -e "${BOLD}Enable all security services? [Y/n]:${NC} ")" SEC_CHOICE
 if [[ "$SEC_CHOICE" =~ ^[Nn]$ ]]; then
   SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"; ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
 else
@@ -135,8 +129,7 @@ echo "    1) CloudFormation — standard AWS, best for beginners"
 echo "    2) SAM            — if you already use SAM CLI"
 echo "    3) Terraform      — if you're a Terraform shop"
 echo ""
-ask "Deployment method [1]:"
-read -r DEPLOY_METHOD
+read -rp "$(echo -e "${BOLD}Deployment method [1]:${NC} ")" DEPLOY_METHOD
 DEPLOY_METHOD="${DEPLOY_METHOD:-1}"
 
 # ============================================================================
@@ -269,14 +262,12 @@ case "$DEPLOY_METHOD" in
     echo "    1) Local     — state file in current directory (simple, for testing)"
     echo "    2) S3 bucket — remote state with locking (recommended for production)"
     echo ""
-    ask "State storage [1]:"
-    read -r TF_STATE
+    read -rp "$(echo -e "${BOLD}State storage [1]:${NC} ")" TF_STATE
     TF_STATE="${TF_STATE:-1}"
 
     if [[ "$TF_STATE" == "2" ]]; then
       BUCKET_NAME="${ENV_NAME}-tfstate-${ACCOUNT_ID}"
-      ask "S3 bucket name [${BUCKET_NAME}]:"
-      read -r CUSTOM_BUCKET
+      read -rp "$(echo -e "${BOLD}S3 bucket name [${BUCKET_NAME}]:${NC} ")" CUSTOM_BUCKET
       BUCKET_NAME="${CUSTOM_BUCKET:-$BUCKET_NAME}"
 
       info "Creating S3 state bucket: ${BUCKET_NAME}"
