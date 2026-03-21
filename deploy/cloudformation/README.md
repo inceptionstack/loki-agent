@@ -23,6 +23,13 @@ aws cloudformation create-stack \
     ParameterKey=ModelMode,ParameterValue=bedrock \
   --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
+    # Security (all default true — set false for test deploys):
+    # ParameterKey=EnableSecurityHub,ParameterValue=false \
+    # ParameterKey=EnableGuardDuty,ParameterValue=false \
+    # ParameterKey=EnableInspector,ParameterValue=false \
+    # ParameterKey=EnableAccessAnalyzer,ParameterValue=false \
+    # ParameterKey=EnableConfigRecorder,ParameterValue=false \
+    # ParameterKey=LokiWatermark,ParameterValue=my-team \
 ```
 
 ## StackSet Deployment (Organizations)
@@ -44,6 +51,13 @@ aws cloudformation create-stack-instances \
   --stack-set-name openclaw-instances \
   --deployment-targets OrganizationalUnitIds=ou-xxxx-xxxxxxxx \
   --regions us-east-1
+    # Security (all default true — set false for test deploys):
+    # ParameterKey=EnableSecurityHub,ParameterValue=false \
+    # ParameterKey=EnableGuardDuty,ParameterValue=false \
+    # ParameterKey=EnableInspector,ParameterValue=false \
+    # ParameterKey=EnableAccessAnalyzer,ParameterValue=false \
+    # ParameterKey=EnableConfigRecorder,ParameterValue=false \
+    # ParameterKey=LokiWatermark,ParameterValue=my-team \
 ```
 
 ## Outputs
@@ -61,3 +75,7 @@ aws cloudformation create-stack-instances \
 - Stack creation takes ~8–10 minutes (EC2 bootstrap installs Node.js, Loki, and configures the gateway)
 - The `CreationPolicy` with `ResourceSignal` ensures the stack only completes when the instance is fully bootstrapped
 - Requires `CAPABILITY_NAMED_IAM` due to named IAM roles and users
+
+## Next Steps
+
+See [Next Steps After Deployment](../README.md#next-steps-after-deployment) for bootstrap scripts setup.

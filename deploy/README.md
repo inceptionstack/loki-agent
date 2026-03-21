@@ -23,7 +23,7 @@ All three methods create the same architecture:
 - **VPC** — isolated VPC with public subnet, internet gateway, route table
 - **EC2 Instance** — ARM64 Graviton (AL2023), root + data EBS volumes (gp3, encrypted)
 - **IAM** — instance role (AdministratorAccess + SSM), admin IAM user with console password
-- **Security Services** — SecurityHub, GuardDuty, Inspector, Access Analyzer, Config (via Lambda custom resources)
+- **Security Services** — SecurityHub, GuardDuty, Inspector, Access Analyzer, Config (individually toggleable via parameters, all enabled by default)
 - **Bedrock** — use case form auto-submitted, optional quota increase requests
 - **OpenClaw** — installed via bootstrap script, systemd gateway service, brain workspace files
 
@@ -39,6 +39,12 @@ All three methods create the same architecture:
 | `SSHAllowedCidr` | `127.0.0.1/32` | SSH access CIDR (disabled by default — use SSM) |
 | `LiteLLMBaseUrl` | *(empty)* | LiteLLM proxy URL (only when `ModelMode=litellm`) |
 | `BootstrapScriptUrl` | GitHub raw URL | URL to the bootstrap script |
+| `EnableSecurityHub` | `true` | AWS Security Hub aggregates security findings. (~$0.001 per finding/month) |
+| `EnableGuardDuty` | `true` | Amazon GuardDuty threat detection via CloudTrail, VPC Flow Logs, DNS. (~$4/million events) |
+| `EnableInspector` | `true` | Amazon Inspector vulnerability scanning. (~$0.01-$1.25 per resource/month) |
+| `EnableAccessAnalyzer` | `true` | IAM Access Analyzer finds external shares. (Free) |
+| `EnableConfigRecorder` | `true` | AWS Config records configuration changes. (~$0.003 per item/month) |
+| `LokiWatermark` | `loki-agent` | Custom identifier tag on all resources |
 
 ## Post-Deployment
 
@@ -70,6 +76,46 @@ The template creates an IAM admin user (`<EnvironmentName>-admin`) with a random
 aws secretsmanager get-secret-value --secret-id openclaw/admin-password \
   --region us-east-1 --query SecretString --output text | jq .
 ```
+
+## Next Steps After Deployment
+
+Once Loki is running and you've connected via SSM, point your agent at the bootstrap scripts to complete setup:
+
+### Essential Bootstraps (run these first)
+
+Tell your Loki agent:
+> "Read the files in the `essential/` folder one by one and execute each bootstrap."
+
+These set up security baselines, coding guidelines, MCP tools, memory search, and more. Each bootstrap is idempotent — safe to re-run.
+
+| Bootstrap | What It Does |
+|-----------|-------------|
+| `BOOTSTRAP-SECURITY.md` | Security hardening + AWS Budgets alerts |
+| `BOOTSTRAP-SKILLS.md` | Installs AWS infrastructure skills |
+| `BOOTSTRAP-MCPORTER.md` | Sets up MCP server tooling |
+| `BOOTSTRAP-MEMORY-SEARCH.md` | Enables semantic memory search via Bedrock embeddings |
+| `BOOTSTRAP-CODING-GUIDELINES.md` | Coding standards and project conventions |
+| `BOOTSTRAP-SECRETS-AWS.md` | AWS Secrets Manager integration |
+| `BOOTSTRAP-PLAYWRIGHT.md` | Browser automation via Playwright MCP |
+| `BOOTSTRAP-DAILY-UPDATE.md` | Daily AWS account digest briefing |
+| `BOOTSTRAP-DISK-SPACE-STRAT.md` | EC2 disk space management strategy |
+| `BOOTSTRAP-DIAGRAMS.md` | Diagram style guide for architecture docs |
+
+### Optional Bootstraps
+
+Browse the `optional/` folder for additional capabilities:
+
+| Bootstrap | What It Does |
+|-----------|-------------|
+| `BOOTSTRAP-TELEGRAM.md` | Connect Loki to Telegram |
+| `BOOTSTRAP-WEB-UI.md` | Expose control UI via CloudFront + Cognito |
+| `BOOTSTRAP-PIPELINE-NOTIFICATIONS.md` | CI/CD pipeline alerts to Telegram |
+| `BOOTSTRAP-OUTLINE-NOTES.md` | Self-hosted Outline wiki |
+| `BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md` | Automatic PR code review with Claude |
+| `BOOTSTRAP-MODEL-CONFIG.md` | Advanced model configuration |
+| `OPTIMIZE-TOO-LARGE-CONTEXT.md` | Context window optimization tips |
+
+Full details: [Bootstrap Scripts Guide](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide)
 
 ## Shared Files
 

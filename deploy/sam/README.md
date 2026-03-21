@@ -19,6 +19,13 @@ sam deploy \
     ModelMode=bedrock \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --no-confirm-changeset
+    # Security (all default true — set false for test deploys):
+    # ParameterKey=EnableSecurityHub,ParameterValue=false \
+    # ParameterKey=EnableGuardDuty,ParameterValue=false \
+    # ParameterKey=EnableInspector,ParameterValue=false \
+    # ParameterKey=EnableAccessAnalyzer,ParameterValue=false \
+    # ParameterKey=EnableConfigRecorder,ParameterValue=false \
+    # ParameterKey=LokiWatermark,ParameterValue=my-team \
 ```
 
 Or use guided mode for interactive parameter input:
@@ -44,3 +51,7 @@ Same as the CloudFormation template — `InstanceId`, `PublicIp`, `SSMConnect`, 
 - No S3 bucket required — all Lambda code is inline (`InlineCode`)
 - Stack creation takes ~8–10 minutes
 - Use `sam delete --stack-name my-openclaw` to tear down
+
+## Next Steps
+
+See [Next Steps After Deployment](../README.md#next-steps-after-deployment) for bootstrap scripts setup.
