@@ -2,7 +2,7 @@
 
 > **TL;DR — Deploy Loki in one command:**
 > ```bash
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+> bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 
@@ -106,7 +106,7 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 ### Option 1: One-command install (recommended)
 
 ```bash
-curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 ```
 
 The installer verifies your AWS credentials, checks permissions, lets you pick an instance size and deployment method (CloudFormation/SAM/Terraform), deploys everything, and monitors progress until Loki is ready.

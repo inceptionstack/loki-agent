@@ -1,17 +1,7 @@
 #!/usr/bin/env bash
 # Loki Agent — One-Shot Installer
-# Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
-#
-# Wrapped in a main() function so bash reads the entire script before executing.
-# This prevents chunk-boundary parsing issues with curl | bash.
-
-main() {
+# Usage: bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 set -euo pipefail
-
-# When piped via curl, stdin is the script itself. Reopen stdin from /dev/tty for interactive prompts.
-if [[ ! -t 0 ]]; then
-  exec < /dev/tty
-fi
 
 # ============================================================================
 # Colors & Helpers
@@ -413,8 +403,3 @@ echo ""
 
 # Cleanup
 rm -rf "$TMPDIR" 2>/dev/null || true
-
-}
-
-# Run main — this ensures bash has fully parsed the script before execution
-main "$@"
