@@ -1,318 +1,170 @@
-# loki-bootstrap
+# Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
 
-Bootstrap prompts and deployment templates for running Loki (powered by [OpenClaw](https://github.com/inceptionstack/openclaw) on AWS. Deploy a fully configured Loki AI ops assistant with a single command).
+## The Problem: Infrastructure Eats Your Time
 
-> **📖 New to this?** Read the [complete deployment guide](wiki/Deploying-Loki-on-AWS.md) — covers account setup, security, budgets, and FAQ.
+Building a prototype has never been faster. Tools like Lovable, Base44, and Bolt let any developer go from idea to working demo in minutes. For simple frontend apps with basic CRUD, these platforms deliver genuine speed. The prototype side of the equation is largely solved.
 
----
+The problem begins the moment a team decides to build something real on AWS. Even experienced engineers who know exactly what they want to build spend days on infrastructure before writing a single line of business logic: provisioning compute, designing IAM policies, configuring networking, setting up CI/CD pipelines, instrumenting monitoring, and establishing security baselines. For a solo founder or a small team without dedicated DevOps resources, this can create huge delays or might mean never get to a shipping product fast enough (or at all).
 
-## Table of Contents
+The alternative is (and what most solo founders and scrappy teams might do) building quickly on a rapid-development platform and migrating to AWS later. That creates a different set of problems. These platforms are "black box", can't access real AWS services except what is prescribed (if at all), and require complete rewrites when teams outgrow them. The technical debt accumulates silently until someone needs a (different, or more complicated) payment integration, a compliance requirement, or a workload the platform simply can't support (special backend APIs or even an API only product, specialized data schemas or graphs, special scale provisions, specialized security options and more). At that point, the team faces a choice between a costly rewrite and staying on a platform that limits what they can build.
 
-- [Quick Start](#quick-start)
-- [What Gets Deployed](#what-gets-deployed)
-- [Parameters Reference](#parameters-reference)
-- [Model Modes](#model-modes)
-- [Post-Deployment](#post-deployment)
-- [Bootstrap Prompts](#bootstrap-prompts)
-- [Brain Files](#brain-files)
-- [Security](#security)
-- [Contributing](#contributing)
+**It would be great if developers didn't have to choose between speed and control.**
+
 
 ---
 
-## Quick Start
+## Why This Is Solvable Now
 
-Choose one of three deployment methods. All deploy the same architecture.
+Three capabilities have converged to make this problem solvable for the first time.
 
-### Option 1: CloudFormation (Console)
+**1. AI agents that actually work.** OpenClaw (and other claw-like tools), the open-source AI agent framework, proved at scale that users (some are developers) will trust an AI agent to execute shell commands, manage files, and interact with APIs — when the agent is capable and the human retains control. It reached 317k GitHub stars in 6 weeks, one of the fastest adoption curves in open-source history.
 
-1. Download `deploy/cloudformation/template.yaml`
-2. Open the [CloudFormation Console](https://console.aws.amazon.com/cloudformation/home#/stacks/create)
-3. Upload the template, fill in parameters, and create the stack
-4. Wait for `CREATE_COMPLETE` (~8–10 minutes)
+**2. Infrastructure-as-code is mature.** aws-cli, Terraform, AWS CDK, CloudFormation,  SAM and other tooling make resource provisioning fully programmable. An AI agent can generate, modify, and deploy infrastructure using the same tools a human engineer would use — producing output that is auditable, version-controlled, and reversible.
 
-### Option 2: SAM CLI
+**3. Foundation models can reason about architecture.** Models like Anthropic Claude support the context windows and tool-use reliability required for multi-step infrastructure provisioning. They can reason about full-stack application architecture, generate correct configurations, and maintain context across multi-hour build sessions.
+
+These three capabilities are the building blocks. **Loki is what you get when you combine them into a single, deployable package, and then give it its own AWS account to administer 24/7.**
+
+
+---
+
+## What Loki Does
+
+Loki is an open-source, deploy-it-yourself AI agent that lives in your AWS account (usually one per account so the agents don't step on each other's toes) and builds real code, infrastructure, deployments and configurations. 
+
+Clone the repo, deploy via CloudFormation, SAM, or Terraform, and within minutes you have a 24/7 agent running in your account , connected to Amazon Bedrock (by default, you can change that), loaded with AWS infrastructure skills, and ready to build. The agent is accessible via Telegram, Discord, Slack, or a terminal UI, and maintains full memory across sessions so it always knows what it built, what's deployed, and what state everything is in.
+
+Loki handles the complete build lifecycle inside your AWS account:
+
+* **Designs and deploys** serverless APIs, container workloads, and data pipelines
+* **Writes application code**, pushes to repositories, and triggers CI/CD pipelines
+* **Configures IAM policies**, security groups, and compliance logging
+* **Sets up CloudWatch monitoring** and security services automatically
+* **Debugs production issues** — reads CloudTrail logs, identifies root causes, and applies fixes
+
+Everything Loki builds can use (but is not limited to) standard AWS services: CloudFormation or CDK or Terraform for infrastructure, CodeCommit or GitHub for code, Lambda or ECS for compute, DynamoDB or RDS for data. There's no proprietary runtime, no abstraction layer, and no migration required when your application grows beyond the prototype stage.
+
+**You own everything.** Disable Loki tomorrow and your applications keep running. Every resource is visible in the AWS console, portable to any toolchain, and yours to modify.
+
+### Difference from Cursor, Claude Code, Kiro and others
+
+Unlike **AI coding tools** (Cursor, Kiro, Claude Code) that run on your laptop and stop when the laptop closes, Loki is a persistent agent that lives in your AWS account around the clock. Start a build on Tuesday, come back Thursday, and it knows exactly where things stand.
+
+### Difference from Lovable, Bolt, Base44 etc
+
+Unlike **rapid-dev platforms** (Replit, Lovable, Bolt) that abstract away infrastructure and trap your code in proprietary runtimes, Loki works *within* AWS. Your infrastructure is real AWS, managed by standard IaC tools, with no outside vendor lock-in (except AWS of course, but you could choose to build fully containerized apps with it so you can easily port them in the future).
+
+### Difference from Standard OpenClaw Assistants
+
+Unlike a **general-purpose AI assistants**, Loki ships with AWS infrastructure skills, security best practices baked in, and the IAM permissions to actually provision resources. It's purpose-built for building and operating on AWS. **Instead of being fully locked down into a VM sandbox or docker sandbox, it's sandbox is defined by the boundaries of the AWS account it lives in.**
+
+It does not bundle any clawhub skills (huge security risk there), but comes with mostly AWS skills and playwright MCP using mcporter.
+
+
+---
+
+## How It Works
+
+Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-bootstrap](https://github.com/inceptionstack/loki-bootstrap) repository packages everything needed to deploy a production-ready Loki instance:
+
+**1. One-click deployment.** Choose your IaC tool  (CloudFormation, SAM, or Terraform) and deploy. The template creates an isolated VPC, a T4g.xlarge EC2 instance by default (recommended so it can really do things like build run tests, build code, dockerize things and more, as a real dev machine), IAM roles, security services, and installs Loki with a pre-configured workspace. Total deploy time: \~4-10 minutes.
+
+**2. Configurable security posture.** The deployment includes five individually toggleable security services — Security Hub, GuardDuty, Inspector, Access Analyzer, and AWS Config  all enabled by default. For test/dev environments, disable what you don't need. The EC2 instance uses SSM Session Manager instead of SSH (no open ports), and the Loki gateway only listens on localhost (not exposed to the network).
+
+**3. Observe → Plan → Act.** Loki reads the current state of your AWS account, plans the next actions, and executes them with full admin power. **(remember - with power comes resposibility. this is risky, so use it on a clean AWS account to minize blast radius of agent making mistakes)**
+
+**4. Persistent memory.** Conversation history and agent memory are stored locally on the instance. Loki maintains workspace files (SOUL.md, TOOLS.md, MEMORY.md) that give it continuity across sessions and restarts. It knows what it built yesterday. 
+
+**5. Your data stays yours.** The only external calls are to Amazon Bedrock for AI inference (processed under the Bedrock data privacy policy — your data is not used to train models). Alternatively, use your own Anthropic API key or a LiteLLM proxy. No code, infrastructure configurations, or application data leaves your account.
+
+
+---
+
+## Who It's For
+
+**Solo founders and pre-seed teams (1–3 people)** frustrated by rapid-dev platform limitations such as no custom backend, no real AWS services, no path to production, who need to iterate quickly without accumulating technical debt.
+
+**Small startup teams (2–10 people)** racing toward product-market fit with limited runway. They need sophisticated backend capabilities like payments, integrations, compliance and can't afford dedicated DevOps resources or have too much work on their hands already.
+
+**Corporate innovation teams** building proofs of concept. They must comply with corporate security standards, can't use external platforms that require data to leave their AWS account, and are measured by speed of validation.
+
+**Any developer** who knows what they want to build on AWS but doesn't want to spend a week on infrastructure before writing business logic to build a POC.
+
+
+---
+
+## Getting Started
 
 ```bash
-sam build -t deploy/sam/template.yaml
-sam deploy \
-  --guided \
-  --template-file deploy/sam/template.yaml \
-  --stack-name openclaw-stack \
-  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM
-```
+# Clone
+git clone https://github.com/inceptionstack/loki-bootstrap.git
+cd loki-bootstrap/deploy/cloudformation
 
-### Option 3: Terraform
+# Deploy
+aws cloudformation create-stack \
+  --stack-name my-loki \
+  --template-body file://template.yaml \
+  --parameters ParameterKey=EnvironmentName,ParameterValue=my-loki \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-1
 
-```bash
-cd deploy/
-terraform init
-terraform plan -var="environment_name=openclaw"
-terraform apply -var="environment_name=openclaw"
-```
-
-Override variables in a `terraform.tfvars` file or with `-var` flags.
-
----
-
-## What Gets Deployed
-
-The stack provisions a self-contained Loki environment:
-
-```
-┌──────────────────────────────────────────────────┐
-│  VPC (10.0.0.0/16)                               │
-│  ├─ Public Subnet + Internet Gateway             │
-│  ├─ EC2 Instance (Loki runtime)              │
-│  │   ├─ openclaw-bootstrap.sh (first boot)       │
-│  │   ├─ openclaw-config-gen.py (config setup)    │
-│  │   ├─ bedrock-motd.sh (Bedrock helper)         │
-│  │   └─ litellm-setup.sh (LiteLLM proxy)        │
-│  └─ Security Group (SSM + optional SSH)          │
-│                                                  │
-│  Lambda Custom Resources                         │
-│  ├─ Config generation                            │
-│  └─ Post-deploy validation                       │
-│                                                  │
-│  Security Services                               │
-│  ├─ AWS Security Hub                             │
-│  ├─ Amazon Inspector                             │
-│  ├─ AWS Budgets                                  │
-│  └─ IAM (least-privilege roles)                  │
-└──────────────────────────────────────────────────┘
-```
-
-**Key components:**
-
-- **VPC** — Isolated network with public subnet and internet gateway
-- **EC2 Instance** — Runs the Loki agent runtime (via OpenClaw); bootstrapped on first boot via `openclaw-bootstrap.sh`
-- **Lambda Custom Resources** — Handle config generation and post-deploy validation during stack creation
-- **Security Services** — Security Hub, Inspector, and budgets enabled by default
-- **IAM Roles** — Least-privilege roles for EC2 (Bedrock access, SSM, CloudWatch) and Lambda
-
----
-
-## Parameters Reference
-
-| Parameter | Description | Default | Required |
-|-----------|-------------|---------|----------|
-| `EnvironmentName` | Name prefix for all resources | `openclaw` | Yes |
-| `InstanceType` | EC2 instance type | `t3.medium` | No |
-| `ModelMode` | AI model backend — `bedrock`, `litellm`, or `api-key` | `bedrock` | Yes |
-| `DefaultModel` | Default model ID for the agent | `anthropic.claude-sonnet-4-20250514` | No |
-| `BedrockRegion` | AWS region for Bedrock API calls | `us-east-1` | No |
-| `LiteLLMBaseUrl` | LiteLLM proxy endpoint (required if `ModelMode=litellm`) | — | Conditional |
-| `LiteLLMApiKey` | API key for LiteLLM proxy (required if `ModelMode=litellm`) | — | Conditional |
-| `BootstrapScriptUrl` | URL to a custom bootstrap script (overrides default) | — | No |
-| `SSHAllowedCidr` | CIDR block allowed for SSH access; leave empty to disable SSH | — | No |
-
-> Parameters may vary slightly between the CloudFormation, SAM, and Terraform templates. Refer to the specific template file for the full list.
-
----
-
-## Model Modes
-
-The `ModelMode` parameter controls how Loki connects to language models.
-
-### `bedrock` (default)
-
-Uses Amazon Bedrock directly. The EC2 instance role includes Bedrock permissions. No external API keys needed.
-
-- Set `BedrockRegion` to the region where your models are enabled
-- Set `DefaultModel` to a Bedrock model ID (e.g. `anthropic.claude-sonnet-4-20250514`)
-- The `bedrock-motd.sh` helper validates Bedrock access on boot
-
-### `litellm`
-
-Routes requests through a [LiteLLM](https://github.com/BerriAI/litellm) proxy, allowing access to multiple providers through a unified API.
-
-- Set `LiteLLMBaseUrl` to your LiteLLM endpoint
-- Set `LiteLLMApiKey` to your proxy API key
-- The `litellm-setup.sh` helper configures the proxy connection on boot
-
-### `api-key`
-
-Uses a provider API key directly (e.g. Anthropic API key). Configure the key and endpoint in the Loki config after deployment.
-
----
-
-## Post-Deployment
-
-### Connect via SSM
-
-SSH is optional. The recommended way to connect is through AWS Systems Manager Session Manager:
-
-```bash
-# Find the instance ID
-aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=*openclaw*" \
-  --query "Reservations[].Instances[].InstanceId" \
-  --output text
-
-# Start a session
+# Wait ~10 min, then connect
 aws ssm start-session --target <instance-id>
+
+# Talk to your Loki
+openclaw tui
 ```
 
-### Check Bootstrap Status
+Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack/loki-bootstrap/wiki/Deploying-Loki-on-AWS)
 
-Once connected, check that the bootstrap completed successfully:
-
-```bash
-# View bootstrap log
-cat /var/log/openclaw-bootstrap.log
-
-# Check Loki service status
-systemctl status openclaw
-```
-
-### Configure Channels
-
-After deployment, configure messaging channels (Telegram, Slack, etc.) by following the relevant optional bootstrap prompts or editing the Loki config directly:
-
-```bash
-# Loki config location
-cat /opt/openclaw/config.yaml
-```
 
 ---
 
-## Bootstrap Prompts
+## Principles
 
-Bootstrap prompts are instruction files that Loki executes on first boot (or on demand) to configure its environment. Each creates a marker file in `memory/` to prevent re-running.
 
-### Essential (`essential/`)
+1. **Production-shaped from the start.** Every application Loki builds (assuming given the right instructions and system prompt) includes infrastructure as code, CI/CD, monitoring, and scoped IAM . A prototype that can't be promoted to production is a demo, not a prototype.
+2. **You own everything.** Loki operates inside your AWS account. Every resource it creates is visible in the console, portable to any toolchain, and fully functional if the agent is removed. No abstraction layer, no vendor lock-in, no proprietary runtime.
+3. **Speed without shortcuts.** Loki collapses code + deploy + infrastructure setup from days to minutes. This can include security configuration, monitoring, and CI/CD.
+4. **Transparency over autonomy.** Every action is logged to CloudTrail. You can see exactly what Loki built, modified, or deleted at any time.  This also allows powerful debugging of failing apps while it happens, with fast corrections. 
+5. **Meet developers where they are.** Accessible from Telegram, Discord, Slack, or a terminal.
 
-Run these in order on new instances:
-
-| # | File | Purpose |
-|---|------|---------|
-| 1 | [BOOTSTRAP-SECURITY.md](essential/BOOTSTRAP-SECURITY.md) | Security Hub, Inspector, budgets, WAF, operational hygiene |
-| 2 | [BOOTSTRAP-SECRETS-AWS.md](essential/BOOTSTRAP-SECRETS-AWS.md) | AWS Secrets Manager integration, exec provider, troubleshooting |
-| 3 | [BOOTSTRAP-SKILLS.md](essential/BOOTSTRAP-SKILLS.md) | Install the FastStart skills library |
-| 4 | [BOOTSTRAP-MEMORY-SEARCH.md](essential/BOOTSTRAP-MEMORY-SEARCH.md) | Semantic memory search with embedrock + Cohere Embed v4 on Bedrock |
-| 5 | [BOOTSTRAP-CODING-GUIDELINES.md](essential/BOOTSTRAP-CODING-GUIDELINES.md) | Coding standards — testing, linting, commit conventions, CI/CD |
-| 6 | [BOOTSTRAP-DISK-SPACE-STRAT.md](essential/BOOTSTRAP-DISK-SPACE-STRAT.md) | Secondary EBS data volume, nightly cleanup cron, Docker/tmp offloading |
-| 7 | [BOOTSTRAP-DAILY-UPDATE.md](essential/BOOTSTRAP-DAILY-UPDATE.md) | Daily morning briefing — costs, security findings, pipeline health |
-
-### Optional (`optional/`)
-
-Add as needed:
-
-| File | Purpose |
-|------|---------|
-| [BOOTSTRAP-MODEL-CONFIG.md](optional/BOOTSTRAP-MODEL-CONFIG.md) | Configure AI models (Sonnet default, Opus fallback) to save tokens |
-| [BOOTSTRAP-TELEGRAM.md](optional/BOOTSTRAP-TELEGRAM.md) | Telegram bot setup, Loki wiring, formatting/reaction rules |
-| [BOOTSTRAP-OUTLINE-NOTES.md](optional/BOOTSTRAP-OUTLINE-NOTES.md) | Self-hosted Outline wiki (ECS + Aurora + S3 + Cognito OIDC) |
-| [BOOTSTRAP-PIPELINE-NOTIFICATIONS.md](optional/BOOTSTRAP-PIPELINE-NOTIFICATIONS.md) | CodePipeline + GitHub Actions alerts to Telegram + Loki |
-| [BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md](optional/BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md) | Automatic Claude Code PR + commit review via GitHub Actions |
-| [BOOTSTRAP-WEB-UI.md](optional/BOOTSTRAP-WEB-UI.md) | Control UI via CloudFront + Cognito — ALB, proxy, WebSocket |
-| [OPTIMIZE-TOO-LARGE-CONTEXT.md](optional/OPTIMIZE-TOO-LARGE-CONTEXT.md) | Reduce context window usage, memory management, compaction |
-
-> **Built-in (no bootstrap needed):** Heartbeat monitoring, daily memory logging, and long-term recall are part of the Loki runtime.
 
 ---
 
-## Brain Files
+## Cost Estimates
 
-The `deploy/brain/` directory contains template workspace files that define the agent's personality, behavior, and team structure. These are copied into the Loki workspace during bootstrap.
+| Component | Estimated Monthly Cost |
+|-----------|------------------------|
+| EC2 t4g.medium (24/7) | \~$25                  |
+| EC2 t4g.xlarge (24/7) (recommended for complex dev work) | \~$100                 |
+| EBS volumes (40GB + 80GB) | \~$10                  |
+| Bedrock (moderate use, sonnet 4.6) (recommended: opus 4.6 for main tasks, sonnet 4.6 for subagents) assuming you're building every day. | $300–$2000             |
+| Security services | \~$5 (individually toggleable) |
+|           |                        |
+|           |                        |
 
-| File | Purpose |
-|------|---------|
-| `SOUL.md` | Core personality, communication style, and behavioral rules |
-| `AGENTS.md` | Agent role definitions and capabilities |
+Loki can estimate costs before provisioning resources and summarize your actual AWS spend at any time. Set [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html) alerts during setup.
 
-### Customizing
-
-Edit the brain files before deployment to tailor the agent to your needs:
-
-- **SOUL.md** — Adjust tone, response style, channel-specific rules, and operational boundaries
-- **AGENTS.md** — Define which agent roles are available and their responsibilities
-
-Brain files are loaded into the agent's workspace at `/opt/openclaw/brain/` and can be edited post-deployment as well.
 
 ---
 
-## Security
+## Limitations
 
-### Enabled by Default
+Loki is:
 
-The deployment enables several AWS security services:
+* **Non-deterministic.** Given the same request, it may produce different results. For complex architecture, a developer/architect with AWS experience gets significantly better results — the agent amplifies expertise, it doesn't substitute for it.
+* **Single-account scope.** Loki operates within one AWS account. It's not designed for multi-account orchestration (yet).
+* **Not a compliance auditor.** Loki will try to follow security best practices and enable security services by default, but doesn't replace formal compliance auditing.
+* **Prototyping-to-production, not at-scale operations.** Loki can monitor and debug what it builds, but it's not a replacement for dedicated operations tooling for high-scale production workloads.
 
-- **AWS Security Hub** — Centralized security findings and compliance checks
-- **Amazon Inspector** — Automated vulnerability scanning for the EC2 instance
-- **AWS Budgets** — Cost monitoring and alerts
-- **IAM Least Privilege** — EC2 and Lambda roles follow least-privilege principles
-
-### Network Security
-
-- The EC2 instance runs in a VPC with a single public subnet
-- SSH access is disabled by default; set `SSHAllowedCidr` to enable it
-- SSM Session Manager is the recommended access method (no inbound ports required)
-- Security groups restrict traffic to only what is necessary
-
-### Admin User
-
-The bootstrap creates an admin user for the Loki runtime. Credentials are stored in AWS Secrets Manager and can be retrieved via the AWS Console or CLI:
-
-```bash
-aws secretsmanager get-secret-value --secret-id <environment-name>/openclaw/admin
-```
-
-### Bootstrap Security Prompt
-
-The `BOOTSTRAP-SECURITY.md` essential prompt hardens the environment further by configuring WAF rules, operational hygiene practices, and security monitoring.
 
 ---
 
-## Contributing
+## Open Source
 
-### Adding New Bootstrap Prompts
+Loki is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-bootstrap](https://github.com/inceptionstack/loki-bootstrap).
 
-Create a new `BOOTSTRAP-*.md` file following the existing pattern:
+Built on [OpenClaw](https://github.com/openclaw/openclaw) — the engine that powers the agent runtime, tool execution, and memory system.
 
-1. Add a marker file check at the top (`memory/.bootstrapped-*`)
-2. Write clear, numbered steps
-3. Create the marker file on completion
-4. Use `YOUR_VALUE` placeholders instead of real secrets
-5. Place in `essential/` or `optional/` as appropriate
-
-### Modifying Deployment Templates
-
-The three deployment methods (CloudFormation, SAM, Terraform) should stay functionally equivalent. When modifying one template, update the others to match.
-
-### Project Structure
-
-```
-loki-bootstrap/
-├── essential/              # Required bootstrap prompts
-├── optional/               # Optional bootstrap prompts
-├── deploy/
-│   ├── template.yaml           # CloudFormation template
-│   ├── sam-template.yaml       # SAM template
-│   ├── main.tf                 # Terraform config
-│   ├── variables.tf            # Terraform variables
-│   ├── outputs.tf              # Terraform outputs
-│   ├── providers.tf            # Terraform providers
-│   ├── openclaw-bootstrap.sh   # EC2 bootstrap script
-│   ├── openclaw-config-gen.py  # Config generator
-│   ├── bedrock-motd.sh         # Bedrock MOTD/fix helper
-│   ├── litellm-setup.sh        # LiteLLM proxy setup
-│   └── brain/                  # Template workspace files
-│       ├── SOUL.md
-│       └── AGENTS.md
-└── README.md
-```
-
----
-
-## Related Projects
-
-- [openclaw](https://github.com/inceptionstack/openclaw) — The OpenClaw agent runtime
-- [loki-skills](https://github.com/inceptionstack/loki-skills) — Skills library
-- [embedrock](https://github.com/inceptionstack/embedrock) — Bedrock embedding proxy
-
----
-
-## License
-
-See [LICENSE](LICENSE) for details.
+Contributions, issues, and feedback welcome.
