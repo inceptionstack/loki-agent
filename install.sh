@@ -3,6 +3,8 @@
 # Usage: bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 set -euo pipefail
 export AWS_PAGER=""
+export PAGER=""
+aws() { command aws --no-cli-pager "$@"; }
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"

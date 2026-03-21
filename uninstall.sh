@@ -6,6 +6,9 @@
 # lets you pick which to remove, and cleans up all resources.
 set -euo pipefail
 export AWS_PAGER=""
+export PAGER=""
+# Belt-and-suspenders: alias aws to always disable pager
+aws() { command aws --no-cli-pager "$@"; }
 
 UNINSTALLER_VERSION="0.1.0"
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
