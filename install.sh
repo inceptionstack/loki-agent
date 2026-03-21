@@ -470,7 +470,7 @@ EOF
     info "Initializing Terraform (downloading providers, may take a minute)..."
     TF_INIT_LOG=$(mktemp)
     set +e
-    terraform init -input=false > "$TF_INIT_LOG" 2>&1
+    terraform init -input=false -reconfigure > "$TF_INIT_LOG" 2>&1
     TF_INIT_RC=$?
     set -e
     if [[ $TF_INIT_RC -ne 0 ]]; then
