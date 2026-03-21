@@ -182,15 +182,43 @@ echo ""
 prompt "Deployment method" DEPLOY_METHOD "1"
 
 # ============================================================================
+# Clone location
+# ============================================================================
+echo ""
+CURRENT_DIR=$(pwd)
+echo "  Clone destination:"
+echo "    1) Current directory -- ${CURRENT_DIR}/loki-agent"
+echo "    2) ~/.loki-agent     -- persistent home directory"
+echo "    3) Temp directory    -- auto-deleted when done (not for Terraform local state)"
+echo ""
+prompt "Clone to" CLONE_CHOICE "1"
+
+case "$CLONE_CHOICE" in
+  2) CLONE_DIR="$HOME/.loki-agent" ;;
+  3) CLONE_DIR="$(mktemp -d)/loki-agent"; CLEANUP_TMPDIR=true ;;
+  *) CLONE_DIR="${CURRENT_DIR}/loki-agent" ;;
+esac
+
+# ============================================================================
 # Clone repo
 # ============================================================================
 echo ""
-info "Cloning loki-agent..."
-TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR 2>/dev/null" EXIT
-git clone --depth 1 https://github.com/inceptionstack/loki-agent.git "$TMPDIR/loki-agent" 2>&1 | tail -1
-cd "$TMPDIR/loki-agent"
-ok "Repository cloned"
+info "Cloning loki-agent into ${CLONE_DIR}..."
+
+if [[ -d "$CLONE_DIR/.git" ]]; then
+  info "Directory exists, pulling latest..."
+  git -C "$CLONE_DIR" pull --ff-only 2>&1 | tail -1
+else
+  rm -rf "$CLONE_DIR" 2>/dev/null || true
+  git clone --depth 1 https://github.com/inceptionstack/loki-agent.git "$CLONE_DIR" 2>&1 | tail -1
+fi
+cd "$CLONE_DIR"
+ok "Repository ready: ${CLONE_DIR}"
+
+# Only auto-clean temp dirs
+if [[ "${CLEANUP_TMPDIR:-false}" == "true" ]]; then
+  trap "rm -rf $(dirname "$CLONE_DIR") 2>/dev/null" EXIT
+fi
 
 # ============================================================================
 # Deploy
