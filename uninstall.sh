@@ -114,13 +114,34 @@ discover_deployments() {
   WATERMARKS=()
   METHODS=()
   NAMES=()
+  TF_BUCKETS=()
+  TF_KEYS=()
+  TF_LOCKS=()
 
   while IFS=$'\t' read -r vpc_id watermark method name; do
-    DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
     VPC_IDS+=("$vpc_id")
     WATERMARKS+=("${watermark:-unknown}")
     METHODS+=("${method:-unknown}")
     NAMES+=("${name:-unnamed}")
+
+    # Fetch Terraform state tags if this was a terraform deploy
+    local tf_bucket="" tf_key="" tf_lock=""
+    if [[ "${method:-}" == "terraform" ]]; then
+      tf_bucket=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-state-bucket" \
+        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+      [[ "$tf_bucket" == "None" ]] && tf_bucket=""
+      tf_key=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-state-key" \
+        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+      [[ "$tf_key" == "None" ]] && tf_key=""
+      tf_lock=$(aws ec2 describe-tags --filters "Name=resource-id,Values=${vpc_id}" "Name=key,Values=loki:tf-lock-table" \
+        --region "$SCAN_REGION" --query 'Tags[0].Value' --output text 2>/dev/null || echo "")
+      [[ "$tf_lock" == "None" ]] && tf_lock=""
+    fi
+    TF_BUCKETS+=("$tf_bucket")
+    TF_KEYS+=("$tf_key")
+    TF_LOCKS+=("$tf_lock")
+
+    DEPLOY_COUNT=$((DEPLOY_COUNT + 1))
   done <<< "$VPCS_RAW"
 
   echo ""
@@ -136,6 +157,12 @@ discover_deployments() {
       --filters "Name=vpc-id,Values=${VPC_IDS[$i]}" "Name=instance-state-name,Values=running,stopped" \
       --region "$SCAN_REGION" --query 'length(Reservations[].Instances[])' --output text 2>/dev/null || echo "0")
     echo -e "       EC2 instances: ${instance_count}"
+
+    # Show TF state info if available
+    if [[ -n "${TF_BUCKETS[$i]}" ]]; then
+      echo -e "       TF state: s3://${TF_BUCKETS[$i]}/${TF_KEYS[$i]}"
+      [[ -n "${TF_LOCKS[$i]}" ]] && echo -e "       TF lock:  ${TF_LOCKS[$i]}"
+    fi
   done
   echo ""
 }
@@ -481,23 +508,36 @@ offer_state_cleanup() {
   info "Checking for leftover state resources..."
 
   local found_any=false
+  # Collect unique resources to clean (avoid duplicates)
+  local -a buckets_to_delete=()
+  local -a tables_to_delete=()
 
-  # Terraform state buckets
   for i in "${TARGETS[@]}"; do
     local wm="${WATERMARKS[$i]}"
-    local bucket="${wm}-tfstate-${ACCOUNT_ID}"
-    if aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null; then
+
+    # Use tagged TF state bucket if available, otherwise guess from watermark
+    local tf_bucket="${TF_BUCKETS[$i]:-}"
+    [[ -z "$tf_bucket" ]] && tf_bucket="${wm}-tfstate-${ACCOUNT_ID}"
+    if aws s3api head-bucket --bucket "$tf_bucket" --region "$SCAN_REGION" 2>/dev/null; then
       found_any=true
-      echo -e "    Found Terraform state bucket: ${YELLOW}${bucket}${NC}"
+      buckets_to_delete+=("$tf_bucket")
+      echo -e "    Found Terraform state bucket: ${YELLOW}${tf_bucket}${NC}"
     fi
-    local lock="${wm}-tflock"
-    if aws dynamodb describe-table --table-name "$lock" --region "$SCAN_REGION" &>/dev/null; then
+
+    # Use tagged lock table if available, otherwise guess
+    local tf_lock="${TF_LOCKS[$i]:-}"
+    [[ -z "$tf_lock" ]] && tf_lock="${wm}-tflock"
+    if aws dynamodb describe-table --table-name "$tf_lock" --region "$SCAN_REGION" &>/dev/null; then
       found_any=true
-      echo -e "    Found Terraform lock table:   ${YELLOW}${lock}${NC}"
+      tables_to_delete+=("$tf_lock")
+      echo -e "    Found Terraform lock table:   ${YELLOW}${tf_lock}${NC}"
     fi
+
+    # CFN template bucket (from console deploy)
     local cfn_bucket="${wm}-cfn-templates-${ACCOUNT_ID}"
     if aws s3api head-bucket --bucket "$cfn_bucket" --region "$SCAN_REGION" 2>/dev/null; then
       found_any=true
+      buckets_to_delete+=("$cfn_bucket")
       echo -e "    Found CFN template bucket:    ${YELLOW}${cfn_bucket}${NC}"
     fi
   done
@@ -509,23 +549,13 @@ offer_state_cleanup() {
 
   echo ""
   if confirm "Delete these state/template resources too?" ; then
-    for i in "${TARGETS[@]}"; do
-      local wm="${WATERMARKS[$i]}"
-      local bucket="${wm}-tfstate-${ACCOUNT_ID}"
-      if aws s3api head-bucket --bucket "$bucket" --region "$SCAN_REGION" 2>/dev/null; then
-        aws s3 rb "s3://${bucket}" --force --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ${bucket}"
-        ok "Deleted bucket: ${bucket}"
-      fi
-      local lock="${wm}-tflock"
-      if aws dynamodb describe-table --table-name "$lock" --region "$SCAN_REGION" &>/dev/null; then
-        aws dynamodb delete-table --table-name "$lock" --region "$SCAN_REGION" >/dev/null 2>&1 || warn "Could not delete ${lock}"
-        ok "Deleted lock table: ${lock}"
-      fi
-      local cfn_bucket="${wm}-cfn-templates-${ACCOUNT_ID}"
-      if aws s3api head-bucket --bucket "$cfn_bucket" --region "$SCAN_REGION" 2>/dev/null; then
-        aws s3 rb "s3://${cfn_bucket}" --force --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ${cfn_bucket}"
-        ok "Deleted bucket: ${cfn_bucket}"
-      fi
+    for bucket in "${buckets_to_delete[@]}"; do
+      aws s3 rb "s3://${bucket}" --force --region "$SCAN_REGION" 2>/dev/null || warn "Could not delete ${bucket}"
+      ok "Deleted bucket: ${bucket}"
+    done
+    for table in "${tables_to_delete[@]}"; do
+      aws dynamodb delete-table --table-name "$table" --region "$SCAN_REGION" >/dev/null 2>&1 || warn "Could not delete ${table}"
+      ok "Deleted lock table: ${table}"
     done
   fi
 }

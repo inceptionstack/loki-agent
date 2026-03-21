@@ -457,6 +457,11 @@ wait_for_cfn_stack() {
   done
 }
 
+# State tracking for Terraform backend (used by deploy_terraform to tag VPC)
+TF_STATE_BUCKET=""
+TF_STATE_KEY=""
+TF_LOCK_TABLE=""
+
 # ============================================================================
 # Deploy: Terraform (option 4)
 # ============================================================================
@@ -468,6 +473,18 @@ deploy_terraform() {
   terraform_apply
   INSTANCE_ID=$(terraform output -raw instance_id)
   PUBLIC_IP=$(terraform output -raw public_ip)
+
+  # Tag VPC with state backend info so uninstall can find it
+  local vpc_id
+  vpc_id=$(terraform output -raw vpc_id 2>/dev/null || echo "")
+  if [[ -n "$vpc_id" && -n "$TF_STATE_BUCKET" ]]; then
+    aws ec2 create-tags --resources "$vpc_id" --region "$DEPLOY_REGION" --tags \
+      "Key=loki:tf-state-bucket,Value=${TF_STATE_BUCKET}" \
+      "Key=loki:tf-state-key,Value=${TF_STATE_KEY}" \
+      "Key=loki:tf-lock-table,Value=${TF_LOCK_TABLE}" 2>/dev/null || true
+    ok "Tagged VPC with Terraform state location"
+  fi
+
   ok "Terraform apply complete!"
 }
 
@@ -484,6 +501,12 @@ setup_terraform_backend() {
   local bucket="${ENV_NAME}-tfstate-${ACCOUNT_ID}"
   prompt "S3 bucket name" bucket "$bucket"
   local lock_table="${ENV_NAME}-tflock"
+  local state_key="loki-agent/terraform.tfstate"
+
+  # Store for VPC tagging later
+  TF_STATE_BUCKET="$bucket"
+  TF_STATE_KEY="$state_key"
+  TF_LOCK_TABLE="$lock_table"
 
   create_s3_bucket "$bucket" "$DEPLOY_REGION"
 
@@ -499,7 +522,7 @@ setup_terraform_backend() {
 terraform {
   backend "s3" {
     bucket         = "${bucket}"
-    key            = "loki-agent/terraform.tfstate"
+    key            = "${state_key}"
     region         = "${DEPLOY_REGION}"
     dynamodb_table = "${lock_table}"
     encrypt        = true
