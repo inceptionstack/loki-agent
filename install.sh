@@ -195,7 +195,7 @@ prompt "Clone to" CLONE_CHOICE "1"
 
 case "$CLONE_CHOICE" in
   2) CLONE_DIR="$HOME/.loki-agent" ;;
-  3) CLONE_DIR="$(mktemp -d)/loki-agent"; CLEANUP_TMPDIR=true ;;
+  3) CLONE_DIR="$(mktemp -d)/loki-agent" ;;
   *) CLONE_DIR="${CURRENT_DIR}/loki-agent" ;;
 esac
 
@@ -214,11 +214,6 @@ else
 fi
 cd "$CLONE_DIR"
 ok "Repository ready: ${CLONE_DIR}"
-
-# Only auto-clean temp dirs
-if [[ "${CLEANUP_TMPDIR:-false}" == "true" ]]; then
-  trap "rm -rf $(dirname "$CLONE_DIR") 2>/dev/null" EXIT
-fi
 
 # ============================================================================
 # Deploy
@@ -368,4 +363,12 @@ echo -e "  ${BOLD}Connect:${NC}   aws ssm start-session --target ${INSTANCE_ID} 
 echo -e "  ${BOLD}Then run:${NC}  openclaw tui"
 echo ""
 echo -e "  ${BOLD}Docs:${NC}      https://github.com/inceptionstack/loki-agent/wiki"
+echo -e "  ${BOLD}Clone dir:${NC} ${CLONE_DIR}"
 echo ""
+
+if confirm "Remove cloned repo directory (${CLONE_DIR})?" ; then
+  rm -rf "$CLONE_DIR" 2>/dev/null
+  ok "Cleaned up ${CLONE_DIR}"
+else
+  info "Repo kept at ${CLONE_DIR}"
+fi
