@@ -8,6 +8,8 @@ set -euo pipefail
 # ============================================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; BOLD='\033[1m'; NC='\033[0m'
 
+TEMPLATE_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
+
 info() { echo -e "${BLUE}▸${NC} $1"; }
 ok()   { echo -e "${GREEN}✓${NC} $1"; }
 warn() { echo -e "${YELLOW}⚠${NC} $1"; }
@@ -35,6 +37,21 @@ confirm() {
 
 require_cmd() {
   command -v "$1" &>/dev/null || fail "$2"
+}
+
+# Try to open a URL in the user's browser
+open_url() {
+  local url="$1"
+  if command -v open &>/dev/null; then
+    open "$url" 2>/dev/null && return 0
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$url" 2>/dev/null && return 0
+  elif command -v start &>/dev/null; then
+    start "$url" 2>/dev/null && return 0
+  elif [[ -n "${WSL_DISTRO_NAME:-}" ]] && command -v explorer.exe &>/dev/null; then
+    explorer.exe "$url" 2>/dev/null && return 0
+  fi
+  return 1
 }
 
 # Shared: deploy a CFN-based stack (works for both CloudFormation and SAM)
@@ -79,15 +96,6 @@ deploy_cfn_stack() {
     --query 'Stacks[0].Outputs[?OutputKey==`PublicIp`].OutputValue' --output text)
 }
 
-# Shared: security flag parameters string
-security_vars() {
-  echo "-var=enable_security_hub=${SECURITY_HUB} \
-    -var=enable_guardduty=${GUARDDUTY} \
-    -var=enable_inspector=${INSPECTOR} \
-    -var=enable_access_analyzer=${ACCESS_ANALYZER} \
-    -var=enable_config_recorder=${CONFIG_RECORDER}"
-}
-
 # ============================================================================
 # Banner
 # ============================================================================
@@ -98,7 +106,64 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 
 # ============================================================================
-# Pre-flight checks
+# Choose deployment method (FIRST — before any pre-flight checks)
+# ============================================================================
+echo "  Deployment methods:"
+echo ""
+echo -e "    ${GREEN}1) AWS Console (easiest)${NC}  -- opens browser wizard, no tools needed"
+echo ""
+echo "    Requires AWS CLI installed & configured:"
+echo "    2) CloudFormation CLI  -- standard AWS"
+echo "    3) SAM                 -- for SAM CLI users"
+echo "    4) Terraform           -- for Terraform shops"
+echo ""
+prompt "Deployment method" DEPLOY_METHOD "1"
+
+# ============================================================================
+# Option 1: AWS Console — no pre-flight, no clone, just a URL
+# ============================================================================
+if [[ "$DEPLOY_METHOD" == "1" ]]; then
+  echo ""
+  prompt "AWS region" CONSOLE_REGION "us-east-1"
+
+  ENCODED_TEMPLATE=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${TEMPLATE_URL}', safe=''))" 2>/dev/null \
+    || python -c "import urllib; print(urllib.quote('${TEMPLATE_URL}', safe=''))" 2>/dev/null \
+    || echo "${TEMPLATE_URL}")
+
+  CONSOLE_URL="https://${CONSOLE_REGION}.console.aws.amazon.com/cloudformation/home?region=${CONSOLE_REGION}#/stacks/create/review?templateURL=${ENCODED_TEMPLATE}&stackName=loki-agent"
+
+  echo ""
+  echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${GREEN}║  Open this link in your browser to launch the stack wizard  ║${NC}"
+  echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}${CONSOLE_URL}${NC}"
+  echo ""
+
+  if open_url "$CONSOLE_URL"; then
+    ok "Opened in your browser"
+  else
+    info "Copy the link above and paste it into your browser"
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}What to do next:${NC}"
+  echo "    1. Log in to AWS if prompted"
+  echo "    2. Review the parameters — defaults work out of the box"
+  echo "    3. Check \"I acknowledge that AWS CloudFormation might create IAM resources\""
+  echo "    4. Click ${BOLD}Create stack${NC}"
+  echo "    5. Wait ~10 minutes for the stack to finish"
+  echo "    6. Find the Instance ID in the stack Outputs tab"
+  echo "    7. Connect:  aws ssm start-session --target <instance-id> --region ${CONSOLE_REGION}"
+  echo "    8. Run:      openclaw tui"
+  echo ""
+  echo -e "  ${BOLD}Docs:${NC} https://github.com/inceptionstack/loki-agent/wiki"
+  echo ""
+  exit 0
+fi
+
+# ============================================================================
+# Options 2-4: CLI-based — run pre-flight checks
 # ============================================================================
 info "Running pre-flight checks..."
 
@@ -202,14 +267,6 @@ else
   SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"; ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
 fi
 
-echo ""
-echo "  Deployment methods:"
-echo "    1) CloudFormation -- standard AWS, best for beginners"
-echo "    2) SAM            -- for SAM CLI users"
-echo "    3) Terraform      -- for Terraform shops"
-echo ""
-prompt "Deployment method" DEPLOY_METHOD "1"
-
 # ============================================================================
 # Clone location
 # ============================================================================
@@ -249,15 +306,15 @@ ok "Repository ready: ${CLONE_DIR}"
 # ============================================================================
 echo ""
 case "$DEPLOY_METHOD" in
-  1)
+  2)
     info "Deploying with CloudFormation..."
     deploy_cfn_stack "deploy/cloudformation/template.yaml" "CAPABILITY_NAMED_IAM"
     ;;
-  2)
+  3)
     info "Deploying with SAM..."
     deploy_cfn_stack "deploy/sam/template.yaml" "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
     ;;
-  3)
+  4)
     info "Deploying with Terraform..."
     require_cmd terraform "Terraform not found. Install: https://developer.hashicorp.com/terraform/install"
     cd deploy/terraform
