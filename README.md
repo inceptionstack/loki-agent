@@ -6,6 +6,8 @@
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 >
+> ⚠️ **We highly recommend deploying Loki in a brand-new, dedicated AWS account.** Loki has admin-level access and LLMs can make mistakes — a clean account limits the blast radius. Start with prototyping work as you learn and get acquainted with its capabilities. Like any powerful tool, it carries risks; isolating it in its own account is the simplest way to manage them.
+>
 > **To remove a Loki deployment:**
 > ```
 > bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh)
