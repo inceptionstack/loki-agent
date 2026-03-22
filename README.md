@@ -1,4 +1,4 @@
-# Loki: Your Stateful Dev/Research/Sec/Ops Agent in your AWS account
+# Loki: Your Stateful Dev/Research/Ops Agent in your AWS account
 
 > **TL;DR — one command to deploy:**
 > ```
@@ -7,6 +7,8 @@
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 >
 > ⚠️ **We highly recommend deploying Loki in a brand-new, dedicated AWS account.** Loki has admin-level access and LLMs can make mistakes — a clean account limits the blast radius. Start with prototyping work as you learn and get acquainted with its capabilities. Like any powerful tool, it carries risks; isolating it in its own account is the simplest way to manage them.
+>
+> ⚠️ **This is an experiment, not a security product.** Loki can enable AWS security services and flag findings, but it does not replace professional security review, compliance auditing, or threat modeling. An LLM with admin access can cause damage — treat it accordingly.
 >
 > **To remove a Loki deployment:**
 > ```
@@ -57,8 +59,8 @@ Loki handles the complete build lifecycle inside your AWS account:
 
 * **Designs and deploys** serverless APIs, container workloads, and data pipelines
 * **Writes application code**, pushes to repositories, and triggers CI/CD pipelines
-* **Configures IAM policies**, security groups, and compliance logging
-* **Sets up CloudWatch monitoring** and security services automatically
+* **Configures IAM policies**, security groups, and logging
+* **Sets up CloudWatch monitoring** and can enable AWS security services (GuardDuty, Security Hub, etc.) on request
 * **Debugs production issues** — reads CloudTrail logs, identifies root causes, and applies fixes
 
 Everything Loki builds can use (but is not limited to) standard AWS services: CloudFormation or CDK or Terraform for infrastructure, CodeCommit or GitHub for code, Lambda or ECS for compute, DynamoDB or RDS for data. There's no proprietary runtime, no abstraction layer, and no migration required when your application grows beyond the prototype stage.
@@ -75,7 +77,7 @@ Unlike **rapid-dev platforms** (Replit, Lovable, Bolt) that abstract away infras
 
 ### Difference from Standard OpenClaw Assistants
 
-Unlike a **general-purpose AI assistants**, Loki ships with AWS infrastructure skills, security best practices baked in, and the IAM permissions to actually provision resources. It's purpose-built for building and operating on AWS. **Instead of being fully locked down into a VM sandbox or docker sandbox, it's sandbox is defined by the boundaries of the AWS account it lives in.**
+Unlike a **general-purpose AI assistant**, Loki ships with AWS infrastructure skills and the IAM permissions to actually provision resources. It's purpose-built for building and operating on AWS. **Instead of being fully locked down into a VM sandbox or docker sandbox, its sandbox is defined by the boundaries of the AWS account it lives in.**
 
 It does not bundle any clawhub skills (huge security risk there), but comes with mostly AWS skills and playwright MCP using mcporter.
 
@@ -84,7 +86,7 @@ It does not bundle any clawhub skills (huge security risk there), but comes with
 
 ## Loki in Action
 
-Real screenshots from actual usage — building apps, debugging infrastructure, and monitoring security.
+Real screenshots from actual usage — building apps, debugging infrastructure, and monitoring AWS resources.
 
 ### From prompt to deployed app
 
@@ -118,9 +120,9 @@ Loki doesn't wait for you to ask. It sends daily reports covering AWS costs, sec
   <img src="docs/screenshots/loki-morning-briefing.jpg" alt="Loki morning briefing — AWS costs, security findings, CVEs, pipeline status" width="500" />
 </p>
 
-### Security: detect → fix → verify
+### CVE detection and patching
 
-Loki monitors Security Hub, GuardDuty, and Inspector continuously. When it finds issues, it proposes fixes, executes them, rebuilds container images, and verifies the result — autonomously.
+Loki can read from Security Hub, GuardDuty, and Inspector. When it finds CVE reports, it can propose fixes, rebuild container images, and verify the result. **This is a convenience feature, not a security guarantee — always review what it does.**
 
 <p align="center">
   <img src="docs/screenshots/loki-security-fix.jpg" alt="Loki detecting 1 CRITICAL + 19 HIGH security findings and proposing fixes" width="400" />
@@ -146,12 +148,12 @@ Loki isn't a one-shot tool you open when you need something. It's an always-on p
 
 | | Time | What Happens |
 |---|---|---|
-| 🌅 | **8:00 AM** | **Morning briefing lands.** Before you open your laptop, Loki sends a daily report: security posture (0 findings), overnight spend ($3.20), 2 CVE patches applied to your container images at 3 AM, all pipelines green. |
+| 🌅 | **8:00 AM** | **Morning briefing lands.** Before you open your laptop, Loki sends a daily report: security findings summary, overnight spend ($3.20), CVEs flagged in your container images, all pipelines green. |
 | ☕ | **9:30 AM** | **You have an idea.** Via SSM terminal: *"Build me a serverless REST API with DynamoDB, Cognito auth, and a React frontend."* By the time you finish your coffee — it's live, with tests, a CI/CD pipeline, and CloudWatch alarms. All IaC. |
-| 🛡️ | **11:00 AM** | **Loki has your back.** A routine heartbeat check catches an overly permissive security group. Loki tightens it, updates the CloudFormation template, and sends you a one-liner summary. You didn't even notice there was an issue. |
+| 🛡️ | **11:00 AM** | **Loki flags something.** A routine heartbeat check catches an overly permissive security group. Loki proposes tightening it, updates the CloudFormation template, and sends you a summary to review. |
 | 📱 | **2:15 PM** | **Iterate from anywhere.** Message from your phone: *"Add a WebSocket endpoint to the API I built this morning."* Loki remembers the full architecture — no context needed. |
 | 📋 | **5:30 PM** | **Wrap-up summary.** *"Summarize everything we built today."* Loki recaps: 2 new services deployed, 14 CloudFormation resources created, 3 pipelines configured, all tests passing. Copy-paste to your team. |
-| 🌙 | **3:00 AM** | **While you sleep.** Scheduled jobs audit your infrastructure against AWS best practices. Loki finds two cost optimizations and a security improvement, applies them, and logs everything. You wake up to a cleaner, cheaper stack. |
+| 🌙 | **3:00 AM** | **While you sleep.** Scheduled jobs can audit your infrastructure against AWS best practices. Loki finds cost optimizations and flags improvements, logging everything for your morning review. |
 
 
 ---
@@ -162,7 +164,7 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 
 **1. One-click deployment.** Choose your IaC tool  (CloudFormation, SAM, or Terraform) and deploy. The template creates an isolated VPC, a T4g.xlarge EC2 instance by default (recommended so it can really do things like build run tests, build code, dockerize things and more, as a real dev machine), IAM roles, security services, and installs Loki with a pre-configured workspace. Total deploy time: \~4-10 minutes.
 
-**2. Configurable security posture.** The deployment includes five individually toggleable security services — Security Hub, GuardDuty, Inspector, Access Analyzer, and AWS Config  all enabled by default. For test/dev environments, disable what you don't need. The EC2 instance uses SSM Session Manager instead of SSH (no open ports), and the Loki gateway only listens on localhost (not exposed to the network).
+**2. Configurable monitoring.** The deployment includes five individually toggleable AWS security services — Security Hub, GuardDuty, Inspector, Access Analyzer, and AWS Config — all enabled by default. For test/dev environments, disable what you don't need. The EC2 instance uses SSM Session Manager instead of SSH (no open ports), and the Loki gateway only listens on localhost (not exposed to the network). **Note:** Enabling these services doesn't make the agent itself secure — it means the agent can surface findings from these tools. You are still responsible for reviewing and acting on them.
 
 **3. Observe → Plan → Act.** Loki reads the current state of your AWS account, plans the next actions, and executes them with full admin power. **(remember - with power comes resposibility. this is risky, so use it on a clean AWS account to minize blast radius of agent making mistakes)**
 
@@ -262,13 +264,33 @@ Loki can estimate costs before provisioning resources and summarize your actual 
 
 ---
 
+## ⚠️ Risks — Read This
+
+Loki has **administrator access** to your AWS account. This is what makes it useful — and what makes it dangerous. Be honest with yourself about the tradeoffs:
+
+* **LLMs make mistakes.** They can misconfigure IAM policies, delete resources they shouldn't, create overly permissive security groups, or run up costs with unintended resource creation. This is not hypothetical — it will happen.
+* **Admin access means admin-level damage.** If the model hallucinates a destructive command, it has the permissions to execute it. There is no approval gate by default (though you can configure one).
+* **This is not a security product.** Loki can enable GuardDuty and read Security Hub findings, but an LLM summarizing security alerts is not the same as a security operations team. Don't use it as your security posture — use it as a convenience layer that surfaces information.
+* **Non-deterministic behavior.** The same prompt can produce different results on different days. Infrastructure changes are not always reversible.
+
+**Mitigations we recommend:**
+
+1. **Dedicated sandbox account.** This is the single most important thing you can do. If Loki breaks something, the blast radius is one account.
+2. **AWS Budgets with alerts.** Set a spending cap from day one.
+3. **CloudTrail is always on.** Every API call Loki makes is logged. Review the trail periodically.
+4. **Start small.** Build a todo app before you ask it to architect a multi-service platform.
+5. **Review what it builds.** Loki shows you what it's doing. Read it. Question it.
+
+
+---
+
 ## Limitations
 
 Loki is:
 
 * **Non-deterministic.** Given the same request, it may produce different results. For complex architecture, a developer/architect with AWS experience gets significantly better results — the agent amplifies expertise, it doesn't substitute for it.
 * **Single-account scope.** Loki operates within one AWS account. It's not designed for multi-account orchestration (yet).
-* **Not a compliance auditor.** Loki will try to follow security best practices and enable security services by default, but doesn't replace formal compliance auditing.
+* **Not a security tool.** Loki can enable and read from AWS security services, but it is not a substitute for security engineering, compliance auditing, or threat modeling. An LLM with admin access can introduce security issues just as easily as it finds them.
 * **Prototyping-to-production, not at-scale operations.** Loki can monitor and debug what it builds, but it's not a replacement for dedicated operations tooling for high-scale production workloads.
 
 
