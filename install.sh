@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
 # Loki Agent — One-Shot Installer
 # Usage: bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
+#   or:  curl -sfL ... -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 set -euo pipefail
+
+# Ensure we run from a safe CWD — avoid interference from local .env, direnv, etc.
+cd "$HOME" 2>/dev/null || cd /tmp
+
 export AWS_PAGER=""
 export PAGER=""
 aws() { command aws --no-cli-pager "$@"; }
+
+# Catch unexpected exits so they're not silent
+trap 'echo -e "\n\033[0;31m✗ Installer exited unexpectedly at line $LINENO\033[0m" >&2' ERR
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
