@@ -92,6 +92,15 @@ cat >> ~/.bashrc << 'ALIASES'
 alias loki='openclaw'
 alias lt='loki tui'
 alias gr='loki gateway restart'
+
+# Welcome banner (only for interactive login shells)
+if [[ $- == *i* ]] && [[ -z "$LOKI_BANNER_SHOWN" ]]; then
+  export LOKI_BANNER_SHOWN=1
+  printf '\n\033[1;35m🤖 InceptionStack Loki Environment (Based on OpenClaw)\033[0m\n\n'
+  printf '  loki tui              → Launch Loki terminal UI\n'
+  printf '  loki gateway          → Gateway status\n'
+  printf '  loki gateway restart  → Restart gateway\n\n'
+fi
 ALIASES
 export PATH="/home/ec2-user/.local/bin:$PATH"
 eval "$(mise activate bash)"
