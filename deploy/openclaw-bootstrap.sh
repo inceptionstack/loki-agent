@@ -218,15 +218,20 @@ SVCEOF
 ok "Systemd unit written"
 USEREOF
 
-# ---- SSM Session Preferences ----
-step "SSM Session Preferences"
-SSM_DOC_CONTENT='{"schemaVersion":"1.0","description":"SSM prefs","sessionType":"Standard_Stream","inputs":{"runAsEnabled":false,"shellProfile":{"linux":"stty -echo 2>/dev/null; clear; printf '"'"'\\n\\033[1;35m🤖 InceptionStack Loki Environment (Based on OpenClaw)\\033[0m\\n\\n  loki tui    → Launch Loki terminal UI\\n  loki status → Gateway status\\n\\n'"'"'; stty echo 2>/dev/null; exec sudo -iu ec2-user"}}}'
-if aws ssm get-document --name SSM-SessionManagerRunShell --region $REGION >/dev/null 2>&1; then
-  aws ssm update-document --name SSM-SessionManagerRunShell --content "$SSM_DOC_CONTENT" --document-version '$LATEST' --region $REGION >/dev/null 2>&1 || true
-else
-  aws ssm create-document --name SSM-SessionManagerRunShell --document-type Session --content "$SSM_DOC_CONTENT" --region $REGION >/dev/null 2>&1 || true
+# ---- SSM Shell Profile (instance-local, no account-wide SSM doc changes) ----
+step "SSM Shell Profile"
+cat > /etc/profile.d/loki.sh << 'LOKIPROFILE'
+# Loki SSM session: auto-switch to ec2-user with welcome banner
+if [ "$(whoami)" = "ssm-user" ] && [ -z "$LOKI_PROFILE_LOADED" ]; then
+  export LOKI_PROFILE_LOADED=1
+  printf '\n\033[1;35m🤖 InceptionStack Loki Environment (Based on OpenClaw)\033[0m\n\n'
+  printf '  loki tui    → Launch Loki terminal UI\n'
+  printf '  loki status → Gateway status\n\n'
+  exec sudo -iu ec2-user
 fi
-ok "SSM Session doc configured"
+LOKIPROFILE
+chmod 644 /etc/profile.d/loki.sh
+ok "Shell profile installed (/etc/profile.d/loki.sh)"
 
 # ---- InceptionStack Brain ----
 step "InceptionStack Brain"
