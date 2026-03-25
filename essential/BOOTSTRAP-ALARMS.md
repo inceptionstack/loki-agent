@@ -190,6 +190,248 @@ ExecStart=/usr/local/bin/loki-health-check.sh
 TimeoutSec=30
 ```
 
+## CloudWatch Dashboard
+
+Dashboard name: `Loki-Instance-Health`
+
+Provides a single-pane view of all alarms, service health, compute resources, network, and disk I/O. Replace `INSTANCE_ID` and `ACCOUNT_ID` with actual values throughout.
+
+### Layout
+
+| Row | Section | Widgets |
+|-----|---------|---------|
+| 1 | Header + Alarms | Title bar + all 10 alarm status indicators (green/red at a glance) |
+| 2 | Service Health | OpenClaw Gateway (up/down) · Embedrock (up/down) · Bedrock API + Failed Units |
+| 3 | Compute | CPU (80% alarm line) · Memory (90% alarm line) · Disk (85% alarm line) |
+| 4 | Network & EC2 | Packets in/out · Bytes in/out · System + Instance status checks |
+| 5 | Disk I/O | EBS read/write ops · EBS read/write bytes |
+
+### Dashboard JSON
+
+```json
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 1,
+      "properties": {
+        "markdown": "# ⚡ Loki@FastStart — Instance Health Dashboard\n"
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 0, "y": 1, "width": 24, "height": 2,
+      "properties": {
+        "title": "🚨 Alarm Status",
+        "alarms": [
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-system-status-check-failed",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-instance-status-check-failed",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-openclaw-down",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-embedrock-down",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-bedrock-unreachable",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-failed-units",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-cpu-high",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-memory-high",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-disk-high",
+          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-network-dead"
+        ]
+      }
+    },
+    {
+      "type": "text",
+      "x": 0, "y": 3, "width": 24, "height": 1,
+      "properties": { "markdown": "## Service Health" }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 4, "width": 8, "height": 4,
+      "properties": {
+        "title": "🤖 OpenClaw Gateway",
+        "metrics": [
+          [ "Custom/Loki", "OpenClawAlive", "InstanceId", "INSTANCE_ID", { "label": "Gateway Alive", "color": "#2ca02c" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Minimum",
+        "yAxis": { "left": { "min": 0, "max": 1.2, "label": "1=Up 0=Down" } },
+        "annotations": { "horizontal": [{ "label": "DOWN", "value": 0.5, "color": "#d62728", "fill": "below" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 4, "width": 8, "height": 4,
+      "properties": {
+        "title": "🪨 Embedrock",
+        "metrics": [
+          [ "Custom/Loki", "EmbedrockAlive", "InstanceId", "INSTANCE_ID", { "label": "Embedrock Alive", "color": "#1f77b4" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Minimum",
+        "yAxis": { "left": { "min": 0, "max": 1.2, "label": "1=Up 0=Down" } },
+        "annotations": { "horizontal": [{ "label": "DOWN", "value": 0.5, "color": "#d62728", "fill": "below" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 4, "width": 8, "height": 4,
+      "properties": {
+        "title": "☁️ Bedrock API & Failed Units",
+        "metrics": [
+          [ "Custom/Loki", "BedrockReachable", "InstanceId", "INSTANCE_ID", { "label": "Bedrock Reachable", "color": "#ff7f0e" } ],
+          [ "Custom/Loki", "FailedUnits", "InstanceId", "INSTANCE_ID", { "label": "Failed Units", "color": "#d62728", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Maximum",
+        "yAxis": { "left": { "min": 0, "max": 1.2, "label": "1=Up 0=Down" }, "right": { "min": 0, "label": "Failed Count" } }
+      }
+    },
+    {
+      "type": "text",
+      "x": 0, "y": 8, "width": 24, "height": 1,
+      "properties": { "markdown": "## Compute Resources" }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 9, "width": 8, "height": 5,
+      "properties": {
+        "title": "🔥 CPU Utilization",
+        "metrics": [
+          [ "AWS/EC2", "CPUUtilization", "InstanceId", "INSTANCE_ID", { "label": "CPU %", "color": "#9467bd" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 300, "stat": "Average",
+        "yAxis": { "left": { "min": 0, "max": 100, "label": "%" } },
+        "annotations": { "horizontal": [{ "label": "ALARM", "value": 80, "color": "#d62728" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 9, "width": 8, "height": 5,
+      "properties": {
+        "title": "🧠 Memory Usage",
+        "metrics": [
+          [ "Custom/Loki", "MemoryUsedPercent", "InstanceId", "INSTANCE_ID", { "label": "Memory %", "color": "#e377c2" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Maximum",
+        "yAxis": { "left": { "min": 0, "max": 100, "label": "%" } },
+        "annotations": { "horizontal": [{ "label": "ALARM", "value": 90, "color": "#d62728" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 9, "width": 8, "height": 5,
+      "properties": {
+        "title": "💾 Root Disk Usage",
+        "metrics": [
+          [ "Custom/Loki", "DiskUsedPercent", "InstanceId", "INSTANCE_ID", { "label": "Disk %", "color": "#8c564b" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Maximum",
+        "yAxis": { "left": { "min": 0, "max": 100, "label": "%" } },
+        "annotations": { "horizontal": [{ "label": "ALARM", "value": 85, "color": "#d62728" }] }
+      }
+    },
+    {
+      "type": "text",
+      "x": 0, "y": 14, "width": 24, "height": 1,
+      "properties": { "markdown": "## Network & EC2 Status" }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 15, "width": 8, "height": 5,
+      "properties": {
+        "title": "🌐 Network Traffic",
+        "metrics": [
+          [ "AWS/EC2", "NetworkPacketsIn", "InstanceId", "INSTANCE_ID", { "label": "Packets In", "color": "#2ca02c" } ],
+          [ "AWS/EC2", "NetworkPacketsOut", "InstanceId", "INSTANCE_ID", { "label": "Packets Out", "color": "#1f77b4" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 300, "stat": "Sum",
+        "yAxis": { "left": { "min": 0, "label": "Packets" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 15, "width": 8, "height": 5,
+      "properties": {
+        "title": "📊 Network Bytes",
+        "metrics": [
+          [ "AWS/EC2", "NetworkIn", "InstanceId", "INSTANCE_ID", { "label": "Bytes In", "color": "#2ca02c" } ],
+          [ "AWS/EC2", "NetworkOut", "InstanceId", "INSTANCE_ID", { "label": "Bytes Out", "color": "#1f77b4" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 300, "stat": "Sum",
+        "yAxis": { "left": { "min": 0, "label": "Bytes" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 15, "width": 8, "height": 5,
+      "properties": {
+        "title": "✅ EC2 Status Checks",
+        "metrics": [
+          [ "AWS/EC2", "StatusCheckFailed_System", "InstanceId", "INSTANCE_ID", { "label": "System (Nitro/Host)", "color": "#d62728" } ],
+          [ "AWS/EC2", "StatusCheckFailed_Instance", "InstanceId", "INSTANCE_ID", { "label": "Instance (OS)", "color": "#ff7f0e" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 60, "stat": "Maximum",
+        "yAxis": { "left": { "min": 0, "max": 1.2, "label": "0=OK 1=FAIL" } }
+      }
+    },
+    {
+      "type": "text",
+      "x": 0, "y": 20, "width": 24, "height": 1,
+      "properties": { "markdown": "## Disk I/O" }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 21, "width": 12, "height": 4,
+      "properties": {
+        "title": "📖 EBS Read/Write Ops",
+        "metrics": [
+          [ "AWS/EC2", "EBSReadOps", "InstanceId", "INSTANCE_ID", { "label": "Read Ops", "color": "#2ca02c" } ],
+          [ "AWS/EC2", "EBSWriteOps", "InstanceId", "INSTANCE_ID", { "label": "Write Ops", "color": "#d62728" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 300, "stat": "Sum",
+        "yAxis": { "left": { "min": 0, "label": "Ops" } }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12, "y": 21, "width": 12, "height": 4,
+      "properties": {
+        "title": "📝 EBS Read/Write Bytes",
+        "metrics": [
+          [ "AWS/EC2", "EBSReadBytes", "InstanceId", "INSTANCE_ID", { "label": "Read Bytes", "color": "#2ca02c" } ],
+          [ "AWS/EC2", "EBSWriteBytes", "InstanceId", "INSTANCE_ID", { "label": "Write Bytes", "color": "#d62728" } ]
+        ],
+        "view": "timeSeries", "stacked": false, "region": "us-east-1",
+        "period": 300, "stat": "Sum",
+        "yAxis": { "left": { "min": 0, "label": "Bytes" } }
+      }
+    }
+  ]
+}
+```
+
+### Deploy Dashboard
+
+```bash
+# Replace placeholders
+INSTANCE_ID="i-0229529f514ef6fd7"
+ACCOUNT_ID="387904338202"
+
+sed -e "s/INSTANCE_ID/$INSTANCE_ID/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" dashboard.json > /tmp/dashboard-resolved.json
+
+aws cloudwatch put-dashboard \
+  --dashboard-name "Loki-Instance-Health" \
+  --dashboard-body file:///tmp/dashboard-resolved.json \
+  --region us-east-1
+```
+
+Dashboard URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/Loki-Instance-Health`
+
 ## Deployment Order
 
 1. **Create SNS topic** (or reuse existing) — need ARN for alarm actions
