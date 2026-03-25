@@ -21,6 +21,12 @@ INSTALLER_VERSION="0.3.0"
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-e7e8267}"
 INSTALLER_DATE="${INSTALLER_DATE:-2026-03-21 10:30}"
 
+# Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
+IS_CLOUDSHELL=false
+if [[ -n "${AWS_EXECUTION_ENV:-}" && "${AWS_EXECUTION_ENV}" == *"CloudShell"* ]] || [[ -d /home/cloudshell-user && "$(whoami)" == "cloudshell-user" ]]; then
+  IS_CLOUDSHELL=true
+fi
+
 # ============================================================================
 # UI helpers
 # ============================================================================
@@ -313,11 +319,19 @@ prepare_repo() {
   echo "    2) ~/.loki-agent     -- persistent home directory"
   echo "    3) Temp directory    -- auto-deleted when done (not for Terraform local state)"
   echo ""
+  # CloudShell: default to /tmp (home is tiny)
+  local default_choice="1"
+  if [[ "$IS_CLOUDSHELL" == "true" ]]; then
+    warn "CloudShell detected — /home has limited space (~1GB)"
+    info "Defaulting to /tmp for the clone"
+    default_choice="3"
+  fi
+
   local choice
-  prompt "Clone to" choice "1"
+  prompt "Clone to" choice "$default_choice"
   case "$choice" in
     2) CLONE_DIR="$HOME/.loki-agent" ;;
-    3) CLONE_DIR="$(mktemp -d)/loki-agent" ;;
+    3) CLONE_DIR="/tmp/loki-agent-$$" ;;
     *) CLONE_DIR="${current}/loki-agent" ;;
   esac
 
@@ -613,7 +627,31 @@ EOF
 }
 
 terraform_init() {
+  # AWS provider is ~500MB — CloudShell /home is ~1GB. Use /tmp for plugin cache.
+  if [[ ! -v TF_PLUGIN_CACHE_DIR ]]; then
+    export TF_PLUGIN_CACHE_DIR="/tmp/terraform-plugin-cache"
+  fi
+  mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+  # Check disk space before downloading providers
+  local avail_mb
+  avail_mb=$(df -m "$(pwd)" --output=avail 2>/dev/null | tail -1 | tr -d ' ' || echo "9999")
+  if [[ "$avail_mb" -lt 600 ]]; then
+    warn "Low disk space (${avail_mb}MB available) — Terraform providers need ~500MB"
+    if [[ "$IS_CLOUDSHELL" == "true" ]]; then
+      info "CloudShell detected — moving Terraform workdir to /tmp"
+      local tf_tmp="/tmp/loki-terraform-$$"
+      mkdir -p "$tf_tmp"
+      cp -a . "$tf_tmp/"
+      cd "$tf_tmp"
+      info "Working from: $(pwd)"
+    else
+      warn "You may run out of disk space. Consider freeing space or using /tmp."
+    fi
+  fi
+
   info "Initializing Terraform (downloading providers, may take a minute)..."
+  info "Plugin cache: ${TF_PLUGIN_CACHE_DIR}"
   run_or_fail "Terraform init" terraform init -input=false
   grep -E 'Initializing|Installing|Installed' "$_RUN_LOG" | while IFS= read -r line; do
     echo -e "  ${BLUE}…${NC} ${line}"
