@@ -105,3 +105,96 @@
 - Pipeline failure → auto-investigate and fix; pipeline success (task waiting) → mark done, notify operator
 - CloudFront SPA: viewer-request Function for path rewriting, plain HTML for OAuth callbacks, invalidate /* after deploy
 ```
+
+
+---
+
+## Daily Conformance Audit (Cron Job)
+
+Loki runs a daily automated audit to check all repos against these coding guidelines. Non-conformant repos get auto-fixed where safe, and a summary is delivered via Telegram.
+
+### What It Checks
+
+For each repo (CodeCommit and GitHub):
+
+1. **Git hygiene** — `.gitignore` exists with `node_modules/`, `dist/`, `.env`. No tracked artifacts (`node_modules/`, `.next/`, `.cache/`, `*.zip`, `*.tar.gz`, `.DS_Store`, `build/`, `coverage/`). Auto-fix: add to `.gitignore`, `git rm -r --cached`, commit + push.
+2. **README.md** — exists, has architecture section, not boilerplate.
+3. **Infrastructure** — `infrastructure/template.yaml` or `template.json` (CloudFormation) exists.
+4. **buildspec.yml** — exists for repos with CI/CD pipelines.
+5. **Lambda packaging** — `lambda/node_modules` is NOT tracked in git.
+6. **Secrets** — no hardcoded account IDs, API keys, or secrets in source.
+7. **Stale artifacts** — flag and remove tracked files that shouldn't be in git.
+
+### Auto-Fix vs Log-Only
+
+| Issue | Action |
+|-------|--------|
+| Missing `.gitignore` entry | ✅ Auto-fix: add entry, `git rm --cached`, commit, push |
+| Tracked `node_modules/`, `dist/`, build artifacts | ✅ Auto-fix: remove from tracking, commit, push |
+| Missing `README.md` or architecture section | 📝 Log only |
+| Missing CloudFormation template | 📝 Log only |
+| Hardcoded secrets detected | 🚨 Log + alert |
+
+Commit message for auto-fixes: `chore: project guidelines compliance fix`
+
+### Cron Setup
+
+Schedule: daily at 09:00 UTC (runs as isolated agentTurn).
+
+```json
+{
+  "name": "project-guidelines-audit",
+  "schedule": { "kind": "cron", "expr": "0 9 * * *", "tz": "UTC" },
+  "sessionTarget": "isolated",
+  "payload": {
+    "kind": "agentTurn",
+    "message": "<see full prompt below>",
+    "timeoutSeconds": 300,
+    "model": "amazon-bedrock/global.anthropic.claude-sonnet-4-6"
+  },
+  "delivery": { "mode": "announce" }
+}
+```
+
+### Full Audit Prompt
+
+The agentTurn message should instruct the agent to:
+
+```
+Run a project guidelines audit across all repos.
+
+For each repo:
+1. Clone to /tmp using exec + git clone
+2. Check against coding guidelines (git hygiene, README, infra, buildspec, Lambda packaging, secrets, tracked artifacts)
+3. Simple fixes (missing .gitignore entry, tracked artifacts) = FIX and push
+4. Complex gaps = LOG only
+
+Use exec for ALL file operations (not the write tool).
+
+Output:
+- Step 1: Run all checks, collect results into markdown
+- Step 2: Upload full report to Outline (or your team's wiki) via API
+- Step 3: Return a short Telegram summary (under 500 chars):
+  - One line per repo with pass/fail
+  - Total fixes applied
+  - 'Full report: Outline > Reports'
+
+Commit message for fixes: 'chore: project guidelines compliance fix'
+```
+
+Customize the repo list and wiki upload for your environment.
+
+### Report Delivery
+
+- **Full report**: uploaded to Outline wiki (Reports collection) or your team's documentation tool
+- **Telegram summary**: short pass/fail per repo, total fixes applied, link to full report
+- **Alerts**: hardcoded secrets or critical gaps trigger immediate notification
+
+### Repos to Audit
+
+Maintain the repo list in the cron job prompt. Include all repos that should follow the coding guidelines:
+
+- CodeCommit repos (clone via `aws codecommit` or HTTPS)
+- GitHub repos (clone via `https://x-access-token:${GH_TOKEN}@github.com/org/repo.git`)
+
+Update the list when repos are added or removed.
