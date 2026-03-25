@@ -1,6 +1,8 @@
-# BOOTSTRAP-ALARMS.md — Loki Instance Health Monitoring
+# BOOTSTRAP-ALARMS.md — Instance Health Monitoring
 
-Alarms to deploy on every EC2 instance running Loki. Designed to catch the failures we've actually seen — network death from crash-loops, Nitro card failures, disk fills, and silent service deaths.
+Alarms to deploy on every EC2 instance running a Loki agent. Designed to catch the failures we've actually seen — network death from crash-loops, Nitro card failures, disk fills, and silent service deaths.
+
+> **Dashboard name:** Use the agent's name (e.g. `Loki`, `Loki-Staging`, `Loki-Prod`). Set via the `DASHBOARD_TITLE` variable in the deploy steps below.
 
 ## Prerequisites
 
