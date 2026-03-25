@@ -233,6 +233,30 @@ choose_deploy_method() {
   echo "    4) Terraform              -- for Terraform shops (auto-installs if needed)"
   echo ""
   prompt "Deployment method" DEPLOY_METHOD "1"
+
+  # If Terraform selected and not installed, handle it now — before config questions.
+  # This avoids the user filling out all config only to be blocked at deploy time.
+  if [[ "$DEPLOY_METHOD" == "4" ]]; then
+    if ! command -v terraform &>/dev/null; then
+      echo ""
+      warn "Terraform is not installed on this system."
+      echo ""
+      echo "  Loki can install Terraform locally now (no root/sudo required)."
+      echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
+      echo ""
+      if confirm "Install Terraform locally before continuing?" "default_yes"; then
+        install_terraform
+      else
+        echo ""
+        echo "  Install it manually, then re-run this installer:"
+        echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
+        echo ""
+        fail "Terraform is required for the Terraform deployment method."
+      fi
+    else
+      ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
+    fi
+  fi
 }
 
 collect_config() {
@@ -489,27 +513,7 @@ TF_LOCK_TABLE=""
 # ============================================================================
 # Deploy: Terraform (option 4)
 # Auto-install Terraform if not present (works on CloudShell, AL2023, Ubuntu, macOS)
-ensure_terraform() {
-  if command -v terraform &>/dev/null; then
-    ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
-    return 0
-  fi
-
-  echo ""
-  warn "Terraform is not installed."
-  echo ""
-  echo "  Loki can install it automatically for this session."
-  echo "  It will be placed in a local directory — no root/sudo required."
-  echo ""
-
-  if ! confirm "Install Terraform locally now?" "default_yes"; then
-    echo ""
-    echo "  Install it manually:"
-    echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
-    echo ""
-    fail "Terraform is required for Terraform deployments."
-  fi
-
+install_terraform() {
   info "Installing Terraform..."
 
   # Detect OS and architecture
@@ -558,6 +562,16 @@ with zipfile.ZipFile('${tmp_zip}') as z:
   else
     fail "Terraform installed but not found in PATH. Try: export PATH=${install_dir}:\$PATH"
   fi
+}
+
+ensure_terraform() {
+  if command -v terraform &>/dev/null; then
+    ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
+    return 0
+  fi
+
+  # Should have been handled in choose_deploy_method, but install silently as a safety net
+  install_terraform
 }
 # ============================================================================
 deploy_terraform() {
