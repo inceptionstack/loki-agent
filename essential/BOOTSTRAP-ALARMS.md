@@ -215,7 +215,7 @@ Provides a single-pane view of all alarms, service health, compute resources, ne
       "type": "text",
       "x": 0, "y": 0, "width": 24, "height": 1,
       "properties": {
-        "markdown": "# ⚡ Loki@FastStart — Instance Health Dashboard\n"
+        "markdown": "# ⚡ DASHBOARD_TITLE — Instance Health\n"
       }
     },
     {
@@ -418,19 +418,23 @@ Provides a single-pane view of all alarms, service health, compute resources, ne
 ### Deploy Dashboard
 
 ```bash
-# Replace placeholders
+# Required: replace these with your values
 INSTANCE_ID="i-0229529f514ef6fd7"
 ACCOUNT_ID="387904338202"
+DASHBOARD_TITLE="Loki"  # Recommended: use the agent's name (e.g. "Loki", "Loki-Staging", "Loki-Prod")
 
-sed -e "s/INSTANCE_ID/$INSTANCE_ID/g" -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" dashboard.json > /tmp/dashboard-resolved.json
+sed -e "s/INSTANCE_ID/$INSTANCE_ID/g" \
+    -e "s/ACCOUNT_ID/$ACCOUNT_ID/g" \
+    -e "s/DASHBOARD_TITLE/$DASHBOARD_TITLE/g" \
+    dashboard.json > /tmp/dashboard-resolved.json
 
 aws cloudwatch put-dashboard \
-  --dashboard-name "Loki-Instance-Health" \
+  --dashboard-name "${DASHBOARD_TITLE}-Instance-Health" \
   --dashboard-body file:///tmp/dashboard-resolved.json \
   --region us-east-1
 ```
 
-Dashboard URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/Loki-Instance-Health`
+Dashboard URL: `https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards/dashboard/<DASHBOARD_TITLE>-Instance-Health`
 
 ## Deployment Order
 
