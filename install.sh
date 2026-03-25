@@ -491,7 +491,7 @@ ensure_terraform() {
   if ! confirm "Install Terraform locally now?" "default_yes"; then
     echo ""
     echo "  Install it manually:"
-    echo "    https://developer.hashicorp.com/terraform/install"
+    echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
     echo ""
     fail "Terraform is required for Terraform deployments."
   fi
