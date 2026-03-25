@@ -196,7 +196,16 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 ```
 
-The installer verifies your AWS credentials, checks permissions, lets you pick an instance size and deployment method (CloudFormation/SAM/Terraform), deploys everything, and monitors progress until Loki is ready.
+
+> **Works from AWS CloudShell!** You can run the installer directly from [AWS CloudShell](https://console.aws.amazon.com/cloudshell/) — no local setup needed. CloudShell already has AWS credentials configured via your console session. If you pick Terraform as the deployment method, the installer will offer to install it automatically (no root required).
+
+**What the installer does:**
+- Verifies AWS credentials and checks IAM permissions
+- Lets you pick instance size (t4g.medium/large/xlarge)
+- Choose deployment method: CloudFormation Console, CloudFormation CLI, SAM, or **Terraform** (auto-installs if needed)
+- For Terraform: optionally sets up S3 backend with DynamoDB locking
+- Deploys everything and monitors progress until Loki is ready
+- Shows you the SSM connect command when done
 
 ### Option 2: Manual deploy
 
