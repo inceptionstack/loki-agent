@@ -442,7 +442,7 @@ deploy_console() {
   echo "    6. Find the Instance ID in the stack ${BOLD}Outputs${NC} tab"
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
-  echo "    aws ssm start-session --target <instance-id> --region ${DEPLOY_REGION}"
+  echo "    aws ssm start-session --target <instance-id> --document-name Loki-Session --region ${DEPLOY_REGION}"
   echo "    loki tui"
   echo ""
   echo -e "  ${BOLD}Docs:${NC} https://github.com/inceptionstack/loki-agent/wiki"
@@ -699,6 +699,26 @@ terraform_apply() {
 }
 
 # ============================================================================
+# Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
+ensure_ssm_session_document() {
+  if aws ssm describe-document --name "Loki-Session" --region "$DEPLOY_REGION" \&>/dev/null; then
+    ok "SSM session document: Loki-Session"
+    return 0
+  fi
+  info "Creating Loki-Session SSM document (starts sessions as ec2-user)..."
+  aws ssm create-document \
+    --name "Loki-Session" \
+    --document-type "Session" \
+    --content '{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ \&\& exec bash --login"}}}' \
+    --region "$DEPLOY_REGION" >/dev/null 2>\&1 || {
+      warn "Could not create Loki-Session document (may need ssm:CreateDocument permission)"
+      info "Connect with: aws ssm start-session --target \${INSTANCE_ID} --region \${DEPLOY_REGION}"
+      info "Then run: sudo su - ec2-user"
+      return 0
+    }
+  ok "Created Loki-Session SSM document"
+}
+
 # Post-deploy: wait for bootstrap + show results
 # ============================================================================
 wait_for_bootstrap() {
@@ -738,7 +758,7 @@ show_complete() {
   echo -e "  ${BOLD}Region:${NC}    ${DEPLOY_REGION}"
   echo -e "  ${BOLD}Account:${NC}   ${ACCOUNT_ID}"
   echo ""
-  echo -e "  ${BOLD}Connect:${NC}   aws ssm start-session --target ${INSTANCE_ID} --region ${DEPLOY_REGION}"
+  echo -e "  ${BOLD}Connect:${NC}   aws ssm start-session --target ${INSTANCE_ID} --document-name Loki-Session --region ${DEPLOY_REGION}"
   echo -e "  ${BOLD}Then run:${NC}  loki tui"
   echo -e "               (logged in as ec2-user with loki aliases ready)"
   echo ""
@@ -785,6 +805,7 @@ main() {
   esac
 
   wait_for_bootstrap
+  ensure_ssm_session_document
   show_complete
 }
 
