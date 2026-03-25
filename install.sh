@@ -740,6 +740,7 @@ show_complete() {
   echo ""
   echo -e "  ${BOLD}Connect:${NC}   aws ssm start-session --target ${INSTANCE_ID} --region ${DEPLOY_REGION}"
   echo -e "  ${BOLD}Then run:${NC}  loki tui"
+  echo -e "               (logged in as ec2-user with loki aliases ready)"
   echo ""
   echo -e "  ${BOLD}Docs:${NC}      https://github.com/inceptionstack/loki-agent/wiki"
   echo -e "  ${BOLD}Clone dir:${NC} ${CLONE_DIR}"
