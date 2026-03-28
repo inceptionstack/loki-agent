@@ -15,7 +15,9 @@ aws() { command aws --no-cli-pager "$@"; }
 trap 'echo -e "\n\033[0;31m✗ Installer exited unexpectedly at line $LINENO\033[0m" >&2' ERR
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
+DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
+SSM_DOC_NAME="Loki-Session"
 INSTALLER_VERSION="0.3.0"
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-e7e8267}"
@@ -127,6 +129,17 @@ run_or_fail() {
     echo ""; warn "${label} failed:"; cat "$_RUN_LOG"; rm -f "$_RUN_LOG"
     fail "${label} exited with code $rc"
   fi
+}
+
+# Build the SSM connect command for a given instance (or placeholder)
+ssm_connect_cmd() {
+  local target="${1:-\$INSTANCE_ID}"
+  local cmd="aws ssm start-session --target ${target}"
+  if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null 2>&1; then
+    cmd+=" --document-name ${SSM_DOC_NAME}"
+  fi
+  cmd+=" --region ${DEPLOY_REGION}"
+  echo "$cmd"
 }
 
 # ============================================================================
@@ -442,10 +455,10 @@ deploy_console() {
   echo "    6. Find the Instance ID in the stack ${BOLD}Outputs${NC} tab"
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
-  echo "    aws ssm start-session --target <instance-id> --document-name Loki-Session --region ${DEPLOY_REGION}"
+  echo "    $(ssm_connect_cmd '<instance-id>')"
   echo "    loki tui"
   echo ""
-  echo -e "  ${BOLD}Docs:${NC} https://github.com/inceptionstack/loki-agent/wiki"
+  echo -e "  ${BOLD}Docs:${NC} ${DOCS_URL}"
   echo ""
   echo -e "  ${YELLOW}Note:${NC} Template bucket ${bucket} was created in your account."
   echo "  You can delete it after the stack is created:"
@@ -701,22 +714,22 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
-  if aws ssm describe-document --name "Loki-Session" --region "$DEPLOY_REGION" \&>/dev/null; then
-    ok "SSM session document: Loki-Session"
+  if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
+    ok "SSM session document: ${SSM_DOC_NAME}"
     return 0
   fi
-  info "Creating Loki-Session SSM document (starts sessions as ec2-user)..."
+  info "Creating ${SSM_DOC_NAME} SSM document (starts sessions as ec2-user)..."
   aws ssm create-document \
-    --name "Loki-Session" \
+    --name "$SSM_DOC_NAME" \
     --document-type "Session" \
-    --content '{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ \&\& exec bash --login"}}}' \
-    --region "$DEPLOY_REGION" >/dev/null 2>\&1 || {
-      warn "Could not create Loki-Session document (may need ssm:CreateDocument permission)"
+    --content '{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && exec bash --login"}}}' \
+    --region "$DEPLOY_REGION" >/dev/null 2>&1 || {
+      warn "Could not create ${SSM_DOC_NAME} document (may need ssm:CreateDocument permission)"
       info "Connect with: aws ssm start-session --target \${INSTANCE_ID} --region \${DEPLOY_REGION}"
       info "Then run: sudo su - ec2-user"
       return 0
     }
-  ok "Created Loki-Session SSM document"
+  ok "Created ${SSM_DOC_NAME} SSM document"
 }
 
 # Post-deploy: wait for bootstrap + show results
@@ -758,11 +771,11 @@ show_complete() {
   echo -e "  ${BOLD}Region:${NC}    ${DEPLOY_REGION}"
   echo -e "  ${BOLD}Account:${NC}   ${ACCOUNT_ID}"
   echo ""
-  echo -e "  ${BOLD}Connect:${NC}   aws ssm start-session --target ${INSTANCE_ID} --document-name Loki-Session --region ${DEPLOY_REGION}"
+  echo -e "  ${BOLD}Connect:${NC}   $(ssm_connect_cmd "$INSTANCE_ID")"
   echo -e "  ${BOLD}Then run:${NC}  loki tui"
   echo -e "               (logged in as ec2-user with loki aliases ready)"
   echo ""
-  echo -e "  ${BOLD}Docs:${NC}      https://github.com/inceptionstack/loki-agent/wiki"
+  echo -e "  ${BOLD}Docs:${NC}      ${DOCS_URL}"
   echo -e "  ${BOLD}Clone dir:${NC} ${CLONE_DIR}"
   echo ""
 
