@@ -2,6 +2,12 @@
 # Loki Agent — One-Shot Installer
 # Usage: bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
 #   or:  curl -sfL ... -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
+
+# Require bash — printf -v and other bashisms won't work in dash/sh
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "This script requires bash. Run with: bash $0" >&2; exit 1
+fi
+
 set -euo pipefail
 
 # Ensure we run from a safe CWD — avoid interference from local .env, direnv, etc.
@@ -11,16 +17,30 @@ export AWS_PAGER=""
 export PAGER=""
 aws() { command aws --no-cli-pager "$@"; }
 
-# Catch unexpected exits so they're not silent
-trap 'echo -e "\n\033[0;31m✗ Installer exited unexpectedly at line $LINENO\033[0m" >&2' ERR
+# Catch unexpected exits so they're not silent; clean up temp clone dir if set
+trap '
+  echo -e "\n\033[0;31m✗ Installer exited unexpectedly at line $LINENO\033[0m" >&2
+  if [[ -n "${CLONE_DIR:-}" && "${CLONE_DIR}" == /tmp/* && -d "$CLONE_DIR" ]]; then
+    echo -e "\033[1;33m⚠ Temp clone directory left at: ${CLONE_DIR}\033[0m" >&2
+  fi
+  if [[ -n "${TF_WORKDIR:-}" && -d "$TF_WORKDIR" ]]; then
+    echo -e "\033[1;33m⚠ Temp Terraform workdir left at: ${TF_WORKDIR}\033[0m" >&2
+  fi
+' ERR
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 SSM_DOC_NAME="Loki-Session"
 INSTALLER_VERSION="0.3.0"
+
+# Deploy method constants
+DEPLOY_CFN_CONSOLE=1
+DEPLOY_CFN_CLI=2
+DEPLOY_SAM=3
+DEPLOY_TERRAFORM=4
 # Stamped at release; fall back to git info at runtime
-INSTALLER_COMMIT="${INSTALLER_COMMIT:-e7e8267}"
+INSTALLER_COMMIT="${INSTALLER_COMMIT:-dev}"
 INSTALLER_DATE="${INSTALLER_DATE:-2026-03-21 10:30}"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
@@ -43,7 +63,7 @@ prompt() {
   local text="$1" var="$2" default="${3:-}"
   local display="$text"; [[ -n "$default" ]] && display="$text [$default]"
   read -rp "$(echo -e "${BOLD}${display}:${NC} ")" value
-  eval "$var=\"\${value:-$default}\""
+  printf -v "$var" '%s' "${value:-$default}"
 }
 
 confirm() {
@@ -61,17 +81,27 @@ toggle() {
   local hint="[Y/n]"; [[ "$default" == "false" ]] && hint="[y/N]"
   read -rp "$(echo -e "    ${text} ${hint}: ")" answer
   case "$default" in
-    true)  [[ "$answer" =~ ^[Nn]$ ]] && eval "$var=false" || eval "$var=true" ;;
-    false) [[ "$answer" =~ ^[Yy]$ ]] && eval "$var=true"  || eval "$var=false" ;;
+    true)  [[ "$answer" =~ ^[Nn]$ ]] && printf -v "$var" '%s' "false" || printf -v "$var" '%s' "true" ;;
+    false) [[ "$answer" =~ ^[Yy]$ ]] && printf -v "$var" '%s' "true"  || printf -v "$var" '%s' "false" ;;
   esac
 }
 
 require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 
-# Verify AWS credentials with specific error messages
+# Confirm or exit cleanly
+confirm_or_abort() { confirm "$@" || { echo "Aborted."; exit 0; }; }
+
+# Extract a key from JSON on stdin
+json_field() { python3 -c "import json,sys; print(json.load(sys.stdin)[sys.argv[1]])" "$1"; }
+
+# URL-encode a string
+url_encode() { python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"; }
+
+# Verify AWS credentials with specific error messages.
+# On success, sets ACCOUNT_ID and CALLER_ARN from a single STS call.
 verify_aws_credentials() {
   local sts_output sts_rc=0
-  sts_output=$(aws sts get-caller-identity 2>&1) || sts_rc=$?
+  sts_output=$(aws sts get-caller-identity --output json 2>&1) || sts_rc=$?
   if [[ $sts_rc -ne 0 ]]; then
     warn "aws sts get-caller-identity failed:"
     warn "$sts_output"
@@ -81,6 +111,11 @@ verify_aws_credentials() {
       fail "AWS credentials are configured (profile: ${AWS_PROFILE:-default}) but authentication failed. Refresh your session or check your credential process."
     fi
   fi
+  # Extract account and ARN from the single STS response
+  ACCOUNT_ID=$(echo "$sts_output" | json_field Account) \
+    || fail "Could not determine AWS account ID"
+  CALLER_ARN=$(echo "$sts_output" | json_field Arn) \
+    || fail "Could not determine caller ARN"
 }
 
 # ============================================================================
@@ -105,6 +140,9 @@ create_s3_bucket() {
   aws s3api put-bucket-encryption --bucket "$bucket" --region "$region" \
     --server-side-encryption-configuration \
     '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"}}]}'
+  aws s3api put-public-access-block --bucket "$bucket" --region "$region" \
+    --public-access-block-configuration \
+    'BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true'
   ok "Bucket created: ${bucket}"
 }
 
@@ -148,7 +186,7 @@ ssm_connect_cmd() {
 show_banner() {
   # Resolve commit/date from git if running from a clone, otherwise use stamped values
   local commit="$INSTALLER_COMMIT" date="$INSTALLER_DATE"
-  if [[ "$commit" == "e7e8267" ]] && command -v git &>/dev/null; then
+  if [[ "$commit" == "dev" ]] && command -v git &>/dev/null; then
     local script_dir; script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
     if [[ -d "$script_dir/.git" ]]; then
       commit=$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -174,9 +212,10 @@ preflight_checks() {
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
+  require_cmd python3 "Python 3 is required but not found. Install it from your package manager."
+
   verify_aws_credentials
-  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || fail "Could not determine AWS account ID"
-  CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text 2>/dev/null) || fail "Could not determine caller ARN"
+  # ACCOUNT_ID and CALLER_ARN are now set by verify_aws_credentials (single STS call)
   REGION=$(aws configure get region 2>/dev/null || echo "us-east-1")
 
   ok "Identity: ${CALLER_ARN}"
@@ -187,7 +226,7 @@ preflight_checks() {
   warn "Loki will get AdministratorAccess on this ENTIRE account."
   warn "Use a dedicated sandbox account — never deploy in production."
   echo ""
-  confirm "Deploy to account ${ACCOUNT_ID} in ${REGION}?" || { echo "Aborted."; exit 0; }
+  confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?"
 
   check_permissions
   check_existing_deployments
@@ -202,7 +241,7 @@ check_permissions() {
     --query 'EvaluationResults[?EvalDecision!=`allowed`].EvalActionName' \
     --output text 2>/dev/null | grep -q "."; then
     warn "Some permissions may be missing."
-    confirm "Continue anyway?" || { echo "Aborted."; exit 0; }
+    confirm_or_abort "Continue anyway?"
   else
     ok "Permissions verified"
   fi
@@ -227,7 +266,7 @@ check_existing_deployments() {
     done <<< "$vpcs"
     echo ""
     warn "Deploying another Loki will create a separate VPC and resources."
-    confirm "Continue with a new deployment?" || { echo "Aborted."; exit 0; }
+    confirm_or_abort "Continue with a new deployment?"
   else
     ok "No existing Loki deployments found"
   fi
@@ -236,6 +275,13 @@ check_existing_deployments() {
 # ============================================================================
 # Phase: Collect configuration
 # ============================================================================
+# Helper: get a human-readable terraform version string
+terraform_version_string() {
+  terraform version -json 2>/dev/null \
+    | json_field terraform_version 2>/dev/null \
+    || terraform version | head -1
+}
+
 choose_deploy_method() {
   echo ""
   echo "  Deployment methods:"
@@ -245,11 +291,12 @@ choose_deploy_method() {
   echo "    3) SAM                    -- for SAM CLI users"
   echo "    4) Terraform              -- for Terraform shops (auto-installs if needed)"
   echo ""
-  prompt "Deployment method" DEPLOY_METHOD "1"
+  prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_CFN_CONSOLE"
+  DEPLOY_METHOD=$(echo "$DEPLOY_METHOD" | tr -d '[:space:]')
 
   # If Terraform selected and not installed, handle it now — before config questions.
   # This avoids the user filling out all config only to be blocked at deploy time.
-  if [[ "$DEPLOY_METHOD" == "4" ]]; then
+  if [[ "$DEPLOY_METHOD" == "$DEPLOY_TERRAFORM" ]]; then
     if ! command -v terraform &>/dev/null; then
       echo ""
       warn "Terraform is not installed on this system."
@@ -267,7 +314,7 @@ choose_deploy_method() {
         fail "Terraform is required for the Terraform deployment method."
       fi
     else
-      ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
+      ok "Terraform: $(terraform_version_string)"
     fi
   fi
 }
@@ -330,6 +377,65 @@ collect_security_config() {
   if [[ -n "$enabled" ]]; then ok "Enabled:${enabled}"; else warn "All security services disabled"; fi
 }
 
+# ============================================================================
+# Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
+# ============================================================================
+# ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
+PARAM_CFN_NAMES=(EnvironmentName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder)
+PARAM_TF_NAMES=(environment_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder)
+PARAM_VALUES=()  # populated by build_deploy_params()
+
+# Populate PARAM_VALUES from user config (call after collect_config)
+build_deploy_params() {
+  PARAM_VALUES=(
+    "$ENV_NAME"
+    "$INSTANCE_TYPE"
+    "bedrock"
+    "$DEPLOY_REGION"
+    "$LOKI_WATERMARK"
+    "$SECURITY_HUB"
+    "$GUARDDUTY"
+    "$INSPECTOR"
+    "$ACCESS_ANALYZER"
+    "$CONFIG_RECORDER"
+  )
+  # Validate parallel arrays are in sync
+  [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \
+    || fail "BUG: PARAM_CFN_NAMES has ${#PARAM_CFN_NAMES[@]} entries but PARAM_VALUES has ${#PARAM_VALUES[@]}"
+  [[ ${#PARAM_TF_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \
+    || fail "BUG: PARAM_TF_NAMES has ${#PARAM_TF_NAMES[@]} entries but PARAM_VALUES has ${#PARAM_VALUES[@]}"
+}
+
+# Format params as CFN Console URL query string (param_Key=Value), URL-encoded
+format_console_params() {
+  local params=""
+  for i in "${!PARAM_CFN_NAMES[@]}"; do
+    local encoded_val
+    encoded_val=$(url_encode "${PARAM_VALUES[$i]}")
+    params+="&param_${PARAM_CFN_NAMES[$i]}=${encoded_val}"
+  done
+  echo "$params"
+}
+
+# Format params as CFN CLI --parameters (ParameterKey=X,ParameterValue=Y)
+format_cfn_cli_params() {
+  local params=""
+  for i in "${!PARAM_CFN_NAMES[@]}"; do
+    [[ -n "$params" ]] && params+=" "
+    params+="ParameterKey=${PARAM_CFN_NAMES[$i]},ParameterValue=${PARAM_VALUES[$i]}"
+  done
+  echo "$params"
+}
+
+# Format params as Terraform -var arguments
+format_tf_vars() {
+  local vars=()
+  for i in "${!PARAM_TF_NAMES[@]}"; do
+    vars+=(-var="${PARAM_TF_NAMES[$i]}=${PARAM_VALUES[$i]}")
+  done
+  printf '%s\n' "${vars[@]}"
+}
+
 show_summary() {
   echo ""
   echo -e "  ${BOLD}╭─────────────── Deploy Summary ───────────────╮${NC}"
@@ -342,7 +448,7 @@ show_summary() {
   echo -e "  ${BOLD}│${NC}  Config:       ${CONFIG_RECORDER}"
   echo -e "  ${BOLD}╰───────────────────────────────────────────────╯${NC}"
   echo ""
-  confirm "Proceed with deployment?" "default_yes" || { echo "Aborted."; exit 0; }
+  confirm_or_abort "Proceed with deployment?" "default_yes"
 }
 
 # ============================================================================
@@ -422,17 +528,17 @@ deploy_console() {
   rm -f "$tmp"
   ok "Template uploaded"
 
-  local s3_url="https://${bucket}.s3.amazonaws.com/loki-agent/template.yaml"
-  local encoded; encoded=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${s3_url}', safe=''))" 2>/dev/null \
-    || echo "$s3_url")
+  # Generate a pre-signed URL (valid 1 hour) since the bucket blocks public access
+  local s3_url
+  s3_url=$(aws s3 presign "s3://${bucket}/loki-agent/template.yaml" \
+    --expires-in 3600 --region "$DEPLOY_REGION") \
+    || fail "Could not generate pre-signed URL for template"
+  local encoded
+  encoded=$(url_encode "$s3_url")
 
   local url="https://${DEPLOY_REGION}.console.aws.amazon.com/cloudformation/home?region=${DEPLOY_REGION}#/stacks/create/review"
   url+="?templateURL=${encoded}&stackName=${ENV_NAME}-stack"
-  url+="&param_EnvironmentName=${ENV_NAME}&param_InstanceType=${INSTANCE_TYPE}"
-  url+="&param_BedrockRegion=${DEPLOY_REGION}&param_LokiWatermark=${LOKI_WATERMARK}"
-  url+="&param_EnableSecurityHub=${SECURITY_HUB}&param_EnableGuardDuty=${GUARDDUTY}"
-  url+="&param_EnableInspector=${INSPECTOR}&param_EnableAccessAnalyzer=${ACCESS_ANALYZER}"
-  url+="&param_EnableConfigRecorder=${CONFIG_RECORDER}"
+  url+="$(format_console_params)"
 
   echo ""
   echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -469,19 +575,6 @@ deploy_console() {
 # ============================================================================
 # Deploy: CloudFormation / SAM via CLI (options 2-3)
 # ============================================================================
-cfn_parameters() {
-  echo "ParameterKey=EnvironmentName,ParameterValue=${ENV_NAME}" \
-       "ParameterKey=InstanceType,ParameterValue=${INSTANCE_TYPE}" \
-       "ParameterKey=ModelMode,ParameterValue=bedrock" \
-       "ParameterKey=BedrockRegion,ParameterValue=${DEPLOY_REGION}" \
-       "ParameterKey=EnableSecurityHub,ParameterValue=${SECURITY_HUB}" \
-       "ParameterKey=EnableGuardDuty,ParameterValue=${GUARDDUTY}" \
-       "ParameterKey=EnableInspector,ParameterValue=${INSPECTOR}" \
-       "ParameterKey=EnableAccessAnalyzer,ParameterValue=${ACCESS_ANALYZER}" \
-       "ParameterKey=EnableConfigRecorder,ParameterValue=${CONFIG_RECORDER}" \
-       "ParameterKey=LokiWatermark,ParameterValue=${LOKI_WATERMARK}"
-}
-
 deploy_cfn_stack() {
   local template="$1" capabilities="$2"
   STACK_NAME="${ENV_NAME}-stack"
@@ -492,7 +585,7 @@ deploy_cfn_stack() {
     --template-body "file://${template}" \
     --region "$DEPLOY_REGION" \
     --capabilities $capabilities \
-    --parameters $(cfn_parameters) \
+    --parameters $(format_cfn_cli_params) \
     --output text --query 'StackId'
 
   info "Stack creating... this takes ~8-10 minutes"
@@ -505,15 +598,27 @@ deploy_cfn_stack() {
 }
 
 wait_for_cfn_stack() {
+  local iterations=0 max_iterations=120  # 120 × 15s = 30 minutes
   while true; do
-    local status
+    local status rc=0
     status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
-      --query 'Stacks[0].StackStatus' --output text 2>&1)
+      --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+      echo ""; fail "Stack no longer exists or is inaccessible: $status"
+    fi
     echo -ne "\r  Status: ${status}          "
     case "$status" in
       CREATE_COMPLETE)     echo ""; ok "Stack created!"; break ;;
       *FAILED*|*ROLLBACK*) echo ""; fail "Stack failed: $status" ;;
-      *)                   sleep 15 ;;
+      *)
+        iterations=$((iterations + 1))
+        if [[ $iterations -ge $max_iterations ]]; then
+          echo ""
+          warn "Timed out after 30 minutes waiting for stack. Check the CloudFormation console for status."
+          break
+        fi
+        sleep 15
+        ;;
     esac
   done
 }
@@ -522,6 +627,7 @@ wait_for_cfn_stack() {
 TF_STATE_BUCKET=""
 TF_STATE_KEY=""
 TF_LOCK_TABLE=""
+TF_WORKDIR=""  # Set if Terraform work is moved to /tmp (CloudShell low-disk)
 
 # ============================================================================
 # Deploy: Terraform (option 4)
@@ -541,7 +647,7 @@ install_terraform() {
   # Get latest stable version from HashiCorp checkpoint
   local version
   version=$(curl -sf https://checkpoint-api.hashicorp.com/v1/check/terraform 2>/dev/null \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["current_version"])' 2>/dev/null \
+    | json_field current_version 2>/dev/null \
     || echo "1.12.1")  # Fallback to known good version
 
   local zip_url="https://releases.hashicorp.com/terraform/${version}/terraform_${version}_${os}_${arch}.zip"
@@ -558,9 +664,9 @@ install_terraform() {
   else
     python3 -c "
 import zipfile, sys
-with zipfile.ZipFile('${tmp_zip}') as z:
-    z.extractall('${install_dir}')
-"
+with zipfile.ZipFile(sys.argv[1]) as z:
+    z.extractall(sys.argv[2])
+" "$tmp_zip" "$install_dir"
   fi
 
   chmod +x "${install_dir}/terraform"
@@ -579,7 +685,7 @@ with zipfile.ZipFile('${tmp_zip}') as z:
 
 ensure_terraform() {
   if command -v terraform &>/dev/null; then
-    ok "Terraform: $(terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null || terraform version | head -1)"
+    ok "Terraform: $(terraform_version_string)"
     return 0
   fi
 
@@ -662,15 +768,15 @@ terraform_init() {
 
   # Check disk space before downloading providers
   local avail_mb
-  avail_mb=$(df -m "$(pwd)" --output=avail 2>/dev/null | tail -1 | tr -d ' ' || echo "9999")
+  avail_mb=$(df -Pm "$(pwd)" 2>/dev/null | awk 'NR==2{print $4}' || echo "9999")
   if [[ "$avail_mb" -lt 600 ]]; then
     warn "Low disk space (${avail_mb}MB available) — Terraform providers need ~500MB"
     if [[ "$IS_CLOUDSHELL" == "true" ]]; then
       info "CloudShell detected — moving Terraform workdir to /tmp"
-      local tf_tmp="/tmp/loki-terraform-$$"
-      mkdir -p "$tf_tmp"
-      cp -a . "$tf_tmp/"
-      cd "$tf_tmp"
+      TF_WORKDIR="/tmp/loki-terraform-$$"
+      mkdir -p "$TF_WORKDIR"
+      cp -a . "$TF_WORKDIR/"
+      cd "$TF_WORKDIR"
       info "Working from: $(pwd)"
     else
       warn "You may run out of disk space. Consider freeing space or using /tmp."
@@ -689,17 +795,12 @@ terraform_init() {
 
 terraform_apply() {
   info "Deploying (~2-3 minutes)..."
-  run_or_fail "Terraform apply" terraform apply -auto-approve \
-    -var="environment_name=${ENV_NAME}" \
-    -var="instance_type=${INSTANCE_TYPE}" \
-    -var="model_mode=bedrock" \
-    -var="bedrock_region=${DEPLOY_REGION}" \
-    -var="enable_security_hub=${SECURITY_HUB}" \
-    -var="enable_guardduty=${GUARDDUTY}" \
-    -var="enable_inspector=${INSPECTOR}" \
-    -var="enable_access_analyzer=${ACCESS_ANALYZER}" \
-    -var="enable_config_recorder=${CONFIG_RECORDER}" \
-    -var="loki_watermark=${LOKI_WATERMARK}"
+  # Build -var arguments from the single parameter source-of-truth
+  local tf_vars=()
+  while IFS= read -r v; do
+    tf_vars+=("$v")
+  done < <(format_tf_vars)
+  run_or_fail "Terraform apply" terraform apply -auto-approve "${tf_vars[@]}"
 
   grep -E 'Creating\.\.\.|Creation complete|Apply complete|Outputs:|= ' "$_RUN_LOG" | while IFS= read -r line; do
     if   [[ "$line" == *": Creating..."* ]];       then echo -e "  ${BLUE}+${NC} ${line##*] }"
@@ -779,11 +880,28 @@ show_complete() {
   echo -e "  ${BOLD}Clone dir:${NC} ${CLONE_DIR}"
   echo ""
 
-  if confirm "Remove cloned repo directory (${CLONE_DIR})?" ; then
-    rm -rf "$CLONE_DIR" 2>/dev/null
-    ok "Cleaned up ${CLONE_DIR}"
+  if [[ -n "${CLONE_DIR:-}" ]] && confirm "Remove cloned repo directory (${CLONE_DIR})?" ; then
+    # Sanity check: only delete paths that look like our clone dirs
+    if [[ "$CLONE_DIR" == /tmp/* || "$CLONE_DIR" == "$HOME"/.* || "$CLONE_DIR" == *"/loki-agent" ]]; then
+      rm -rf "$CLONE_DIR" 2>/dev/null
+      ok "Cleaned up ${CLONE_DIR}"
+    else
+      warn "Unexpected clone path — skipping automatic removal: ${CLONE_DIR}"
+    fi
   else
     info "Repo kept at ${CLONE_DIR}"
+  fi
+  if [[ -n "${TF_WORKDIR:-}" && -d "$TF_WORKDIR" ]]; then
+    if confirm "Remove temp Terraform workdir (${TF_WORKDIR})?" ; then
+      if [[ "$TF_WORKDIR" == /tmp/* ]]; then
+        rm -rf "$TF_WORKDIR" 2>/dev/null
+        ok "Cleaned up ${TF_WORKDIR}"
+      else
+        warn "Unexpected workdir path — skipping automatic removal: ${TF_WORKDIR}"
+      fi
+    else
+      info "Terraform workdir kept at ${TF_WORKDIR}"
+    fi
   fi
 }
 
@@ -795,10 +913,11 @@ main() {
   preflight_checks
   choose_deploy_method
   collect_config
+  build_deploy_params  # Populate parameter arrays from user config
   show_summary
 
   # Console deploy exits early (no clone, no bootstrap wait)
-  if [[ "$DEPLOY_METHOD" == "1" ]]; then
+  if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
     deploy_console
     exit 0
   fi
@@ -808,11 +927,11 @@ main() {
   echo ""
 
   case "$DEPLOY_METHOD" in
-    2) info "Deploying with CloudFormation..."
+    "$DEPLOY_CFN_CLI") info "Deploying with CloudFormation..."
        deploy_cfn_stack "deploy/cloudformation/template.yaml" "CAPABILITY_NAMED_IAM" ;;
-    3) info "Deploying with SAM..."
+    "$DEPLOY_SAM") info "Deploying with SAM..."
        deploy_cfn_stack "deploy/sam/template.yaml" "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND" ;;
-    4) info "Deploying with Terraform..."
+    "$DEPLOY_TERRAFORM") info "Deploying with Terraform..."
        deploy_terraform ;;
     *) fail "Invalid choice: $DEPLOY_METHOD" ;;
   esac
