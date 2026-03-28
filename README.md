@@ -1,4 +1,4 @@
-# Loki: A Stateful Prototyping/Dev/Research/Ops Agent in your AWS account
+# Loki: A Stateful Prototyping/Dev/Research/Ops Agent based on openclaw in your AWS account
 
 [![Loki Agent Demo](https://img.youtube.com/vi/dJSk8DYlHvI/maxresdefault.jpg)](https://www.youtube.com/watch?v=dJSk8DYlHvI)
 
