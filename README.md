@@ -8,7 +8,12 @@
 
 > **TL;DR — one command to deploy:**
 > ```
-> bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+> ```
+> Or if you prefer to inspect first:
+> ```
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh
+> bash /tmp/loki-install.sh
 > ```
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 >
