@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Loki Agent — One-Shot Installer
-# Usage: bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
-#   or:  curl -sfL ... -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
+# Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then

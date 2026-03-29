@@ -6,15 +6,18 @@
 
 📝 [Read the blog post: "I Gave My Agent Its Own AWS Account"](https://robotpaper.ai/i-gave-my-agent-its-own-aws-account-and-now-it-codes-deploys-and-debugs-full-stack-apps/)
 
-> **TL;DR — one command to deploy:**
+> **TL;DR — deploy Loki:**
+>
+> **macOS / Linux / WSL (works in bash and zsh):**
+> ```sh
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 > ```
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+>
+> **AWS CloudShell:**
+> ```sh
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 > ```
-> Or if you prefer to inspect first:
-> ```
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh
-> bash /tmp/loki-install.sh
-> ```
+>
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.
 >
 > ⚠️ **We highly recommend deploying Loki in a brand-new, dedicated AWS account.** Loki has admin-level access and LLMs can make mistakes — a clean account limits the blast radius. Start with prototyping work as you learn and get acquainted with its capabilities. Like any powerful tool, it carries risks; isolating it in its own account is the simplest way to manage them.
@@ -22,8 +25,8 @@
 > ⚠️ **This is an experiment, not a security product.** Loki can enable AWS security services and flag findings, but it does not replace professional security review, compliance auditing, or threat modeling. An LLM with admin access can cause damage — treat it accordingly.
 >
 > **To remove a Loki deployment:**
-> ```
-> bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh)
+> ```sh
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh -o /tmp/loki-uninstall.sh && bash /tmp/loki-uninstall.sh
 > ```
 >
 > After your first chat, run the [Bootstrap Scripts](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide) to set up security, skills, memory search, and more.
@@ -202,8 +205,10 @@ Loki is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-sour
 
 ### Option 1: One-command install (recommended)
 
-```bash
-bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh)
+**macOS / Linux / WSL** (works in bash, zsh, and AWS CloudShell):
+
+```sh
+curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 ```
 
 
@@ -245,8 +250,8 @@ Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack
 
 Remove one or all Loki deployments from your account:
 
-```bash
-bash <(curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh)
+```sh
+curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh -o /tmp/loki-uninstall.sh && bash /tmp/loki-uninstall.sh
 ```
 
 Finds deployments by tag, lets you pick which to remove, deletes CloudFormation stacks or cleans up resources manually (Terraform deploys), and optionally removes state buckets/lock tables.
