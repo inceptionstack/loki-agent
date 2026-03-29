@@ -8,6 +8,25 @@
 
 ---
 
+## First: Ask the User
+
+Before proceeding, ask the user:
+
+> **Do you want to create a new Telegram group, or join an existing one?**
+>
+> - **New group** — you're the first Loki instance, no group exists yet
+> - **Join existing** — a group already exists with other Loki bots, and you have the group chat ID
+
+If **joining an existing group**, the user needs to provide:
+1. The **group chat ID** (negative number, e.g. `-5085452290`)
+2. The **owner's Telegram user ID** (numeric, e.g. `1775159795`)
+
+Then skip to [Part 1](#part-1-botfather--disable-group-privacy-mode) (still required) and [Part 3](#part-3-configure-openclaw) (use the provided chat ID). Skip Part 2 entirely.
+
+If **creating a new group**, follow all parts in order.
+
+---
+
 ## Architecture
 
 ```
@@ -29,6 +48,8 @@ Owner sends message in private Telegram group
 
 ## Part 1: BotFather — Disable Group Privacy Mode
 
+> **Required for both new and existing groups.**
+
 Telegram bots have **Privacy Mode** enabled by default. This means they only see:
 - Messages starting with `/` (commands)
 - Messages that @mention the bot
@@ -43,13 +64,17 @@ For the fleet group to work (every message triggers every bot, no @mention neede
 3. Select your bot
 4. Choose **Disable**
 
+**Important:** If the bot was already added to the group before disabling privacy mode, the owner must **remove and re-add the bot** to the group. Telegram requires this for the change to take effect.
+
 **Security note:** With privacy mode off, the bot receives all messages in any group it's added to. This is safe because OpenClaw's `groupPolicy: "allowlist"` ensures only messages from approved groups AND approved senders are processed. Messages from non-allowlisted groups are silently dropped at the gateway level — they never reach the agent.
 
 **Optional hardening:** After setup, run `/setjoingroups` → Disable in BotFather. This prevents anyone from adding the bot to unauthorized groups. Re-enable temporarily when joining new groups.
 
 ---
 
-## Part 2: Create the Private Telegram Group
+## Part 2: Create the Private Telegram Group (New Group Only)
+
+> **Skip this if joining an existing group.** The owner should provide the group chat ID and add your bot to the group instead.
 
 The owner (human) does this manually in Telegram:
 
@@ -76,7 +101,7 @@ Look for a line like:
 {"chatId":-1001234567890,"reason":"no-mention"} "skipping group message"
 ```
 
-The negative number (e.g. `-1001234567890`) is your **group chat ID**.
+The negative number (e.g. `-1001234567890`) is your **group chat ID**. Save it — you'll need it for Part 3, and for onboarding future Loki instances.
 
 **If no log appears:** The bot may not have received the message yet. Verify:
 - Privacy mode is disabled: `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"` → check `can_read_all_group_messages: true`
@@ -86,7 +111,9 @@ The negative number (e.g. `-1001234567890`) is your **group chat ID**.
 
 ## Part 3: Configure OpenClaw
 
-Replace `GROUP_CHAT_ID` with the negative number from the logs, and `OWNER_USER_ID` with the owner's Telegram numeric user ID (already in `channels.telegram.allowFrom`).
+> **Required for both new and existing groups.**
+
+Replace `GROUP_CHAT_ID` with the group chat ID (negative number), and `OWNER_USER_ID` with the owner's Telegram numeric user ID (already in `channels.telegram.allowFrom`).
 
 ```bash
 openclaw config patch <<'EOF'
@@ -132,36 +159,8 @@ If the bot doesn't respond:
 
 ---
 
-## Part 5: Adding More Loki Instances
+## Why This Is Safe With Multiple Bots
 
-For each additional Loki instance on a different AWS account:
-
-1. **BotFather:** `/setprivacy` → select that instance's bot → **Disable**
-2. **Telegram:** Add the bot to the same group
-3. **Remove + re-add** the bot if privacy mode was changed after it was already in a group
-4. **Configure** that instance's OpenClaw with the same group chat ID:
-
-```bash
-openclaw config patch <<'EOF'
-{
-  "channels": {
-    "telegram": {
-      "groupPolicy": "allowlist",
-      "groupAllowFrom": ["OWNER_USER_ID"],
-      "groups": {
-        "GROUP_CHAT_ID": {
-          "enabled": true,
-          "requireMention": false,
-          "allowFrom": ["OWNER_USER_ID"]
-        }
-      }
-    }
-  }
-}
-EOF
-```
-
-**Why this is safe with multiple bots:**
 - Each bot only processes messages from `allowFrom` user IDs (the owner)
 - Bot-to-bot messages are ignored because bot user IDs are not in `allowFrom`
 - No infinite reply loops possible
