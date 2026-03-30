@@ -225,7 +225,7 @@ preflight_checks() {
   warn "Loki will get AdministratorAccess on this ENTIRE account."
   warn "Use a dedicated sandbox account — never deploy in production."
   echo ""
-  confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?"
+  confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
 
   check_permissions
   check_existing_deployments
