@@ -63,9 +63,6 @@ Exposes the OpenClaw control dashboard via CloudFront + Cognito authentication. 
 ### BOOTSTRAP-PIPELINE-NOTIFICATIONS.md — CI/CD Alerts
 Wires up CodePipeline and GitHub Actions notifications to Telegram and/or OpenClaw. Get build started/passed/failed alerts.
 
-### BOOTSTRAP-OUTLINE-NOTES.md — Wiki Setup
-Deploys a self-hosted Outline wiki on ECS Fargate with Aurora PostgreSQL. Great for team knowledge sharing and documentation.
-
 ### BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md — AI Code Review
 Adds a GitHub Action that runs Claude Code for automatic code review on PRs and commits.
 
