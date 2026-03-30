@@ -10,7 +10,7 @@
 >
 > **macOS / Linux / WSL / CloudShell:**
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 > ```
 >
 > Requires: AWS CLI configured, admin access on a dedicated AWS account. The script walks you through everything.

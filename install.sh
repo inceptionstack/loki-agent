@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Loki Agent — One-Shot Installer
-# Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
-#   or:  curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
+# Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -9,19 +8,6 @@ if [ -z "${BASH_VERSION:-}" ]; then
 fi
 
 set -euo pipefail
-
-# Re-attach stdin to terminal when piped (e.g. curl | bash)
-# Without this, interactive prompts get EOF and the script aborts.
-if [[ ! -t 0 ]]; then
-  if [[ -e /dev/tty ]]; then
-    exec < /dev/tty
-  else
-    echo "Error: No terminal available for interactive prompts." >&2
-    echo "Download first, then run:" >&2
-    echo "  curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh" >&2
-    exit 1
-  fi
-fi
 
 # Ensure we run from a safe CWD — avoid interference from local .env, direnv, etc.
 cd "$HOME" 2>/dev/null || cd /tmp
