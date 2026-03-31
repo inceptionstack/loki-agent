@@ -24,7 +24,7 @@ jobs:
       tests: ${{ steps.find.outputs.tests }}
       has_tests: ${{ steps.find.outputs.has_tests }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Discover test scripts
         id: find
@@ -49,7 +49,7 @@ jobs:
       matrix:
         test: ${{ fromJson(needs.discover.outputs.tests) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Run ${{ matrix.test }}
         run: |

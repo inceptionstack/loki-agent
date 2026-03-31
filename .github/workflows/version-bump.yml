@@ -15,7 +15,7 @@ jobs:
     # Skip if this commit was made by the bot (prevent infinite loop)
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
