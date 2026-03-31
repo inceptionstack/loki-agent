@@ -385,19 +385,34 @@ collect_config() {
   local -a pack_descs=()
   local -a pack_experimental=()
 
-  # Parse agent packs from registry.yaml (requires python3, already validated)
+  # Parse agent packs from registry.yaml (stdlib only — no PyYAML dependency)
   while IFS='|' read -r pname pdesc pexp; do
     pack_names+=("$pname")
     pack_descs+=("$pdesc")
     pack_experimental+=("$pexp")
   done < <(python3 -c "
-import yaml, sys
-with open('$registry') as f:
-    reg = yaml.safe_load(f)
-for name, cfg in reg.get('packs', {}).items():
+import re, sys
+text = open('$registry').read()
+# Simple state-machine parser for the flat registry YAML structure
+current_pack = None
+packs = {}
+for line in text.split('\n'):
+    # Top-level pack name (2-space indent under packs:)
+    m = re.match(r'^  (\w[\w-]*):\s*$', line)
+    if m:
+        current_pack = m.group(1)
+        packs[current_pack] = {}
+        continue
+    if current_pack:
+        # Key-value pairs (4-space indent)
+        kv = re.match(r'^    (\w[\w-]*):\s+(.+)$', line)
+        if kv:
+            packs[current_pack][kv.group(1)] = kv.group(2).strip().strip('\"').strip(\"'\")
+for name, cfg in packs.items():
     if cfg.get('type') == 'agent':
-        exp = 'true' if cfg.get('experimental', False) else 'false'
-        print(f\"{name}|{cfg.get('description', name)}|{exp}\")
+        desc = cfg.get('description', name)
+        exp = 'true' if cfg.get('experimental', '').lower() == 'true' else 'false'
+        print(f'{name}|{desc}|{exp}')
 " 2>/dev/null || echo "openclaw|OpenClaw — stateful AI agent with persistent gateway|false")
 
   echo "  Agent to deploy:"
@@ -440,10 +455,19 @@ for name, cfg in reg.get('packs', {}).items():
   local default_size_choice="3"  # default → t4g.xlarge
   local pack_instance_type
   pack_instance_type=$(python3 -c "
-import yaml
-with open('$registry') as f:
-    reg = yaml.safe_load(f)
-print(reg.get('packs', {}).get('$PACK_NAME', {}).get('instance_type', 't4g.xlarge'))
+import re
+text = open('$registry').read()
+current_pack = None
+for line in text.split('\n'):
+    m = re.match(r'^  (\w[\w-]*):\s*$', line)
+    if m:
+        current_pack = m.group(1)
+        continue
+    if current_pack == '$PACK_NAME':
+        kv = re.match(r'^    instance_type:\s+(.+)$', line)
+        if kv:
+            print(kv.group(1).strip().strip('\"'))
+            break
 " 2>/dev/null || echo "t4g.xlarge")
   case "$pack_instance_type" in
     t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
