@@ -380,7 +380,14 @@ collect_config() {
   echo ""
 
   # ---- Pack selection (dynamically discovered from registry.yaml) -----------
-  local registry="${CLONE_DIR}/packs/registry.yaml"
+  # CLONE_DIR may not be set yet (repo is cloned after config collection).
+  # If the local file isn't available, fetch from GitHub.
+  local registry="${CLONE_DIR:-}/packs/registry.yaml"
+  if [[ ! -f "$registry" ]]; then
+    local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.yaml"
+    registry="/tmp/loki-registry-$$.yaml"
+    curl -sfL "$registry_url" -o "$registry" 2>/dev/null || registry=""
+  fi
   local -a pack_names=()
   local -a pack_descs=()
   local -a pack_experimental=()
@@ -390,7 +397,7 @@ collect_config() {
     pack_names+=("$pname")
     pack_descs+=("$pdesc")
     pack_experimental+=("$pexp")
-  done < <(python3 -c "
+  done < <([ -n "$registry" ] && python3 -c "
 import re, sys
 text = open('$registry').read()
 # Simple state-machine parser for the flat registry YAML structure
@@ -457,7 +464,7 @@ for name, cfg in packs.items():
   # Adjust instance size default based on pack registry
   local default_size_choice="3"  # default → t4g.xlarge
   local pack_instance_type
-  pack_instance_type=$(python3 -c "
+  pack_instance_type=$([ -n "$registry" ] && python3 -c "
 import re
 text = open('$registry').read()
 current_pack = None
