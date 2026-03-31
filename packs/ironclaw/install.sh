@@ -80,12 +80,7 @@ log "region=${REGION} model=${MODEL} bedrockify-port=${BEDROCKIFY_PORT}"
 step "Checking prerequisites"
 require_cmd curl tar
 
-# Verify bedrockify is running
-HEALTH="$(curl -sf "http://127.0.0.1:${BEDROCKIFY_PORT}/" 2>&1)" || true
-if ! printf '%s' "${HEALTH}" | grep -q '"status":"ok"'; then
-  fail "bedrockify is not running on port ${BEDROCKIFY_PORT}. Install bedrockify pack first."
-fi
-ok "bedrockify is healthy on port ${BEDROCKIFY_PORT}"
+check_bedrockify_health "${BEDROCKIFY_PORT}"
 
 # ── Install IronClaw ──────────────────────────────────────────────────────────
 step "Installing IronClaw"
