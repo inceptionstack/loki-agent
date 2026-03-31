@@ -327,14 +327,8 @@ collect_config() {
   ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
   prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
-  echo ""
-  echo "  Instance sizes:"
-  echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"
-  echo "    2) t4g.large   -- 2 vCPU, 8GB  (~\$50/mo)  regular use"
-  echo "    3) t4g.xlarge  -- 4 vCPU, 16GB (~\$100/mo) recommended"
-  echo ""
-
   # ---- Pack selection -------------------------------------------------------
+  echo ""
   echo "  Agent to deploy:"
   echo "    1) OpenClaw  -- stateful AI agent with 24/7 gateway (recommended)"
   echo "    2) Hermes    -- NousResearch CLI agent (lighter)"
@@ -353,6 +347,11 @@ collect_config() {
     default_size_choice="1"      # hermes → t4g.medium
     info "Hermes is lightweight — defaulting to t4g.medium"
   fi
+  echo ""
+  echo "  Instance sizes:"
+  echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"
+  echo "    2) t4g.large   -- 2 vCPU, 8GB  (~\$50/mo)  regular use"
+  echo "    3) t4g.xlarge  -- 4 vCPU, 16GB (~\$100/mo) recommended"
   echo ""
   local choice
   prompt "Instance size" choice "$default_size_choice"
