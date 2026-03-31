@@ -428,6 +428,9 @@ for name, cfg in packs.items():
   echo ""
   local pack_choice
   prompt "Deploy which agent" pack_choice "1"
+  # Sanitize: strip non-digits, default to 1
+  pack_choice="${pack_choice//[^0-9]/}"
+  [[ -z "$pack_choice" ]] && pack_choice=1
   local idx=$(( pack_choice - 1 ))
   if [[ $idx -lt 0 || $idx -ge ${#pack_names[@]} ]]; then
     idx=0  # default to first (openclaw)
