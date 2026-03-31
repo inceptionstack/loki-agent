@@ -1,17 +1,53 @@
-## Playwright via MCPorter
+## Playwright — Browser Automation
 
-> **Applies to:** OpenClaw only
+> **Applies to:** All agents (with agent-specific sections below)
 
-You have Playwright available as an MCP server via mcporter. Confirm it's working by running mcporter list — you should see playwright (22 tools, healthy). If it's missing, add it to ~/.openclaw/workspace/config/mcporter.json under mcpServers:
+Playwright provides headless browser automation for web scraping, testing, and interaction. The Chromium binary is pre-installed on the instance.
 
-"playwright": {
- "command": "npx @playwright/mcp --headless --executable-path /home/ec2-user/.cache/ms-playwright/chromium-1208/chrome-linux/chrome"
-}
+### Verify Chromium is installed
 
-The Chromium binary is pre-installed at that path. To use it, call tools via mcporter call playwright.<tool_name> — e.g. mcporter call playwright.browser_navigate url="https://example.com", then playwright.browser_snapshot to capture the page, playwright.browser_click / playwright.browser_type to interact, and playwright.browser_screenshot to capture visuals. Always run headless (no display on this server). No separate install needed — npx @playwright/mcp pulls the MCP server on first use.
+```bash
+ls /home/ec2-user/.cache/ms-playwright/chromium-*/chrome-linux/chrome
+```
+
+If missing, install it:
+
+```bash
+npx playwright install chromium
+```
 
 ---
 
+## OpenClaw-Specific Configuration
+
+OpenClaw uses Playwright via MCPorter as an MCP server. Confirm it's working:
+
+```bash
+mcporter list
+```
+
+You should see `playwright` (22 tools, healthy). If it's missing, add it to `~/.openclaw/workspace/config/mcporter.json` under `mcpServers`:
+
+```json
+"playwright": {
+  "command": "npx @playwright/mcp --headless --executable-path /home/ec2-user/.cache/ms-playwright/chromium-1208/chrome-linux/chrome"
+}
+```
+
+Use it via mcporter: `mcporter call playwright.browser_navigate url="https://example.com"`, then `playwright.browser_snapshot` to capture the page, `playwright.browser_click` / `playwright.browser_type` to interact, and `playwright.browser_screenshot` to capture visuals. Always run headless (no display on this server).
+
+OpenClaw also has a built-in `browser` tool that can use Playwright directly — check if it's available before setting up the MCPorter route.
+
 ## Hermes-Specific Configuration
 
-> Not applicable — Playwright/browser automation is an OpenClaw-specific capability delivered via MCPorter MCP integration. Hermes is a CLI agent and does not support browser automation.
+Hermes uses Playwright under the covers for browser automation. Verify it's working:
+
+```bash
+# Check Playwright is available
+npx playwright --version
+
+# Test headless browser launch
+npx playwright open --headless https://example.com 2>/dev/null && echo "Playwright OK"
+```
+
+If the Chromium binary is present (checked above), Hermes can use browser automation out of the box. No additional configuration needed — Hermes invokes Playwright directly as part of its agent toolchain.

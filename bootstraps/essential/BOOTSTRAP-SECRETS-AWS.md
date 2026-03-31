@@ -1,6 +1,6 @@
 # AWS Secrets Manager Integration for OpenClaw on EC2
 
-> **Applies to:** OpenClaw only (with agent-specific sections below)
+> **Applies to:** All agents (with agent-specific sections below)
 
 This document describes how to configure OpenClaw to fetch secrets from AWS Secrets Manager on an EC2 instance using an exec-based secrets provider.
 
@@ -307,12 +307,25 @@ Multiple secret IDs can be requested in a single invocation. The script must han
 
 ---
 
+## OpenClaw-Specific Configuration
+
+The exec provider setup above (Steps 1–7) is specific to OpenClaw's gateway secrets resolution system. Follow all steps as documented.
+
 ## Hermes-Specific Configuration
 
-> Not applicable — The exec provider protocol (`protocolVersion: 1` JSON over stdin/stdout) is specific to the OpenClaw gateway's secrets resolution system. Hermes does not have a built-in secrets provider mechanism.
->
-> For Hermes deployments that need AWS secrets, fetch them directly in shell scripts using the AWS CLI:
-> ```bash
-> aws secretsmanager get-secret-value --secret-id "your/secret" --query SecretString --output text
-> ```
-> Or inject them as environment variables in the Hermes systemd service or `.env` file at deploy time.
+Hermes can also use AWS Secrets Manager. The approach differs from OpenClaw's exec provider protocol:
+
+**Option 1: Environment injection at startup**
+Fetch secrets and inject them as environment variables in the Hermes systemd service:
+
+```bash
+# In the Hermes service ExecStartPre or a wrapper script:
+export API_KEY=$(aws secretsmanager get-secret-value --secret-id "your/secret" --query SecretString --output text)
+```
+
+**Option 2: Direct AWS CLI in scripts**
+```bash
+aws secretsmanager get-secret-value --secret-id "your/secret" --query SecretString --output text
+```
+
+The EC2 Instance Role Permissions and Storing Secrets sections above apply to both agents — secrets are stored the same way regardless of which agent reads them.

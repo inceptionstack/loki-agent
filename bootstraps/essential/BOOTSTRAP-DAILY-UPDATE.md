@@ -1,6 +1,6 @@
 # BOOTSTRAP-DAILY-UPDATE.md — Daily AWS Account Digest
 
-> **Applies to:** OpenClaw only
+> **Applies to:** All agents (with agent-specific sections below)
 
 > **Run this once to set up a daily morning briefing.**
 > If `memory/.bootstrapped-daily-update` exists, skip.
@@ -134,6 +134,19 @@ mkdir -p memory && echo "Daily update bootstrapped $(date -u +%Y-%m-%dT%H:%M:%SZ
 
 ---
 
+## OpenClaw-Specific Configuration
+
+The cron setup above uses OpenClaw's built-in `openclaw cron` system. No additional configuration needed — it works out of the box.
+
 ## Hermes-Specific Configuration
 
-> Not applicable — Hermes does not have a built-in cron/scheduling system. Daily briefings require OpenClaw's `openclaw cron` facility. For Hermes deployments, use an external scheduler (systemd timer, cron, EventBridge) to trigger equivalent checks via shell scripts.
+Hermes supports promoted cron jobs natively. Set up the daily briefing using Hermes's cron system:
+
+```bash
+hermes cron add \
+  --name "daily-briefing" \
+  --schedule "0 8 * * *" \
+  --message "Run the daily AWS account briefing. Check costs, security findings, pipeline health, and EC2 status. Format output for Telegram (no tables, use bullet lists). Keep under 400 words."
+```
+
+Refer to the Hermes documentation for cron job configuration options.

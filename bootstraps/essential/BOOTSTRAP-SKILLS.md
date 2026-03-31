@@ -1,6 +1,6 @@
 # BOOTSTRAP-SKILLS.md — Skills Library Setup
 
-> **Applies to:** OpenClaw only
+> **Applies to:** All agents (with agent-specific sections below)
 
 > **Run this once on first boot.** If `memory/.bootstrapped-skills` exists, skip — you've already done this.
 
@@ -60,6 +60,17 @@ Report the full list of installed skills to the operator.
 
 ---
 
+## OpenClaw-Specific Configuration
+
+OpenClaw auto-discovers skills from the `skills/` directory in the workspace. After cloning, skills are available immediately — no additional configuration needed.
+
 ## Hermes-Specific Configuration
 
-> Not applicable — Hermes does not have an auto-discovery skills system. OpenClaw automatically loads skills from the `skills/` directory in the workspace. Hermes capabilities are configured statically via its config file (`~/.hermes/config.yaml`).
+Hermes also supports skills. After cloning the skills library into the workspace, configure Hermes to use the skills directory:
+
+```bash
+# Skills are cloned to the same location
+ls ~/.openclaw/workspace/skills/
+```
+
+Refer to Hermes documentation for how skills are loaded and invoked in your agent configuration.
