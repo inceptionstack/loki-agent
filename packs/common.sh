@@ -66,6 +66,19 @@ pack_config_get() {
   echo "$default"
 }
 
+# check_bedrockify_health PORT
+# Verify bedrockify is running and healthy on the given port.
+# Fails with a clear message if not reachable.
+check_bedrockify_health() {
+  local port="${1:?usage: check_bedrockify_health PORT}"
+  local health
+  health="$(curl -sf "http://127.0.0.1:${port}/" 2>&1)" || true
+  if ! printf '%s' "${health}" | grep -q '"status":"ok"'; then
+    fail "bedrockify is not running on port ${port}. Install bedrockify pack first."
+  fi
+  ok "bedrockify is healthy on port ${port}"
+}
+
 # pack_banner NAME ACTION
 pack_banner() {
   local name="$1"
