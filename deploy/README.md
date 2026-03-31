@@ -38,7 +38,7 @@ All three methods create the same architecture:
 | `BedrockRegion` | `us-east-1` | Region for Bedrock API calls |
 | `SSHAllowedCidr` | `127.0.0.1/32` | SSH access CIDR (disabled by default — use SSM) |
 | `LiteLLMBaseUrl` | *(empty)* | LiteLLM proxy URL (only when `ModelMode=litellm`) |
-| `BootstrapScriptUrl` | GitHub raw URL | URL to the bootstrap script |
+| `PackName` | `openclaw` | Agent pack to deploy (`openclaw` or `hermes`) |
 | `EnableSecurityHub` | `true` | AWS Security Hub aggregates security findings. (~$0.001 per finding/month) |
 | `EnableGuardDuty` | `true` | Amazon GuardDuty threat detection via CloudTrail, VPC Flow Logs, DNS. (~$4/million events) |
 | `EnableInspector` | `true` | Amazon Inspector vulnerability scanning. (~$0.01-$1.25 per resource/month) |
@@ -116,8 +116,5 @@ Full details: [Bootstrap Scripts Guide](https://github.com/inceptionstack/loki-a
 
 Files at the `deploy/` level are used by all deployment methods:
 
-- `openclaw-bootstrap.sh` — main EC2 bootstrap script (installs Node, OpenClaw, Claude Code, etc.)
-- `openclaw-config-gen.py` — generates Loki config based on model mode
-- `bedrock-motd.sh` — writes MOTD + fix script if Bedrock form submission fails
-- `litellm-setup.sh` — helper to patch an existing Loki config with LiteLLM proxy settings
+- `bootstrap.sh` — generic EC2 bootstrap dispatcher (installs system deps, runs pack install scripts)
 - `brain/` — template workspace files (SOUL.md, AGENTS.md, etc.) copied to each new instance

@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Generate OpenClaw config. Args: bedrock_region model gw_port gw_token model_mode litellm_url litellm_key litellm_model provider_key"""
-import json, sys
+"""Generate OpenClaw config. Args: bedrock_region model gw_port gw_token model_mode litellm_url litellm_key litellm_model provider_key
+Sensitive values (gw_token, litellm_key, provider_key) can also be passed via env vars:
+  GW_TOKEN_ENV, LITELLM_KEY_ENV, PROVIDER_KEY_ENV (env takes precedence over argv)"""
+import json, sys, os
+
+if len(sys.argv) < 5:
+    print("Usage: config-gen.py bedrock_region model gw_port gw_token [model_mode litellm_url litellm_key litellm_model provider_key]", file=sys.stderr)
+    sys.exit(1)
+
 bedrock_region = sys.argv[1]
 model = sys.argv[2]
 gw_port = sys.argv[3]
-gw_token = sys.argv[4]
+gw_token = os.environ.get("GW_TOKEN_ENV") or sys.argv[4]
 model_mode = sys.argv[5] if len(sys.argv) > 5 else "bedrock"
 litellm_url = sys.argv[6] if len(sys.argv) > 6 else ""
-litellm_key = sys.argv[7] if len(sys.argv) > 7 else ""
+litellm_key = os.environ.get("LITELLM_KEY_ENV") or (sys.argv[7] if len(sys.argv) > 7 else "")
 litellm_model = sys.argv[8] if len(sys.argv) > 8 else "claude-opus-4-6"
-provider_key = sys.argv[9] if len(sys.argv) > 9 else ""
+provider_key = os.environ.get("PROVIDER_KEY_ENV") or (sys.argv[9] if len(sys.argv) > 9 else "")
+home = os.path.expanduser("~")
 cfg = {
   "models": {"providers": {"amazon-bedrock": {"baseUrl": f"https://bedrock-runtime.{bedrock_region}.amazonaws.com", "auth": "aws-sdk", "api": "bedrock-converse-stream", "models": []}}, "bedrockDiscovery": {"enabled": True, "region": "us-east-1", "providerFilter": ["anthropic"]}},
-  "agents": {"defaults": {"model": {"primary": f"amazon-bedrock/{model}", "fallbacks": ["amazon-bedrock/us.anthropic.claude-sonnet-4-6"]}, "workspace": "/home/ec2-user/.openclaw/workspace", "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "subagents": {"maxConcurrent": 8}}},
+  "agents": {"defaults": {"model": {"primary": f"amazon-bedrock/{model}", "fallbacks": ["amazon-bedrock/us.anthropic.claude-sonnet-4-6"]}, "workspace": f"{home}/.openclaw/workspace", "compaction": {"mode": "safeguard"}, "maxConcurrent": 4, "subagents": {"maxConcurrent": 8}}},
   "tools": {"web": {"search": {"enabled": False}, "fetch": {"enabled": True}}},
   "hooks": {"internal": {"enabled": True, "entries": {"boot-md": {"enabled": True}, "bootstrap-extra-files": {"enabled": True}, "command-logger": {"enabled": True}, "session-memory": {"enabled": True}}}},
   "gateway": {"port": int(gw_port), "mode": "local", "bind": "loopback", "auth": {"mode": "token", "token": gw_token}}
@@ -26,6 +34,6 @@ if model_mode == "litellm" and litellm_url and litellm_key:
 elif model_mode == "api-key" and provider_key:
   cfg["models"]["providers"]["anthropic"] = {"apiKey": provider_key, "models": []}
   cfg["agents"]["defaults"]["model"] = {"primary": "anthropic/claude-opus-4-6-20260514", "fallbacks": ["anthropic/claude-sonnet-4-6-20260514", f"amazon-bedrock/{model}"]}
-with open("/home/ec2-user/.openclaw/openclaw.json", "w") as f:
+with open(f"{home}/.openclaw/openclaw.json", "w") as f:
   json.dump(cfg, f, indent=2)
 print(f"Config written (mode={model_mode})")

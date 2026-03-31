@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# packs/common.sh — shared helpers for all pack install scripts
+# Source this file; do not execute directly.
+# Usage: source "$(dirname "$0")/../common.sh"
+
+# Colors
+_CLR_GREEN='\033[0;32m'
+_CLR_CYAN='\033[0;36m'
+_CLR_RED='\033[0;31m'
+_CLR_YELLOW='\033[0;33m'
+_CLR_BOLD='\033[1m'
+_CLR_NC='\033[0m'
+
+# log LEVEL MESSAGE
+log()  { printf "${_CLR_CYAN}→${_CLR_NC} %s\n" "$1"; }
+ok()   { printf "${_CLR_GREEN}✓${_CLR_NC} %s\n" "$1"; }
+fail() { printf "${_CLR_RED}✗${_CLR_NC} %s\n" "$1" >&2; exit 1; }
+warn() { printf "${_CLR_YELLOW}⚠${_CLR_NC} %s\n" "$1"; }
+step() {
+  printf "\n${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "${_CLR_BOLD}  %s${_CLR_NC}\n" "$1"
+  printf "${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
+}
+
+# require_cmd CMD [CMD...]  — fail if any command is not found
+require_cmd() {
+  for cmd in "$@"; do
+    if ! command -v "$cmd" &>/dev/null; then
+      fail "Required command not found: $cmd (prerequisites not met)"
+    fi
+  done
+}
+
+# write_done_marker PACK_NAME
+write_done_marker() {
+  local pack_name="$1"
+  touch "/tmp/pack-${pack_name}-done"
+  ok "Marker written: /tmp/pack-${pack_name}-done"
+}
+
+# Read a value from the pack config JSON file
+# Usage: pack_config_get "key" "default_value"
+pack_config_get() {
+  local key="$1" default="${2:-}"
+  local config="${PACK_CONFIG:-/tmp/loki-pack-config.json}"
+  if [[ -f "$config" ]] && command -v jq &>/dev/null; then
+    local val
+    val=$(jq -r --arg k "$key" '.[$k] // empty' "$config" 2>/dev/null)
+    if [[ -n "$val" ]]; then
+      echo "$val"
+      return
+    fi
+  fi
+  echo "$default"
+}
+
+# pack_banner NAME ACTION
+pack_banner() {
+  local name="$1"
+  local action="${2:-INSTALLING}"
+  printf "\n${_CLR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "${_CLR_CYAN}  [PACK:%s] %s${_CLR_NC}\n" "$name" "$action"
+  printf "${_CLR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
+}

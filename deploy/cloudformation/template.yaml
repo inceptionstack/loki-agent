@@ -10,6 +10,7 @@ Metadata:
           default: "🔧 Basic Configuration"
         Parameters:
           - EnvironmentName
+          - PackName
           - InstanceType
           - DefaultModel
       - Label:
@@ -46,7 +47,6 @@ Metadata:
           default: "⚙️ Advanced"
         Parameters:
           - OpenClawGatewayPort
-          - BootstrapScriptUrl
           - LokiWatermark
     ParameterLabels:
       EnvironmentName:
@@ -93,8 +93,8 @@ Metadata:
         default: "SSH Key Pair (optional)"
       OpenClawGatewayPort:
         default: "Gateway Port"
-      BootstrapScriptUrl:
-        default: "Bootstrap Script URL"
+      PackName:
+        default: "Agent Pack"
       LokiWatermark:
         default: "Loki Watermark Tag"
 
@@ -102,6 +102,14 @@ Metadata:
 # PARAMETERS
 # ============================================================================
 Parameters:
+  PackName:
+    Type: String
+    Default: openclaw
+    AllowedValues:
+      - openclaw
+      - hermes
+    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter, t4g.medium sufficient)."
+
   EnvironmentName:
     Type: String
     Default: openclaw
@@ -152,9 +160,9 @@ Parameters:
   DataVolumeSize:
     Type: Number
     Default: 80
-    MinValue: 20
+    MinValue: 0
     MaxValue: 500
-    Description: "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for production."
+    Description: "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for OpenClaw, 0 for Hermes."
 
   KeyPairName:
     Type: String
@@ -163,10 +171,10 @@ Parameters:
 
   OpenClawGatewayPort:
     Type: Number
-    Default: 18789
+    Default: 3001
     MinValue: 1024
     MaxValue: 65535
-    Description: "Internal port for the OpenClaw gateway service. Change only if port 18789 conflicts with other services."
+    Description: "Internal port for the OpenClaw gateway service. Change only if port 3001 conflicts with other services."
 
   BedrockRegion:
     Type: String
@@ -217,11 +225,6 @@ Parameters:
     NoEcho: true
     Description: "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
 
-  BootstrapScriptUrl:
-    Type: String
-    Default: 'https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/openclaw-bootstrap.sh'
-    Description: "URL to the EC2 bootstrap script. Uses the official script by default. Override only for custom installations."
-
   RequestQuotaIncreases:
     Type: String
     Default: 'false'
@@ -268,6 +271,7 @@ Parameters:
 # ============================================================================
 Conditions:
   HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+  HasDataVolume: !Not [!Equals [!Ref DataVolumeSize, 0]]
   IsLiteLLM: !Equals [!Ref ModelMode, 'litellm']
   IsApiKey: !Equals [!Ref ModelMode, 'api-key']
   IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
@@ -295,6 +299,8 @@ Resources:
           Value: !Ref LokiWatermark
         - Key: loki:deploy-method
           Value: cloudformation
+        - Key: loki:pack
+          Value: !Ref PackName
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
@@ -919,12 +925,15 @@ Resources:
             VolumeType: gp3
             DeleteOnTermination: true
             Encrypted: true
-        - DeviceName: /dev/sdb
-          Ebs:
-            VolumeSize: !Ref DataVolumeSize
-            VolumeType: gp3
-            DeleteOnTermination: false
-            Encrypted: true
+        - !If
+          - HasDataVolume
+          - DeviceName: /dev/sdb
+            Ebs:
+              VolumeSize: !Ref DataVolumeSize
+              VolumeType: gp3
+              DeleteOnTermination: false
+              Encrypted: true
+          - !Ref AWS::NoValue
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-instance'
@@ -938,6 +947,8 @@ Resources:
           Value: cloudformation
         - Key: loki:version
           Value: '1.0'
+        - Key: loki:pack
+          Value: !Ref PackName
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -954,10 +965,22 @@ Resources:
           export LITELLM_API_KEY="${LiteLLMApiKey}"
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
-          # Download and run bootstrap from S3
-          curl -sfL ${BootstrapScriptUrl} -o /tmp/openclaw-bootstrap.sh
-          chmod +x /tmp/openclaw-bootstrap.sh
-          bash /tmp/openclaw-bootstrap.sh
+          export PACK_NAME="${PackName}"
+          # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
+          for _attempt in 1 2 3; do
+            git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && break
+            echo "git clone failed (attempt $_attempt), retrying in 10s..." && sleep 10
+          done
+          bash /tmp/loki-agent/deploy/bootstrap.sh \
+            --pack "$PACK_NAME" \
+            --region "$BEDROCK_REGION" \
+            --model "$DEFAULT_MODEL" \
+            --gw-port "$GW_PORT" \
+            --model-mode "$MODEL_MODE" \
+            --litellm-base-url "$LITELLM_BASE_URL" \
+            --litellm-api-key "$LITELLM_API_KEY" \
+            --litellm-model "$LITELLM_MODEL" \
+            --provider-api-key "$PROVIDER_API_KEY"
 # ============================================================================
 # OUTPUTS
 # ============================================================================
@@ -990,4 +1013,7 @@ Outputs:
     Description: Connect via SSM Session Manager
     Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
 
+  PackName:
+    Description: "Deployed agent pack"
+    Value: !Ref PackName
 

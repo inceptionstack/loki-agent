@@ -1,0 +1,56 @@
+name: openclaw
+version: "1.0.0"
+type: agent
+description: "OpenClaw stateful AI agent with gateway"
+
+deps:
+  - bedrockify
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.large
+
+params:
+  - name: region
+    description: "AWS region for Bedrock"
+    default: us-east-1
+  - name: model
+    description: "Default Bedrock model ID"
+    default: "us.anthropic.claude-opus-4-6-v1"
+  - name: port
+    description: "Gateway port"
+    default: "3001"
+  - name: token
+    description: "Gateway auth token (auto-generated if empty)"
+    default: ""
+  - name: model-mode
+    description: "bedrock | litellm | api-key"
+    default: "bedrock"
+  - name: litellm-url
+    description: "LiteLLM base URL (model-mode=litellm only)"
+    default: ""
+  - name: litellm-key
+    description: "LiteLLM API key (model-mode=litellm only)"
+    default: ""
+  - name: litellm-model
+    description: "LiteLLM model ID (model-mode=litellm only)"
+    default: "claude-opus-4-6"
+  - name: provider-key
+    description: "Anthropic provider API key (model-mode=provider-key only)"
+    default: ""
+
+health_check:
+  command: "openclaw --version"
+  timeout: 10
+
+provides:
+  commands:
+    - openclaw
+    - loki
+  services:
+    - openclaw-gateway

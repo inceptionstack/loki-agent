@@ -1,3 +1,19 @@
+variable "aws_region" {
+  type        = string
+  default     = "us-east-1"
+  description = "AWS region for infrastructure deployment. Defaults to us-east-1."
+}
+
+variable "pack_name" {
+  description = "Agent pack to deploy (openclaw or hermes)"
+  type        = string
+  default     = "openclaw"
+  validation {
+    condition     = contains(["openclaw", "hermes"], var.pack_name)
+    error_message = "pack_name must be openclaw or hermes."
+  }
+}
+
 variable "environment_name" {
   type        = string
   default     = "openclaw"
@@ -52,11 +68,11 @@ variable "root_volume_size" {
 variable "data_volume_size" {
   type        = number
   default     = 80
-  description = "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for production."
+  description = "Separate data volume for OpenClaw state and workspaces. Set to 0 to skip (uses root volume instead). 80GB recommended for OpenClaw, 0 for Hermes."
 
   validation {
-    condition     = var.data_volume_size >= 20 && var.data_volume_size <= 500
-    error_message = "Must be between 20 and 500."
+    condition     = var.data_volume_size == 0 || (var.data_volume_size >= 20 && var.data_volume_size <= 500)
+    error_message = "Must be 0 (skip) or between 20 and 500."
   }
 }
 
@@ -68,8 +84,8 @@ variable "key_pair_name" {
 
 variable "openclaw_gateway_port" {
   type        = number
-  default     = 18789
-  description = "Internal port for the OpenClaw gateway service. Change only if port 18789 conflicts with other services."
+  default     = 3001
+  description = "Internal port for the OpenClaw gateway service. Change only if port 3001 conflicts with other services."
 
   validation {
     condition     = var.openclaw_gateway_port >= 1024 && var.openclaw_gateway_port <= 65535
@@ -129,12 +145,6 @@ variable "provider_api_key" {
   default     = ""
   sensitive   = true
   description = "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
-}
-
-variable "bootstrap_script_url" {
-  type        = string
-  default     = "https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/openclaw-bootstrap.sh"
-  description = "URL to the EC2 bootstrap script. Uses the official script by default. Override only for custom installations."
 }
 
 variable "request_quota_increases" {

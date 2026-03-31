@@ -1,0 +1,43 @@
+version: 1
+
+defaults:
+  ami_filter: "al2023-ami-*-arm64"
+  arch: arm64
+  os: al2023
+  instance_type: t4g.xlarge
+  root_volume_gb: 40
+  data_volume_gb: 80
+  bedrock_region: us-east-1
+
+packs:
+  bedrockify:
+    type: base
+    description: "OpenAI-compatible Bedrock proxy (systemd daemon on localhost)"
+    order: 0
+
+  openclaw:
+    type: agent
+    description: "OpenClaw — stateful AI agent with persistent gateway"
+    deps:
+      - bedrockify
+    instance_type: t4g.xlarge
+    root_volume_gb: 40
+    data_volume_gb: 80
+    default_model: "us.anthropic.claude-opus-4-6-v1"
+    ports:
+      gateway: 3001
+    brain: true
+    claude_code: true
+
+  hermes:
+    type: agent
+    description: "Hermes — NousResearch CLI agent via bedrockify"
+    deps:
+      - bedrockify
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    default_model: "anthropic/claude-opus-4.6"
+    ports: {}
+    brain: false
+    claude_code: false

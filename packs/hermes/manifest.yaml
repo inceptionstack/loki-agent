@@ -1,0 +1,36 @@
+name: hermes
+version: "1.0.0"
+type: agent
+description: "NousResearch Hermes CLI agent via bedrockify"
+
+deps:
+  - bedrockify
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.medium
+
+params:
+  - name: region
+    description: "AWS region for Bedrock"
+    default: us-east-1
+  - name: hermes-model
+    description: "Model ID (OpenAI-style via bedrockify). Generic --model is ignored."
+    default: "anthropic/claude-opus-4.6"
+  - name: bedrockify-port
+    description: "Port where bedrockify is running"
+    default: "8090"
+
+health_check:
+  command: "hermes --version"
+  timeout: 10
+
+provides:
+  commands:
+    - hermes
+  services: []
