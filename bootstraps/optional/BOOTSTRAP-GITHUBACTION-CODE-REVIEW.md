@@ -1,5 +1,7 @@
 # BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md — Automatic Code Review with Claude Code
 
+> **Applies to:** All agents (agent-agnostic — uses GitHub Actions + Bedrock directly)
+
 > Add this to any repo in the inceptionstack org to get automatic AI code review on PRs and commits.
 
 ## Overview

@@ -1,10 +1,14 @@
-# BOOTSTRAP-WEB-UI.md — Expose OpenClaw Control UI via CloudFront + Cognito
+# BOOTSTRAP-WEB-UI.md — Expose Agent Control UI via CloudFront + Cognito
 
-> **Target audience:** You are an OpenClaw agent implementing this for your human. Follow every step. At the end, you MUST guide your human through manual browser steps (device pairing + gateway token). Present the full plan to the user and get approval before making any infrastructure changes.
+> **Applies to:** All agents (with agent-specific sections below)
+
+> **Target audience:** You are an agent implementing this for your human. Follow every step. At the end, you MUST guide your human through manual browser steps. Present the full plan to the user and get approval before making any infrastructure changes.
 
 ## What This Does
 
-Exposes the OpenClaw Gateway's built-in Control UI (Vite + Lit SPA) through a CloudFront distribution, secured by Cognito login. The gateway stays on loopback — a Node.js proxy on the same EC2 handles Cognito JWT validation and proxies HTTP + WebSocket to the gateway.
+Exposes the agent's web UI through a CloudFront distribution, secured by Cognito login. The gateway stays on loopback — a Node.js proxy on the same EC2 handles Cognito JWT validation and proxies HTTP + WebSocket to the gateway.
+
+> **Note:** The detailed architecture below is for OpenClaw's built-in Control UI (Vite + Lit SPA). For Hermes, see the Hermes-specific section at the bottom — Hermes uses Open WebUI or its own API server endpoint instead.
 
 ## Architecture
 
@@ -643,3 +647,59 @@ These are AWS-managed CloudFront policies (same in all accounts):
 - Device pairing is a third layer — each new browser must be explicitly approved by the operator.
 - The gateway remains on loopback (`127.0.0.1`) — never exposed to the network.
 - The proxy itself has no secrets hardcoded — Cognito config comes from environment variables.
+
+---
+
+## OpenClaw-Specific Configuration
+
+The entire Step 1–8 walkthrough above is specific to OpenClaw's built-in Control UI (Vite + Lit SPA on port 18789). Follow the steps as documented — they cover proxy setup, ALB, CloudFront, Cognito, gateway config patches, and device pairing.
+
+Key OpenClaw-specific details:
+- Gateway target: `http://127.0.0.1:18789`
+- Config: `openclaw config patch` for `gateway.controlUi.allowedOrigins`
+- Device pairing: `openclaw devices list` / `openclaw devices approve`
+- Token: gateway token from `~/.openclaw/openclaw.json`
+
+## Hermes-Specific Configuration
+
+Hermes does **not** have OpenClaw's built-in Vite SPA Control UI. Instead, Hermes provides two web access options:
+
+### Option A: Open WebUI Integration (Recommended)
+
+Hermes has built-in support for [Open WebUI](https://github.com/open-webui/open-webui) as a frontend. It exposes an OpenAI-compatible API server that Open WebUI can connect to directly.
+
+1. Start the Hermes API server:
+   ```bash
+   hermes api                          # Foreground
+   hermes api --port 11434             # Custom port
+   ```
+
+2. Deploy Open WebUI (Docker):
+   ```bash
+   docker run -d -p 3000:8080 \
+     -e OPENAI_API_BASE_URL=http://host.docker.internal:11434/v1 \
+     -e OPENAI_API_KEY=not-needed \
+     --name open-webui \
+     ghcr.io/open-webui/open-webui:main
+   ```
+
+3. To expose Open WebUI via CloudFront + Cognito, use the same ALB + CloudFront + proxy pattern from Steps 2-8 above, but target port `3000` (Open WebUI) instead of port `18789`.
+
+See Hermes docs: <https://hermes-agent.nousresearch.com/docs/user-guide/messaging/open-webui>
+
+### Option B: Direct API Server + Custom Frontend
+
+Hermes exposes an OpenAI-compatible `/v1/chat/completions` endpoint. You can build or use any OpenAI-compatible web UI:
+
+```bash
+hermes api --host 0.0.0.0 --port 11434
+```
+
+To secure this behind CloudFront + Cognito, use the same proxy pattern from Steps 2-8 above, targeting port `11434` as the backend. The Cognito JWT proxy code works identically — just change `GATEWAY_TARGET` from `http://127.0.0.1:18789` to `http://127.0.0.1:11434`.
+
+### Shared Infrastructure
+
+The ALB, CloudFront, Cognito, and security group setup (Steps 3-5) is identical regardless of which agent or backend you're proxying. The only differences are:
+- **Target port** in the proxy's `GATEWAY_TARGET` environment variable
+- **Health check path** in the ALB target group (may differ per backend)
+- **No device pairing** — Hermes doesn't use OpenClaw's device pairing; Cognito JWT is the sole auth layer

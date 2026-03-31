@@ -1,4 +1,6 @@
-# BOOTSTRAP-PIPELINE-NOTIFICATIONS.md — Pipeline Notifications to Telegram + OpenClaw
+# BOOTSTRAP-PIPELINE-NOTIFICATIONS.md — Pipeline Notifications to Telegram + Agent
+
+> **Applies to:** All agents (with agent-specific sections below)
 
 > **Run this once to wire up build notifications.**
 > If `memory/.bootstrapped-pipeline-notifications` exists, skip.
@@ -387,7 +389,7 @@ When a system event arrives (CodePipeline path), Loki receives it in the main se
 - **On SUCCEEDED:** Log it. If a task was in-progress waiting for pipeline green, move it to `done` and notify the operator.
 - **On STARTED:** Log it silently.
 
-GitHub webhook notifications go only to Telegram (no OpenClaw system event injection currently).
+GitHub webhook notifications go only to Telegram (no agent system event injection currently).
 
 ---
 
@@ -396,3 +398,56 @@ GitHub webhook notifications go only to Telegram (no OpenClaw system event injec
 ```bash
 mkdir -p memory && echo "Pipeline notifications bootstrapped $(date -u +%Y-%m-%dT%H:%M:%SZ)" > memory/.bootstrapped-pipeline-notifications
 ```
+
+---
+
+## OpenClaw-Specific Configuration
+
+The Lambda notifier injects system events into OpenClaw via SSM RunCommand:
+
+```bash
+runuser -u ec2-user -- bash -c 'openclaw system event --text "PIPELINE_MSG" --mode now'
+```
+
+This delivers the event to OpenClaw's main session, where the agent can auto-react to failures. The `notifyOpenClaw` function in the Lambda code (Part 1) handles this path.
+
+## Hermes-Specific Configuration
+
+Hermes receives notifications differently. Instead of SSM RunCommand to inject system events, use the Hermes gateway API or `hermes event` CLI:
+
+**Option A — `hermes event` CLI via SSM:**
+
+Replace the `notifyOpenClaw` function in the Lambda handler with:
+
+```javascript
+async function notifyHermes(message) {
+  try {
+    await ssm.send(new SendCommandCommand({
+      InstanceIds: [INSTANCE_ID],
+      DocumentName: "AWS-RunShellScript",
+      Parameters: {
+        commands: [
+          `runuser -u ec2-user -- bash -c 'export PATH="/home/ec2-user/.local/bin:$PATH" && hermes event "${message.replace(/"/g, '\\"')}"'`
+        ]
+      },
+      TimeoutSeconds: 15
+    }));
+  } catch (e) {
+    console.warn("Hermes notify failed:", e.message);
+  }
+}
+```
+
+**Option B — Hermes gateway webhook:**
+
+If the Hermes gateway exposes a webhook endpoint, POST events directly from the Lambda without SSM:
+
+```javascript
+await fetch('https://your-hermes-gateway/webhook', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text: message })
+});
+```
+
+Check Hermes docs for the webhook format: <https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks>

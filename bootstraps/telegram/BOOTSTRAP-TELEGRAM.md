@@ -1,5 +1,7 @@
 # BOOTSTRAP-TELEGRAM.md — Telegram Setup + Communication Rules
 
+> **Applies to:** All agents (with agent-specific sections below)
+
 > **Part 1** (setup) runs once. **Part 2** (formatting rules) applies permanently to every message.
 > If `memory/.bootstrapped-telegram` exists, Part 1 is done — skip to Part 2 to refresh the rules.
 
@@ -40,7 +42,11 @@ curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" \
 
 Note your **numeric chat ID** (e.g. `123456789`).
 
-### Step 3: Configure OpenClaw
+### Step 3: Configure the Agent
+
+Configuration differs by agent type. Follow the section for your agent below.
+
+#### OpenClaw Configuration
 
 Add the Telegram channel to OpenClaw config. Ask Loki to run:
 
@@ -84,12 +90,63 @@ EOF
 
 OpenClaw restarts automatically after the config change.
 
-### Step 4: Verify
+#### Hermes Configuration
 
-Send your bot a message. You should get a response from Loki within a few seconds.
+Hermes configures Telegram via environment variables and `config.yaml`:
+
+**Option A — Interactive setup (recommended):**
 
 ```bash
-# Test the bot directly
+hermes gateway setup
+# Select "Telegram" when prompted
+# Enter your bot token and allowed user IDs
+```
+
+**Option B — Manual configuration:**
+
+Add to `~/.hermes/.env`:
+
+```bash
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+TELEGRAM_ALLOWED_USERS=YOUR_CHAT_ID
+```
+
+To fetch the token from Secrets Manager:
+
+```bash
+BOT_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id /faststart/telegram-bot-token \
+  --query SecretString --output text --region us-east-1)
+
+echo "TELEGRAM_BOT_TOKEN=${BOT_TOKEN}" >> ~/.hermes/.env
+echo "TELEGRAM_ALLOWED_USERS=YOUR_CHAT_ID" >> ~/.hermes/.env
+```
+
+Then start the gateway:
+
+```bash
+hermes gateway                    # Foreground (testing)
+hermes gateway install && hermes gateway start   # Systemd service (production)
+```
+
+**Optional Hermes Telegram config** in `~/.hermes/config.yaml`:
+
+```yaml
+telegram:
+  require_mention: false         # true = only respond when @mentioned in groups
+  mention_patterns:
+    - "^\\s*loki\\b"            # Custom wake word
+```
+
+Hermes supports Telegram voice messages (auto-transcription), images, file attachments, and streaming responses out of the box.
+
+### Step 4: Verify
+
+Send your bot a message. You should get a response from the agent within a few seconds.
+
+**OpenClaw test:**
+
+```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
   --secret-id /faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
@@ -100,14 +157,33 @@ curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
   -d parse_mode="HTML"
 ```
 
+**Hermes test:**
+
+```bash
+hermes gateway status   # Should show "running"
+# Then send a message to your bot in Telegram
+```
+
 ### Step 5: Security — allowlist only
 
-The config above uses `dmPolicy: allowlist` — Loki only responds to chat IDs in `allowFrom`. Never set `dmPolicy: all` on a production instance. Anyone who finds your bot could interact with your agent.
+Both agents use allowlists by default — the agent only responds to explicitly authorized user IDs.
+
+**OpenClaw:** `dmPolicy: allowlist` + `allowFrom` in `openclaw.json`. Never set `dmPolicy: all` on a production instance.
 
 To add more users:
 ```bash
 openclaw config patch '{"channels":{"telegram":{"allowFrom":["CHAT_ID_1","CHAT_ID_2"]}}}'
 ```
+
+**Hermes:** `TELEGRAM_ALLOWED_USERS` in `~/.hermes/.env` (comma-separated). Alternatively, Hermes supports DM pairing — unknown users get a one-time pairing code:
+
+```bash
+hermes pairing approve telegram PAIRING_CODE    # Approve a user
+hermes pairing list                              # View pending + approved
+hermes pairing revoke telegram USER_ID           # Remove access
+```
+
+Never set `GATEWAY_ALLOW_ALL_USERS=true` on a production instance.
 
 ---
 
@@ -189,6 +265,8 @@ Reactions are available but use them sparingly — at most 1 per 5–10 exchange
 - Wrap multiple links in `<>` to suppress embeds.
 - Use inline buttons for destructive operation confirmations.
 ```
+
+> **Note:** These formatting rules apply regardless of agent type — Telegram renders markdown the same way for both OpenClaw and Hermes.
 
 ---
 

@@ -1,5 +1,7 @@
 # BOOTSTRAP-TELEGRAM-GROUP.md — Telegram Group Hub Setup
 
+> **Applies to:** All agents (with agent-specific sections below)
+
 > **Purpose:** Set up a private Telegram group where the human owner can broadcast messages to multiple Loki instances across separate AWS accounts and receive replies from all of them in one place.
 >
 > **Prerequisites:** Complete `BOOTSTRAP-TELEGRAM.md` first. Your bot must be working in DMs (sending and receiving messages) before setting up a group. Do not attempt this bootstrap until regular Telegram integration is confirmed working.
@@ -111,9 +113,13 @@ The negative number (e.g. `-1001234567890`) is your **group chat ID**. Save it �
 
 ---
 
-## Part 3: Configure OpenClaw
+## Part 3: Configure the Agent for Group Chat
 
 > **Required for both new and existing groups.**
+
+Configuration differs by agent type. Follow the section for your agent below.
+
+### OpenClaw Configuration
 
 Replace `GROUP_CHAT_ID` with the group chat ID (negative number), and `OWNER_USER_ID` with the owner's Telegram numeric user ID (already in `channels.telegram.allowFrom`).
 
@@ -158,6 +164,55 @@ EOF
 
 OpenClaw restarts automatically after the config change.
 
+### Hermes Configuration
+
+Replace `GROUP_CHAT_ID` with the group chat ID (negative number), and `OWNER_USER_ID` with the owner's Telegram numeric user ID.
+
+**Step 1 — Set allowed users in `.env`:**
+
+```bash
+# In ~/.hermes/.env — ensure the owner's ID is in the allowed users
+TELEGRAM_ALLOWED_USERS=OWNER_USER_ID
+```
+
+**Step 2 — Configure group behavior in `config.yaml`:**
+
+```yaml
+# In ~/.hermes/config.yaml
+telegram:
+  require_mention: true          # Only respond when @mentioned or replied to
+  mention_patterns:
+    - "@fleet"                    # Broadcast trigger — all bots respond
+    - "@all"                      # Broadcast trigger — all bots respond
+```
+
+**Step 3 — Set home channel (optional):**
+
+Send `/sethome` in the group chat, or set it manually:
+
+```bash
+# In ~/.hermes/.env
+TELEGRAM_HOME_CHANNEL=GROUP_CHAT_ID
+TELEGRAM_HOME_CHANNEL_NAME="LokiFleet"
+```
+
+**Step 4 — Restart the gateway:**
+
+```bash
+hermes gateway stop && hermes gateway start
+```
+
+**How to talk in the group (same as OpenClaw):**
+- **`@fleet check GuardDuty`** — all bots respond (broadcast via mention_patterns)
+- **Reply to a specific bot's message** — only that bot responds
+- **`@bot_username do X`** — only that specific bot responds
+
+**Hermes group security:**
+- `TELEGRAM_ALLOWED_USERS` controls who can trigger the bot (same as DMs)
+- `require_mention: true` prevents the bot from responding to every message
+- Bot-to-bot messages are ignored because bot user IDs aren't in `TELEGRAM_ALLOWED_USERS`
+- Alternatively, promote the bot to group admin instead of disabling privacy mode — admin bots see all messages regardless of privacy setting
+
 ---
 
 ## Part 4: Verify
@@ -175,23 +230,28 @@ If the bot doesn't respond:
 
 ## Why This Is Safe With Multiple Bots
 
-- Each bot only processes messages from `allowFrom` user IDs (the owner)
-- Bot-to-bot messages are ignored because bot user IDs are not in `allowFrom`
+- Each bot only processes messages from authorized user IDs (the owner)
+  - **OpenClaw:** `allowFrom` in the group config
+  - **Hermes:** `TELEGRAM_ALLOWED_USERS` in `.env`
+- Bot-to-bot messages are ignored because bot user IDs are not in the allowlist
 - No infinite reply loops possible
 - No cross-account networking, IAM, or VPC peering required
 - The "mesh" is Telegram's infrastructure — encrypted, private group, invite-only
+- Mixed fleets work fine — OpenClaw and Hermes bots can coexist in the same group
 
 ---
 
 ## Security Checklist
 
 - [ ] Group is private (no public username/link)
-- [ ] `groupPolicy: "allowlist"` (not `"open"`)
-- [ ] `allowFrom` contains only the owner's numeric user ID
-- [ ] `groupAllowFrom` contains only the owner's numeric user ID
-- [ ] Each bot has privacy mode disabled in BotFather (required for function)
+- [ ] **OpenClaw:** `groupPolicy: "allowlist"` (not `"open"`)
+- [ ] **OpenClaw:** `allowFrom` contains only the owner's numeric user ID
+- [ ] **OpenClaw:** `groupAllowFrom` contains only the owner's numeric user ID
+- [ ] **Hermes:** `TELEGRAM_ALLOWED_USERS` contains only the owner's numeric user ID
+- [ ] **Hermes:** `require_mention: true` in `config.yaml`
+- [ ] Each bot has privacy mode disabled in BotFather (required for function) — or promoted to admin
 - [ ] Optional: `/setjoingroups` disabled in BotFather after setup (prevents unauthorized group adds)
-- [ ] No `"*"` wildcards in any `allowFrom` or `groupAllowFrom`
+- [ ] No `"*"` wildcards in any allowlist
 - [ ] Group invite link not shared publicly (revoke after adding bots if needed)
 
 ---
