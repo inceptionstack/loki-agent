@@ -909,7 +909,7 @@ Resources:
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
           export PACK_NAME="${PackName}"
-          # Publish failure to SSM on any error so the installer can detect it
+          # Publish failure to SSM and signal CFN on any error
           trap '
             aws ssm put-parameter --name "/loki/setup-status" \
               --value "FAILED" --type String --overwrite --region "$REGION" 2>/dev/null || true
@@ -917,9 +917,10 @@ Resources:
               --value "FAILED: userdata error at line $LINENO" \
               --type String --overwrite --region "$REGION" 2>/dev/null || true
             touch /tmp/loki-bootstrap-done
+            /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
           ' ERR
           # Ensure git is available (not present on all AMIs)
-          command -v git &>/dev/null || dnf install -y git || yum install -y git
+          command -v git &>/dev/null || dnf install -y git 2>/dev/null || yum install -y git
           # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
           _cloned=false
           for _attempt in 1 2 3; do

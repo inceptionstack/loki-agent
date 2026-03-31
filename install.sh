@@ -40,7 +40,7 @@ DEPLOY_SAM=3
 DEPLOY_TERRAFORM=4
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo dev)}"
-INSTALLER_DATE="${INSTALLER_DATE:-$(git -C "$(dirname "$0")" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2 || echo unknown)}"
+INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$(dirname "$0")" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
 IS_CLOUDSHELL=false
@@ -861,6 +861,11 @@ wait_for_bootstrap() {
   echo ""
   info "Waiting for Loki to bootstrap (~10 minutes)..."
   echo "  Instance: ${INSTANCE_ID} | IP: ${PUBLIC_IP}"
+
+  # Clear stale SSM params from previous deploys to avoid false failure detection
+  aws ssm delete-parameter --name "/loki/setup-status" --region "$DEPLOY_REGION" 2>/dev/null || true
+  aws ssm delete-parameter --name "/loki/setup-step" --region "$DEPLOY_REGION" 2>/dev/null || true
+  aws ssm delete-parameter --name "/loki/setup-log" --region "$DEPLOY_REGION" 2>/dev/null || true
 
   for i in $(seq 1 60); do
     # Check for failure status first (fast path — no SSM command needed)

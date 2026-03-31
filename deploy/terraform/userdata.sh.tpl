@@ -23,7 +23,7 @@ trap '
 ' ERR
 
 # Ensure git is available (not present on all AMIs)
-command -v git &>/dev/null || dnf install -y git || yum install -y git
+command -v git &>/dev/null || dnf install -y git 2>/dev/null || yum install -y git
 # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
 _cloned=false
 for _attempt in 1 2 3; do
