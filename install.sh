@@ -285,12 +285,12 @@ choose_deploy_method() {
   echo ""
   echo "  Deployment methods:"
   echo ""
-  echo -e "    ${GREEN}1) CloudFormation Console${NC} -- opens browser wizard to review & launch"
+  echo "    1) CloudFormation Console -- opens browser wizard to review & launch"
   echo "    2) CloudFormation CLI     -- deploy from terminal"
   echo "    3) SAM                    -- for SAM CLI users"
-  echo "    4) Terraform              -- for Terraform shops (auto-installs if needed)"
+  echo -e "    ${GREEN}4) Terraform${NC}              -- for Terraform shops (auto-installs if needed)"
   echo ""
-  prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_CFN_CONSOLE"
+  prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_TERRAFORM"
   DEPLOY_METHOD=$(echo "$DEPLOY_METHOD" | tr -d '[:space:]')
 
   # If Terraform selected and not installed, handle it now — before config questions.
@@ -323,12 +323,7 @@ collect_config() {
   info "Configuration"
   echo ""
 
-  prompt "Environment name (lowercase, resource prefix)" ENV_NAME "loki"
-  ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-  prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
-
-  # ---- Pack selection -------------------------------------------------------
-  echo ""
+  # ---- Pack selection (first question) --------------------------------------
   echo "  Agent to deploy:"
   echo "    1) OpenClaw  -- stateful AI agent with 24/7 gateway (recommended)"
   echo "    2) Hermes    -- NousResearch CLI agent (lighter)"
@@ -340,6 +335,11 @@ collect_config() {
     *) PACK_NAME="openclaw" ;;
   esac
   ok "Selected pack: ${PACK_NAME}"
+
+  echo ""
+  prompt "Environment name (lowercase, resource prefix)" ENV_NAME "loki"
+  ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
+  prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
   # Adjust instance size default based on pack
   local default_size_choice="3"  # openclaw → t4g.xlarge
