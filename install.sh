@@ -399,7 +399,7 @@ collect_config() {
     pack_experimental+=("$pexp")
   done < <([ -n "$registry" ] && python3 -c "
 import re, sys
-text = open('$registry').read()
+text = open(sys.argv[1]).read()
 # Simple state-machine parser for the flat registry YAML structure
 current_pack = None
 packs = {}
@@ -420,7 +420,7 @@ for name, cfg in packs.items():
         desc = cfg.get('description', name)
         exp = 'true' if cfg.get('experimental', '').lower() == 'true' else 'false'
         print(f'{name}|{desc}|{exp}')
-" 2>/dev/null || echo "openclaw|OpenClaw — stateful AI agent with persistent gateway|false")
+" "$registry" 2>/dev/null || echo "openclaw|OpenClaw — stateful AI agent with persistent gateway|false")
 
   echo "  Agent to deploy:"
   local i
@@ -465,20 +465,21 @@ for name, cfg in packs.items():
   local default_size_choice="3"  # default → t4g.xlarge
   local pack_instance_type
   pack_instance_type=$([ -n "$registry" ] && python3 -c "
-import re
-text = open('$registry').read()
+import re, sys
+text = open(sys.argv[1]).read()
+pack_name = sys.argv[2]
 current_pack = None
 for line in text.split('\n'):
     m = re.match(r'^  (\w[\w-]*):\s*$', line)
     if m:
         current_pack = m.group(1)
         continue
-    if current_pack == '$PACK_NAME':
+    if current_pack == pack_name:
         kv = re.match(r'^    instance_type:\s+(.+)$', line)
         if kv:
             print(kv.group(1).strip().strip('\"'))
             break
-" 2>/dev/null || echo "t4g.xlarge")
+" "$registry" "$PACK_NAME" 2>/dev/null || echo "t4g.xlarge")
   case "$pack_instance_type" in
     t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
     t4g.large)   default_size_choice="2" ;;
