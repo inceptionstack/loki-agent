@@ -17,9 +17,21 @@ ok()   { printf "${_CLR_GREEN}✓${_CLR_NC} %s\n" "$1"; }
 fail() { printf "${_CLR_RED}✗${_CLR_NC} %s\n" "$1" >&2; exit 1; }
 warn() { printf "${_CLR_YELLOW}⚠${_CLR_NC} %s\n" "$1"; }
 step() {
+  # Increment shared step counter (shared with bootstrap.sh)
+  local counter_file="/tmp/loki-step-counter"
+  local total_file="/tmp/loki-step-total"
+  local n total
+  n=$(cat "$counter_file" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  echo "$n" > "$counter_file"
+  total=$(cat "$total_file" 2>/dev/null || echo "?")
   printf "\n${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
-  printf "${_CLR_BOLD}  %s${_CLR_NC}\n" "$1"
+  printf "${_CLR_BOLD}  [%s/%s] %s${_CLR_NC}\n" "$n" "$total" "$1"
   printf "${_CLR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
+  # Publish to SSM for installer progress display
+  aws ssm put-parameter --name "/loki/setup-step" \
+    --value "${n}/${total} $1" \
+    --type String --overwrite --region "${AWS_DEFAULT_REGION:-us-east-1}" >/dev/null 2>&1 || true
 }
 
 # require_cmd CMD [CMD...]  — fail if any command is not found

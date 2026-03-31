@@ -28,17 +28,25 @@ trap '
 ' ERR
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-STEP_N=0
-STEP_TOTAL=16
+STEP_COUNTER_FILE="/tmp/loki-step-counter"
+STEP_TOTAL_FILE="/tmp/loki-step-total"
+echo "0" > "$STEP_COUNTER_FILE"
+echo "0" > "$STEP_TOTAL_FILE"
+
 step() {
-  STEP_N=$((STEP_N + 1))
+  local n
+  n=$(cat "$STEP_COUNTER_FILE" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  echo "$n" > "$STEP_COUNTER_FILE"
+  local total
+  total=$(cat "$STEP_TOTAL_FILE" 2>/dev/null || echo "?")
   echo ""
   echo "========================================"
-  echo "[STEP ${STEP_N}/${STEP_TOTAL}] $(date -u '+%H:%M:%S') $1"
+  echo "[STEP ${n}/${total}] $(date -u '+%H:%M:%S') $1"
   echo "========================================"
   # Publish current step to SSM for the installer to display
   aws ssm put-parameter --name "/loki/setup-step" \
-    --value "${STEP_N}/${STEP_TOTAL} $1" \
+    --value "${n}/${total} $1" \
     --type String --overwrite --region "${REGION}" >/dev/null 2>&1 || true
 }
 ok()   { echo "[OK]    $(date -u '+%H:%M:%S') $1"; }
@@ -191,6 +199,7 @@ jq -n \
 chmod 600 "${PACK_CONFIG}"
 chown ec2-user:ec2-user "${PACK_CONFIG}"
 export PACK_CONFIG
+export AWS_DEFAULT_REGION="${REGION}"
 
 # ── Locate repo root ──────────────────────────────────────────────────────────
 # bootstrap.sh lives in deploy/, one level above repo root
@@ -256,6 +265,25 @@ registry_get_data_vol() {
   " "$REGISTRY")
   echo "${val:-80}"
 }
+
+# ── Count total steps dynamically ─────────────────────────────────────────────
+# Count step() calls in bootstrap.sh + all pack scripts that will run
+_count_steps_in() { grep -c '^step ' "$1" 2>/dev/null || echo 0; }
+_total_steps=$(_count_steps_in "${DEPLOY_DIR}/bootstrap.sh")
+
+# Add steps from deps
+while IFS= read -r _dep; do
+  [[ -n "$_dep" ]] && _dep_script="${PACKS_DIR}/${_dep}/install.sh" && \
+    [[ -f "$_dep_script" ]] && _total_steps=$((_total_steps + $(_count_steps_in "$_dep_script")))
+done < <(registry_get_deps "${PACK_NAME}")
+
+# Add steps from main pack
+_pack_script="${PACKS_DIR}/${PACK_NAME}/install.sh"
+[[ -f "$_pack_script" ]] && _total_steps=$((_total_steps + $(_count_steps_in "$_pack_script")))
+
+echo "$_total_steps" > "$STEP_TOTAL_FILE"
+chmod 666 "$STEP_COUNTER_FILE" "$STEP_TOTAL_FILE"
+chown ec2-user:ec2-user "$STEP_COUNTER_FILE" "$STEP_TOTAL_FILE" 2>/dev/null || true
 
 # ── Phase 1: SYSTEM ───────────────────────────────────────────────────────────
 step "Phase 1: System Setup"
@@ -417,7 +445,7 @@ for dep in "${DEPS[@]}"; do
   fi
   info "Installing dependency: ${dep}"
   # Run as ec2-user with mise/node on PATH; PACK_CONFIG is auto-detected by packs
-  sudo -u ec2-user --preserve-env=PACK_CONFIG bash -c '
+  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION bash -c '
     export PATH="/home/ec2-user/.local/bin:$PATH"
     eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
     NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -437,7 +465,7 @@ if [[ ! -f "$PACK_INSTALL" ]]; then
   exit 1
 fi
 info "Installing pack: ${PACK_NAME}"
-sudo -u ec2-user --preserve-env=PACK_CONFIG bash -c '
+sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION bash -c '
   export PATH="/home/ec2-user/.local/bin:$PATH"
   eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
   NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)

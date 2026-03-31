@@ -859,10 +859,10 @@ ensure_ssm_session_document() {
 # ============================================================================
 wait_for_bootstrap() {
   echo ""
-  info "Waiting for Loki to bootstrap (~5 minutes)..."
+  info "Waiting for Loki to bootstrap (~10 minutes)..."
   echo "  Instance: ${INSTANCE_ID} | IP: ${PUBLIC_IP}"
 
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do
     local cmd_id
     cmd_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
       --document-name AWS-RunShellScript \
@@ -884,7 +884,7 @@ wait_for_bootstrap() {
     if [[ -n "$current_step" ]]; then
       printf "\r  ⏳ [%s] %-50s" "$current_step" ""
     else
-      printf "\r  ⏳ Bootstrapping... (%d/30) %-30s" "$i" ""
+      printf "\r  ⏳ Bootstrapping... (%d/60) %-30s" "$i" ""
     fi
     sleep 10
   done
