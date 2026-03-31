@@ -211,6 +211,26 @@ sudo systemctl edit bedrockify
 sudo systemctl restart bedrockify
 ```
 
+## Pi-Specific Configuration
+
+Pi has no built-in memory system. There is no `memory_search` tool or persistent session storage.
+
+To build custom memory, use bedrockify's `/v1/embeddings` endpoint (available on `localhost:8090`) to generate and store vectors in a file or SQLite database, then query them manually via a Pi extension or bash tool. This is opt-in and requires custom implementation.
+
+## IronClaw-Specific Configuration
+
+IronClaw has a built-in state database (PostgreSQL or embedded libSQL at `~/.ironclaw/state.db`). It may provide its own memory/session search — check IronClaw's documentation for available search tools.
+
+Bedrockify embeddings are also available on `localhost:8090` for custom semantic search workflows:
+
+```bash
+curl -s -X POST http://127.0.0.1:8090/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{"input": "your text here", "model": "amazon.titan-embed-text-v2:0"}'
+```
+
+These can be used alongside IronClaw's native state DB for hybrid retrieval if needed.
+
 ## Finish
 
 ```bash

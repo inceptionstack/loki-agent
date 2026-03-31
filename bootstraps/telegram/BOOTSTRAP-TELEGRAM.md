@@ -268,6 +268,40 @@ Reactions are available but use them sparingly — at most 1 per 5–10 exchange
 
 > **Note:** These formatting rules apply regardless of agent type — Telegram renders markdown the same way for both OpenClaw and Hermes.
 
+## Pi-Specific Configuration
+
+**Not applicable.** Pi is a CLI tool with no Telegram support. It cannot send or receive Telegram messages natively. For Telegram delivery of Pi output, pipe results to a script that calls the Telegram Bot API directly.
+
+## IronClaw-Specific Configuration
+
+IronClaw supports Telegram via WASM channels. Configure the bot token and allowed users in `~/.ironclaw/.env`:
+
+```bash
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+TELEGRAM_ALLOWED_USERS=YOUR_CHAT_ID
+```
+
+To fetch the token from Secrets Manager:
+
+```bash
+BOT_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id /faststart/telegram-bot-token \
+  --query SecretString --output text --region us-east-1)
+
+echo "TELEGRAM_BOT_TOKEN=${BOT_TOKEN}" >> ~/.ironclaw/.env
+echo "TELEGRAM_ALLOWED_USERS=YOUR_CHAT_ID" >> ~/.ironclaw/.env
+```
+
+Start IronClaw with the Telegram channel enabled:
+
+```bash
+ironclaw --channel telegram
+```
+
+Or configure it to start with Telegram as the default channel. Refer to IronClaw's documentation for channel startup flags and systemd service setup.
+
+> **Note:** The formatting rules in Part 2 apply regardless of agent type — Telegram renders markdown the same way for all agents.
+
 ---
 
 ## Finish

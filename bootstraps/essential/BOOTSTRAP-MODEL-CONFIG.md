@@ -137,6 +137,43 @@ model: "anthropic/claude-sonnet-4.6"
 
 Then restart Hermes. Bedrockify maps these OpenAI-style model IDs to Bedrock model IDs automatically.
 
+## Pi-Specific Configuration
+
+Pi uses bedrockify (OpenAI-compatible Bedrock proxy) for model access. Set the model in `~/.pi/agent/models.json` under the `bedrockify` provider entry:
+
+```json
+{
+  "providers": {
+    "bedrockify": {
+      "models": [
+        { "id": "anthropic/claude-opus-4.6" }
+      ]
+    }
+  }
+}
+```
+
+To switch to Sonnet for cost savings, change the `id` to `"anthropic/claude-sonnet-4.6"`. Pi has no cron or heartbeat system, so there's no separate heartbeat model to configure.
+
+## IronClaw-Specific Configuration
+
+IronClaw uses bedrockify via its OpenAI-compatible backend. Set the model in `~/.ironclaw/.env`:
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=http://127.0.0.1:8090/v1
+LLM_API_KEY=not-needed
+LLM_MODEL=anthropic/claude-opus-4.6
+```
+
+For scheduled routines (cron-equivalent), set a lighter model to save costs:
+
+```bash
+LLM_ROUTINE_MODEL=anthropic/claude-sonnet-4.6
+```
+
+Restart IronClaw after editing `.env`.
+
 ## Finish
 
 ```bash

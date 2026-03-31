@@ -126,6 +126,40 @@ Or ask Loki: *"Run the daily briefing now"*
 **Only included if findings exist:** security issues, EC2 problems
 **Silent (don't wake the operator):** routine low/medium security findings already known
 
+## Pi-Specific Configuration
+
+Pi has no built-in cron system. Use the system crontab to schedule daily briefings, wrapping `pi -p "prompt"` as a one-shot invocation:
+
+```bash
+# Add to crontab: crontab -e
+0 8 * * * /usr/local/bin/pi -p "Run the daily AWS account briefing. Check costs, security findings, pipeline health, and EC2 status. Format for Telegram (no tables, bullet lists). Keep under 400 words." >> /tmp/pi-daily-briefing.log 2>&1
+```
+
+Pi has no built-in Telegram delivery — pipe the output to a script that sends it via the Telegram Bot API, or to another delivery mechanism. Pi is a one-shot CLI tool; it will run the task and exit.
+
+## IronClaw-Specific Configuration
+
+IronClaw has **built-in scheduled routines** — configure daily briefings natively:
+
+```bash
+# In ~/.ironclaw/.env or IronClaw's routine config
+ROUTINE_DAILY_BRIEFING_SCHEDULE=0 8 * * *
+ROUTINE_DAILY_BRIEFING_PROMPT="Run the daily AWS account briefing. Check costs, security findings, pipeline health, and EC2 status. Format for Telegram (no tables, bullet lists). Keep under 400 words."
+ROUTINE_DAILY_BRIEFING_CHANNEL=telegram
+```
+
+Or via IronClaw's TOML config if supported:
+
+```toml
+[[routines]]
+name = "daily-briefing"
+schedule = "0 8 * * *"
+prompt = "Run the daily AWS account briefing..."
+channel = "telegram"
+```
+
+IronClaw delivers the output via its built-in Telegram channel — no external scripting needed. Refer to IronClaw's documentation for the exact routine config format.
+
 ## Finish
 
 ```bash

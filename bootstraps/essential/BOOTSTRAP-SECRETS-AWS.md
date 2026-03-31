@@ -347,4 +347,47 @@ hermes config set TELEGRAM_BOT_TOKEN $(aws secretsmanager get-secret-value \
   --secret-id "openclaw/telegram-bot-token" --query SecretString --output text)
 ```
 
-The EC2 Instance Role Permissions and Storing Secrets sections above apply to both agents — secrets are stored the same way in AWS Secrets Manager regardless of which agent reads them.
+## Pi-Specific Configuration
+
+Pi stores secrets in `~/.pi/agent/models.json` under the provider's `apiKey` field. To use bedrockify (which handles AWS auth itself), no API key is needed — set it to a placeholder:
+
+```json
+{
+  "providers": {
+    "bedrockify": {
+      "baseUrl": "http://127.0.0.1:8090/v1",
+      "apiKey": "not-needed"
+    }
+  }
+}
+```
+
+For other secrets (e.g. GitHub token for a Pi task), fetch from Secrets Manager and pass via environment variable or inline in the task prompt. Pi has no native secrets resolution — secrets must be injected externally before invoking Pi.
+
+## IronClaw-Specific Configuration
+
+IronClaw secrets go in `~/.ironclaw/.env`. For bedrockify, set:
+
+```bash
+LLM_API_KEY=not-needed
+LLM_BASE_URL=http://127.0.0.1:8090/v1
+```
+
+For other secrets, add them as environment variables in `.env`:
+
+```bash
+GITHUB_TOKEN=ghp_xxx
+TELEGRAM_BOT_TOKEN=your-bot-token
+```
+
+To fetch from AWS Secrets Manager at setup time:
+
+```bash
+GITHUB_TOKEN=$(aws secretsmanager get-secret-value \
+  --secret-id "faststart/github-token" --query SecretString --output text)
+echo "GITHUB_TOKEN=${GITHUB_TOKEN}" >> ~/.ironclaw/.env
+```
+
+IronClaw reads `.env` at startup — restart after adding secrets. Do not commit `.env` to version control.
+
+The EC2 Instance Role Permissions section above applies to both agents — secrets are stored the same way in AWS Secrets Manager regardless of which agent reads them.

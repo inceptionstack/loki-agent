@@ -96,6 +96,37 @@ After configuring servers, update `TOOLS.md` with:
 
 This is your cheat sheet — future-you will thank present-you.
 
+## Pi-Specific Configuration
+
+**Not applicable.** Pi has no MCP support. MCPorter cannot be used with Pi. For extended capabilities, use Pi's TypeScript extensions system instead — see `BOOTSTRAP-SKILLS.md`.
+
+## IronClaw-Specific Configuration
+
+IronClaw has **native MCP support** built in — no MCPorter needed. Configure MCP servers directly in IronClaw's config file (check `~/.ironclaw/.env` or `~/.ironclaw/config.toml` depending on your version):
+
+```toml
+# ~/.ironclaw/config.toml (if supported)
+[[mcp_servers]]
+name = "aws-mcp"
+command = "npx"
+args = ["-y", "@anthropic-ai/aws-mcp"]
+env = { AWS_REGION = "us-east-1" }
+
+[[mcp_servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/home/ec2-user"]
+```
+
+Or via environment variables in `~/.ironclaw/.env`:
+
+```bash
+MCP_SERVER_AWS_MCP_COMMAND=npx
+MCP_SERVER_AWS_MCP_ARGS=-y @anthropic-ai/aws-mcp
+```
+
+IronClaw auto-discovers MCP tools at startup and makes them available to the agent. Refer to IronClaw's documentation for the exact config format.
+
 ## 6. Finish
 
 After completing all steps:
