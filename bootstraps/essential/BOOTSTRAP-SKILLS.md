@@ -49,6 +49,27 @@ cd ~/.openclaw/workspace/skills && git pull
 
 Consider adding this to a weekly cron to stay current.
 
+## Pi-Specific Configuration
+
+Pi has a TypeScript extensions system. Load FastStart skills by placing them (or symlinks) in `~/.pi/agent/extensions/`. Extensions must export a standard Pi extension interface.
+
+The FastStart skills library is written for OpenClaw/Hermes — they won't load directly as Pi extensions. However, the reference docs and prompts in each skill directory are still useful as context when crafting Pi tasks.
+
+To install a skill as a Pi extension, copy or adapt the skill's logic into a TypeScript file under `~/.pi/agent/extensions/`:
+
+```bash
+# Example: symlink a compatible extension
+ln -s ~/.openclaw/workspace/skills/my-skill/pi-extension.ts ~/.pi/agent/extensions/my-skill.ts
+```
+
+Check the FastStart skills library for any skills that ship a `pi-extension.ts` file.
+
+## IronClaw-Specific Configuration
+
+IronClaw extends capabilities via MCP servers rather than a native skills system. Point IronClaw at the MCP servers that back each FastStart skill — see `BOOTSTRAP-MCPORTER.md` for server configs.
+
+The FastStart skills library's reference docs are still useful as context. For skill-equivalent functionality in IronClaw, configure the corresponding MCP server in `~/.ironclaw/.env` or IronClaw's MCP config section.
+
 ## 4. Finish
 
 After completing all steps:

@@ -213,6 +213,28 @@ hermes gateway stop && hermes gateway start
 - Bot-to-bot messages are ignored because bot user IDs aren't in `TELEGRAM_ALLOWED_USERS`
 - Alternatively, promote the bot to group admin instead of disabling privacy mode — admin bots see all messages regardless of privacy setting
 
+### Pi Configuration
+
+**Not applicable.** Pi has no Telegram support and cannot participate in group chats.
+
+### IronClaw Configuration
+
+IronClaw supports Telegram groups via its WASM channel. Set the group chat ID and configure mention behavior in `~/.ironclaw/.env`:
+
+```bash
+TELEGRAM_HOME_CHANNEL=GROUP_CHAT_ID        # Negative number, e.g. -1001234567890
+TELEGRAM_ALLOWED_USERS=OWNER_USER_ID
+TELEGRAM_REQUIRE_MENTION=true              # Only respond when @mentioned or replied to
+```
+
+Add custom broadcast trigger patterns if supported:
+
+```bash
+TELEGRAM_MENTION_PATTERNS=@fleet,@all
+```
+
+Restart IronClaw after editing `.env`. The same BotFather privacy mode disable (Part 1) is required for IronClaw — it needs to see all group messages, not just commands.
+
 ---
 
 ## Part 4: Verify

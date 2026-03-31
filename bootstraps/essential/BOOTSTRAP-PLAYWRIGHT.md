@@ -50,4 +50,21 @@ npx playwright --version
 npx playwright open --headless https://example.com 2>/dev/null && echo "Playwright OK"
 ```
 
-If the Chromium binary is present (checked above), Hermes can use browser automation out of the box. No additional configuration needed — Hermes invokes Playwright directly as part of its agent toolchain.
+## Pi-Specific Configuration
+
+Pi has no built-in browser automation. There is no native Playwright integration.
+
+As a potential workaround: if Pi gains MCP support via a future extension, the Playwright MCP server could be loaded. For now, browser tasks are not natively supported in Pi — use OpenClaw or Hermes for browser automation needs.
+
+The Chromium binary at `/home/ec2-user/.cache/ms-playwright/` is available on the instance regardless.
+
+## IronClaw-Specific Configuration
+
+IronClaw has no documented native browser automation support. The Playwright Chromium binary is pre-installed on the instance and available for manual invocation via IronClaw's `shell` tool:
+
+```bash
+# IronClaw can invoke Playwright via its shell tool
+npx playwright chromium --headless https://example.com
+```
+
+For richer browser automation, consider adding the Playwright MCP server to IronClaw's MCP config (see `BOOTSTRAP-MCPORTER.md` for the server definition). This gives IronClaw structured browser control via MCP tools.
