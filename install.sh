@@ -379,17 +379,48 @@ collect_config() {
   info "Configuration"
   echo ""
 
-  # ---- Pack selection (first question) --------------------------------------
+  # ---- Pack selection (dynamically discovered from registry.yaml) -----------
+  local registry="${CLONE_DIR}/packs/registry.yaml"
+  local -a pack_names=()
+  local -a pack_descs=()
+  local -a pack_experimental=()
+
+  # Parse agent packs from registry.yaml (requires python3, already validated)
+  while IFS='|' read -r pname pdesc pexp; do
+    pack_names+=("$pname")
+    pack_descs+=("$pdesc")
+    pack_experimental+=("$pexp")
+  done < <(python3 -c "
+import yaml, sys
+with open('$registry') as f:
+    reg = yaml.safe_load(f)
+for name, cfg in reg.get('packs', {}).items():
+    if cfg.get('type') == 'agent':
+        exp = 'true' if cfg.get('experimental', False) else 'false'
+        print(f\"{name}|{cfg.get('description', name)}|{exp}\")
+" 2>/dev/null || echo "openclaw|OpenClaw — stateful AI agent with persistent gateway|false")
+
   echo "  Agent to deploy:"
-  echo "    1) OpenClaw  -- stateful AI agent with 24/7 gateway (recommended)"
-  echo "    2) Hermes    -- NousResearch CLI agent (lighter)"
+  local i
+  for i in "${!pack_names[@]}"; do
+    local num=$((i + 1))
+    local tag=""
+    [[ "${pack_experimental[$i]}" == "true" ]] && tag=" ${YELLOW}(experimental)${NC}"
+    local rec=""
+    [[ "${pack_names[$i]}" == "openclaw" ]] && rec=" ${GREEN}(recommended)${NC}"
+    echo -e "    ${num}) ${BOLD}${pack_names[$i]}${NC}  -- ${pack_descs[$i]}${rec}${tag}"
+  done
   echo ""
   local pack_choice
   prompt "Deploy which agent" pack_choice "1"
-  case "$pack_choice" in
-    2) PACK_NAME="hermes" ;;
-    *) PACK_NAME="openclaw" ;;
-  esac
+  local idx=$(( pack_choice - 1 ))
+  if [[ $idx -lt 0 || $idx -ge ${#pack_names[@]} ]]; then
+    idx=0  # default to first (openclaw)
+  fi
+  PACK_NAME="${pack_names[$idx]}"
+  if [[ "${pack_experimental[$idx]}" == "true" ]]; then
+    warn "${PACK_NAME} is experimental — expect rough edges"
+  fi
   ok "Selected pack: ${PACK_NAME}"
 
   # Count existing deployments to generate a smart default env name
@@ -405,12 +436,20 @@ collect_config() {
   ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
   prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
-  # Adjust instance size default based on pack
-  local default_size_choice="3"  # openclaw → t4g.xlarge
-  if [[ "$PACK_NAME" == "hermes" ]]; then
-    default_size_choice="1"      # hermes → t4g.medium
-    info "Hermes is lightweight — defaulting to t4g.medium"
-  fi
+  # Adjust instance size default based on pack registry
+  local default_size_choice="3"  # default → t4g.xlarge
+  local pack_instance_type
+  pack_instance_type=$(python3 -c "
+import yaml
+with open('$registry') as f:
+    reg = yaml.safe_load(f)
+print(reg.get('packs', {}).get('$PACK_NAME', {}).get('instance_type', 't4g.xlarge'))
+" 2>/dev/null || echo "t4g.xlarge")
+  case "$pack_instance_type" in
+    t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
+    t4g.large)   default_size_choice="2" ;;
+    *)           default_size_choice="3" ;;
+  esac
   echo ""
   echo "  Instance sizes:"
   echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"

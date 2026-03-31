@@ -28,6 +28,7 @@ packs:
       gateway: 3001
     brain: true
     claude_code: true
+    experimental: false
 
   hermes:
     type: agent
@@ -41,3 +42,32 @@ packs:
     ports: {}
     brain: false
     claude_code: false
+    experimental: false
+
+  pi:
+    type: agent
+    description: "Pi — minimal terminal coding harness (experimental)"
+    deps:
+      - bedrockify
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    default_model: "us.anthropic.claude-sonnet-4-6-v1"
+    ports: {}
+    brain: false
+    claude_code: false
+    experimental: true
+
+  ironclaw:
+    type: agent
+    description: "IronClaw — Rust-based AI agent by NEAR AI (experimental)"
+    deps:
+      - bedrockify
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    default_model: "us.anthropic.claude-sonnet-4-6-v1"
+    ports: {}
+    brain: false
+    claude_code: false
+    experimental: true

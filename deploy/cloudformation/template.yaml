@@ -108,7 +108,9 @@ Parameters:
     AllowedValues:
       - openclaw
       - hermes
-    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter, t4g.medium sufficient)."
+      - pi
+      - ironclaw
+    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter). 'pi' and 'ironclaw' are experimental."
 
   EnvironmentName:
     Type: String
