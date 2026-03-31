@@ -17,8 +17,10 @@
 # LLM_BACKEND=openai_compatible, pointing at bedrockify.
 #
 # Known issue: IronClaw may attempt dbus/secret-service for keychain access
-# on Linux. On headless EC2, this may fail silently. We set
-# IRONCLAW_DISABLE_KEYRING=1 as a workaround.
+# on Linux. On headless EC2, this may fail silently. Since we set
+# LLM_BACKEND=openai_compatible with explicit credentials in .env,
+# the OS credential store path should not be triggered for LLM access.
+# If startup fails with dbus errors, install dbus: sudo dnf install -y dbus
 #
 # Idempotent: safe to re-run.
 
@@ -148,9 +150,6 @@ LLM_BACKEND=openai_compatible
 LLM_BASE_URL=http://127.0.0.1:${BEDROCKIFY_PORT}/v1
 LLM_API_KEY=not-needed
 LLM_MODEL=${MODEL}
-
-# Disable keyring — headless EC2 has no dbus/secret-service
-IRONCLAW_DISABLE_KEYRING=1
 EOF
 
 chmod 600 "${HOME}/.ironclaw/.env"
