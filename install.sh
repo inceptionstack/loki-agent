@@ -91,10 +91,10 @@ require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 confirm_or_abort() { confirm "$@" || { echo "Aborted."; exit 0; }; }
 
 # Extract a key from JSON on stdin
-json_field() { python3 -c "import json,sys; print(json.load(sys.stdin)[sys.argv[1]])" "$1"; }
+json_field() { jq -r ".$1" 2>/dev/null; }
 
 # URL-encode a string
-url_encode() { python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"; }
+url_encode() { jq -rn --arg s "$1" '$s | @uri'; }
 
 # Verify AWS credentials with specific error messages.
 # On success, sets ACCOUNT_ID and CALLER_ARN from a single STS call.
@@ -211,7 +211,7 @@ preflight_checks() {
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
-  require_cmd python3 "Python 3 is required but not found. Install it from your package manager."
+  require_cmd jq "jq is required but not found. Install: https://jqlang.github.io/jq/download/"
 
   verify_aws_credentials
   # ACCOUNT_ID and CALLER_ARN are now set by verify_aws_credentials (single STS call)
@@ -379,17 +379,55 @@ collect_config() {
   info "Configuration"
   echo ""
 
-  # ---- Pack selection (first question) --------------------------------------
+  # ---- Pack selection (dynamically discovered from registry.json) -----------
+  # CLONE_DIR may not be set yet (repo is cloned after config collection).
+  # If the local file isn't available, fetch from GitHub.
+  local registry="${CLONE_DIR:-}/packs/registry.json"
+  if [[ ! -f "$registry" ]]; then
+    local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.json"
+    registry="/tmp/loki-registry-$$.json"
+    curl -sfL "$registry_url" -o "$registry" 2>/dev/null || registry=""
+  fi
+  local -a pack_names=()
+  local -a pack_descs=()
+  local -a pack_experimental=()
+
+  # Parse agent packs from registry.json via jq
+  while IFS='|' read -r pname pdesc pexp; do
+    pack_names+=("$pname")
+    pack_descs+=("$pdesc")
+    pack_experimental+=("$pexp")
+  done < <([ -n "$registry" ] && jq -r '
+    .packs | to_entries[]
+    | select(.value.type == "agent")
+    | "\(.key)|\(.value.description // .key)|\(if .value.experimental then "true" else "false" end)"
+  ' "$registry" 2>/dev/null \
+    || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
+
   echo "  Agent to deploy:"
-  echo "    1) OpenClaw  -- stateful AI agent with 24/7 gateway (recommended)"
-  echo "    2) Hermes    -- NousResearch CLI agent (lighter)"
+  local i
+  for i in "${!pack_names[@]}"; do
+    local num=$((i + 1))
+    local tag=""
+    [[ "${pack_experimental[$i]}" == "true" ]] && tag=" ${YELLOW}(experimental)${NC}"
+    local rec=""
+    [[ "${pack_names[$i]}" == "openclaw" ]] && rec=" ${GREEN}(recommended)${NC}"
+    echo -e "    ${num}) ${BOLD}${pack_names[$i]}${NC}  -- ${pack_descs[$i]}${rec}${tag}"
+  done
   echo ""
   local pack_choice
   prompt "Deploy which agent" pack_choice "1"
-  case "$pack_choice" in
-    2) PACK_NAME="hermes" ;;
-    *) PACK_NAME="openclaw" ;;
-  esac
+  # Sanitize: strip non-digits, default to 1
+  pack_choice="${pack_choice//[^0-9]/}"
+  [[ -z "$pack_choice" ]] && pack_choice=1
+  local idx=$(( pack_choice - 1 ))
+  if [[ $idx -lt 0 || $idx -ge ${#pack_names[@]} ]]; then
+    idx=0  # default to first (openclaw)
+  fi
+  PACK_NAME="${pack_names[$idx]}"
+  if [[ "${pack_experimental[$idx]}" == "true" ]]; then
+    warn "${PACK_NAME} is experimental — expect rough edges"
+  fi
   ok "Selected pack: ${PACK_NAME}"
 
   # Count existing deployments to generate a smart default env name
@@ -405,12 +443,15 @@ collect_config() {
   ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
   prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
-  # Adjust instance size default based on pack
-  local default_size_choice="3"  # openclaw → t4g.xlarge
-  if [[ "$PACK_NAME" == "hermes" ]]; then
-    default_size_choice="1"      # hermes → t4g.medium
-    info "Hermes is lightweight — defaulting to t4g.medium"
-  fi
+  # Adjust instance size default based on pack registry
+  local default_size_choice="3"  # default → t4g.xlarge
+  local pack_instance_type
+  pack_instance_type=$([ -n "$registry" ] && jq -r --arg p "$PACK_NAME" '.packs[$p].instance_type // "t4g.xlarge"' "$registry" 2>/dev/null || echo "t4g.xlarge")
+  case "$pack_instance_type" in
+    t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
+    t4g.large)   default_size_choice="2" ;;
+    *)           default_size_choice="3" ;;
+  esac
   echo ""
   echo "  Instance sizes:"
   echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"
@@ -743,16 +784,16 @@ install_terraform() {
   info "Downloading Terraform ${version} (${os}/${arch})..."
   curl -sfL "$zip_url" -o "$tmp_zip" || fail "Failed to download Terraform from ${zip_url}"
 
-  # Unzip — use python3 if unzip not available (CloudShell may not have it)
+  # Unzip — use busybox or jar as fallback if unzip not available (CloudShell may not have it)
   mkdir -p "$install_dir"
   if command -v unzip &>/dev/null; then
     unzip -o -q "$tmp_zip" -d "$install_dir"
+  elif command -v busybox &>/dev/null; then
+    busybox unzip -o -q "$tmp_zip" -d "$install_dir"
+  elif command -v jar &>/dev/null; then
+    (cd "$install_dir" && jar xf "$tmp_zip")
   else
-    python3 -c "
-import zipfile, sys
-with zipfile.ZipFile(sys.argv[1]) as z:
-    z.extractall(sys.argv[2])
-" "$tmp_zip" "$install_dir"
+    fail "Cannot extract terraform zip — install 'unzip': sudo yum install -y unzip (or sudo apt install unzip)"
   fi
 
   chmod +x "${install_dir}/terraform"

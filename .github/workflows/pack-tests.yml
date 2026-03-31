@@ -1,0 +1,59 @@
+name: Pack tests
+
+on:
+  push:
+    branches: [main, 'feature/**']
+    paths:
+      - 'packs/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - '.github/workflows/pack-tests.yml'
+  pull_request:
+    paths:
+      - 'packs/**'
+      - 'tests/**'
+      - 'scripts/**'
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.find.outputs.tests }}
+      has_tests: ${{ steps.find.outputs.has_tests }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover test scripts
+        id: find
+        run: |
+          # Find all test.sh files in packs/ and tests/ by naming convention
+          tests=$(find packs/*/test.sh tests/test-*.sh -type f 2>/dev/null | jq -Rsc 'split("\n") | map(select(length > 0))')
+          echo "tests=${tests}" >> "$GITHUB_OUTPUT"
+          if [[ "$tests" == "[]" ]]; then
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+            echo "No test scripts found"
+          else
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+            echo "Found tests: ${tests}"
+          fi
+
+  test:
+    needs: discover
+    if: needs.discover.outputs.has_tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.discover.outputs.tests) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ${{ matrix.test }}
+        run: |
+          chmod +x "${{ matrix.test }}"
+          bash "${{ matrix.test }}"
+        env:
+          CI: "true"
