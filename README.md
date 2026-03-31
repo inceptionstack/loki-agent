@@ -433,6 +433,15 @@ Loki is:
 
 Loki is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-agent](https://github.com/inceptionstack/loki-agent).
 
-Built on [OpenClaw](https://github.com/openclaw/openclaw) — the engine that powers the agent runtime, tool execution, and memory system.
+Built on [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes](https://github.com/NousResearch/hermes-agent) — choose your agent runtime at deploy time.
+
+### InceptionStack Repositories
+
+| Repo | Description |
+|------|-------------|
+| **[loki-agent](https://github.com/inceptionstack/loki-agent)** | Deploy templates (CloudFormation, SAM, Terraform), pack system, bootstrap scripts, brain files |
+| **[loki-skills](https://github.com/inceptionstack/loki-skills)** | Agent skills library — AWS infrastructure, observability, payments, and more (OpenClaw + Hermes) |
+| **[bedrockify](https://github.com/inceptionstack/bedrockify)** | OpenAI-compatible proxy for Amazon Bedrock — chat completions + embeddings in one binary |
+| **[ai-patterns](https://github.com/inceptionstack/ai-patterns)** | AI Agent Architecture Patterns — definitions, naming, and design considerations |
 
 Contributions, issues, and feedback welcome.
