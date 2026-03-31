@@ -21,6 +21,12 @@ exec > >(tee "$LOGFILE") 2>&1
 # Trap for unexpected exits — clean up SSM publisher and signal CFN failure
 trap '
   echo "[FAIL] Bootstrap exited unexpectedly at line $LINENO" >&2
+  aws ssm put-parameter --name "/loki/setup-status" \
+    --value "FAILED" \
+    --type String --overwrite --region "${REGION:-us-east-1}" >/dev/null 2>&1 || true
+  aws ssm put-parameter --name "/loki/setup-step" \
+    --value "FAILED at line $LINENO" \
+    --type String --overwrite --region "${REGION:-us-east-1}" >/dev/null 2>&1 || true
   touch /tmp/loki-bootstrap-done
   if [[ -n "${STACK_NAME:-}" ]]; then
     /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "${REGION:-us-east-1}" 2>/dev/null || true

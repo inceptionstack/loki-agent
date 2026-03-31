@@ -863,6 +863,34 @@ wait_for_bootstrap() {
   echo "  Instance: ${INSTANCE_ID} | IP: ${PUBLIC_IP}"
 
   for i in $(seq 1 60); do
+    # Check for failure status first (fast path — no SSM command needed)
+    local setup_status
+    setup_status=$(aws ssm get-parameter --name "/loki/setup-status" \
+      --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+    if [[ "$setup_status" == "FAILED" ]]; then
+      echo ""
+      local fail_step
+      fail_step=$(aws ssm get-parameter --name "/loki/setup-step" \
+        --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "unknown step")
+      local fail_log
+      fail_log=$(aws ssm get-parameter --name "/loki/setup-log" \
+        --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+      echo ""
+      echo -e "  ${RED}✗ Bootstrap FAILED${NC}"
+      echo -e "  ${BOLD}Step:${NC} ${fail_step}"
+      if [[ -n "$fail_log" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Last log output:${NC}"
+        echo "$fail_log" | tail -20 | sed 's/^/    /'
+      fi
+      echo ""
+      echo "  To debug, connect via SSM:"
+      echo "    $(ssm_connect_cmd "$INSTANCE_ID")"
+      echo "  Then check: cat /var/log/loki-bootstrap.log"
+      echo ""
+      return 1
+    fi
+
     local cmd_id
     cmd_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
       --document-name AWS-RunShellScript \

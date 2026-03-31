@@ -11,13 +11,29 @@ export LITELLM_API_KEY="${litellm_api_key}"
 export LITELLM_MODEL="${litellm_model}"
 export PROVIDER_API_KEY="${provider_api_key}"
 export PACK_NAME="${pack_name}"
+
+# Publish failure to SSM on any error so the installer can detect it
+trap '
+  aws ssm put-parameter --name "/loki/setup-status" \
+    --value "FAILED" --type String --overwrite --region "$REGION" 2>/dev/null || true
+  aws ssm put-parameter --name "/loki/setup-step" \
+    --value "FAILED: userdata error at line $LINENO" \
+    --type String --overwrite --region "$REGION" 2>/dev/null || true
+  touch /tmp/loki-bootstrap-done
+' ERR
+
 # Ensure git is available (not present on all AMIs)
 command -v git &>/dev/null || dnf install -y git || yum install -y git
 # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
+_cloned=false
 for _attempt in 1 2 3; do
-  git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && break
+  git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && _cloned=true && break
   echo "git clone failed (attempt $_attempt), retrying in 10s..." && sleep 10
 done
+if [[ "$_cloned" != "true" ]]; then
+  echo "FATAL: git clone failed after 3 attempts" >&2
+  exit 1
+fi
 bash /tmp/loki-agent/deploy/bootstrap.sh \
   --pack "$PACK_NAME" \
   --region "$BEDROCK_REGION" \
