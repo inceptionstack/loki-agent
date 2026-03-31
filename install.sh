@@ -91,10 +91,10 @@ require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
 confirm_or_abort() { confirm "$@" || { echo "Aborted."; exit 0; }; }
 
 # Extract a key from JSON on stdin
-json_field() { python3 -c "import json,sys; print(json.load(sys.stdin)[sys.argv[1]])" "$1"; }
+json_field() { jq -r ".$1" 2>/dev/null; }
 
 # URL-encode a string
-url_encode() { python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"; }
+url_encode() { jq -rn --arg s "$1" '$s | @uri'; }
 
 # Verify AWS credentials with specific error messages.
 # On success, sets ACCOUNT_ID and CALLER_ARN from a single STS call.
@@ -211,7 +211,7 @@ preflight_checks() {
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
-  require_cmd python3 "Python 3 is required but not found. Install it from your package manager."
+  require_cmd jq "jq is required but not found. Install: https://jqlang.github.io/jq/download/"
 
   verify_aws_credentials
   # ACCOUNT_ID and CALLER_ARN are now set by verify_aws_credentials (single STS call)
@@ -379,27 +379,30 @@ collect_config() {
   info "Configuration"
   echo ""
 
-  # ---- Pack selection (dynamically discovered from registry.yaml) -----------
+  # ---- Pack selection (dynamically discovered from registry.json) -----------
   # CLONE_DIR may not be set yet (repo is cloned after config collection).
   # If the local file isn't available, fetch from GitHub.
-  local registry="${CLONE_DIR:-}/packs/registry.yaml"
+  local registry="${CLONE_DIR:-}/packs/registry.json"
   if [[ ! -f "$registry" ]]; then
-    local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.yaml"
-    registry="/tmp/loki-registry-$$.yaml"
+    local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.json"
+    registry="/tmp/loki-registry-$$.json"
     curl -sfL "$registry_url" -o "$registry" 2>/dev/null || registry=""
   fi
   local -a pack_names=()
   local -a pack_descs=()
   local -a pack_experimental=()
 
-  # Parse agent packs from registry.yaml via scripts/parse-registry.py (stdlib only)
-  local parser="${CLONE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}/scripts/parse-registry.py"
+  # Parse agent packs from registry.json via jq
   while IFS='|' read -r pname pdesc pexp; do
     pack_names+=("$pname")
     pack_descs+=("$pdesc")
     pack_experimental+=("$pexp")
-  done < <([ -n "$registry" ] && python3 "$parser" "$registry" list-agents 2>/dev/null \
-    || echo "openclaw|OpenClaw — stateful AI agent with persistent gateway|false")
+  done < <([ -n "$registry" ] && jq -r '
+    .packs | to_entries[]
+    | select(.value.type == "agent")
+    | "\(.key)|\(.value.description // .key)|\(if .value.experimental then "true" else "false" end)"
+  ' "$registry" 2>/dev/null \
+    || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
 
   echo "  Agent to deploy:"
   local i
@@ -443,7 +446,7 @@ collect_config() {
   # Adjust instance size default based on pack registry
   local default_size_choice="3"  # default → t4g.xlarge
   local pack_instance_type
-  pack_instance_type=$([ -n "$registry" ] && python3 "$parser" "$registry" get "$PACK_NAME" instance_type 2>/dev/null || echo "t4g.xlarge")
+  pack_instance_type=$([ -n "$registry" ] && jq -r --arg p "$PACK_NAME" '.packs[$p].instance_type // "t4g.xlarge"' "$registry" 2>/dev/null || echo "t4g.xlarge")
   case "$pack_instance_type" in
     t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
     t4g.large)   default_size_choice="2" ;;
@@ -781,16 +784,16 @@ install_terraform() {
   info "Downloading Terraform ${version} (${os}/${arch})..."
   curl -sfL "$zip_url" -o "$tmp_zip" || fail "Failed to download Terraform from ${zip_url}"
 
-  # Unzip — use python3 if unzip not available (CloudShell may not have it)
+  # Unzip — use busybox or jar as fallback if unzip not available (CloudShell may not have it)
   mkdir -p "$install_dir"
   if command -v unzip &>/dev/null; then
     unzip -o -q "$tmp_zip" -d "$install_dir"
+  elif command -v busybox &>/dev/null; then
+    busybox unzip -o -q "$tmp_zip" -d "$install_dir"
+  elif command -v jar &>/dev/null; then
+    (cd "$install_dir" && jar xf "$tmp_zip")
   else
-    python3 -c "
-import zipfile, sys
-with zipfile.ZipFile(sys.argv[1]) as z:
-    z.extractall(sys.argv[2])
-" "$tmp_zip" "$install_dir"
+    fail "Cannot extract terraform zip — install 'unzip': sudo yum install -y unzip (or sudo apt install unzip)"
   fi
 
   chmod +x "${install_dir}/terraform"
