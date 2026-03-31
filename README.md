@@ -39,9 +39,11 @@ Run the install command from the TL;DR above. The installer verifies AWS permiss
 | Pack | Description | Instance | Data Volume |
 |------|-------------|----------|-------------|
 | **OpenClaw** (default) | Stateful AI agent with 24/7 gateway, persistent memory, Telegram/Discord/Slack | t4g.xlarge recommended | 80GB |
-| **Hermes** | NousResearch CLI agent — lighter, terminal-focused | t4g.medium sufficient | None needed (set to 0) |
+| **Hermes** *(experimental)* | NousResearch CLI agent — lighter, terminal-focused, self-improving skills | t4g.medium sufficient | None needed (set to 0) |
+| **Pi** *(experimental)* | Minimal terminal coding harness — read, write, edit, bash tools | t4g.medium sufficient | None needed (set to 0) |
+| **IronClaw** *(experimental)* | Rust-based AI agent by NEAR AI — static binary, fast startup | t4g.medium sufficient | None needed (set to 0) |
 
-The installer asks which pack to deploy and adjusts defaults accordingly.
+The installer discovers packs dynamically and asks which to deploy. Experimental packs are clearly marked.
 
 > **Works from AWS CloudShell!** You can run the installer directly from [AWS CloudShell](https://console.aws.amazon.com/cloudshell/) — no local setup needed. CloudShell already has AWS credentials configured via your console session. If you pick Terraform as the deployment method, the installer will offer to install it automatically (no root required).
 
@@ -151,7 +153,9 @@ Loki uses a **pack-based architecture** for deploying different AI agent runtime
 |------|------|-------------|
 | `bedrockify` | Base (auto-installed) | OpenAI-compatible proxy for Amazon Bedrock. Runs as a systemd daemon on port 8090. All agent packs depend on this. |
 | `openclaw` | Agent | Full stateful AI agent with 24/7 gateway, persistent memory, multi-channel support (Telegram, Discord, Slack). Includes Claude Code. |
-| `hermes` | Agent | NousResearch Hermes CLI agent. Lightweight, terminal-focused, uses bedrockify for model access. |
+| `hermes` | Agent *(experimental)* | NousResearch Hermes CLI agent. Self-improving skills, learning loop, lightweight. Uses bedrockify for model access. |
+| `pi` | Agent *(experimental)* | Pi Coding Agent. Minimal terminal coding harness with read, write, edit, bash tools. Pure Node.js. |
+| `ironclaw` | Agent *(experimental)* | IronClaw by NEAR AI. Rust-based agent with shell/file tools, MCP support. Single static binary. |
 
 ### How It Works
 

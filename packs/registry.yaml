@@ -32,7 +32,7 @@ packs:
 
   hermes:
     type: agent
-    description: "Hermes — NousResearch CLI agent via bedrockify"
+    description: "Hermes — NousResearch CLI agent via bedrockify (experimental)"
     deps:
       - bedrockify
     instance_type: t4g.medium
@@ -42,7 +42,7 @@ packs:
     ports: {}
     brain: false
     claude_code: false
-    experimental: false
+    experimental: true
 
   pi:
     type: agent
