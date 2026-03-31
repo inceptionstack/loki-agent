@@ -1,4 +1,4 @@
-# Loki: A Stateful Prototyping/Dev/Research/Ops Agent based on openclaw in your AWS account
+# Loki: A Harness for Safely Deploying Stateful Full-Stack Builder Agents based on OpenClaw, Hermes and more into your AWS Account.
 
 [![Loki Agent Demo](https://img.youtube.com/vi/dJSk8DYlHvI/maxresdefault.jpg)](https://www.youtube.com/watch?v=dJSk8DYlHvI)
 
