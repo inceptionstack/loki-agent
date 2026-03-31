@@ -1,6 +1,6 @@
 # OPTIMIZE-TOO-LARGE-CONTEXT.md — Context Window Optimization
 
-> **Applies to:** All agents (with agent-specific sections below)
+> **Applies to:** OpenClaw only — Hermes has built-in context compression and does not need manual optimization.
 
 > **Run this if your system prompt exceeds ~5,000 tokens for workspace files, or if you're hitting context limits too quickly.**
 
@@ -51,7 +51,7 @@ After making changes, check your total system prompt token count. Target: under 
 
 ---
 
-## OpenClaw-Specific Configuration
+## OpenClaw-Specific Notes
 
 OpenClaw loads workspace files (`SOUL.md`, `USER.md`, `AGENTS.md`, `IDENTITY.md`, `MEMORY.md`, `TOOLS.md`, `HEARTBEAT.md`) into the system prompt as "Project Context" on every message. To check current token usage:
 
@@ -65,32 +65,12 @@ OpenClaw config options for context management:
 - `agents.defaults.memorySearch.enabled: true` — offloads knowledge to searchable memory instead of the system prompt
 - Skills in `~/.openclaw/workspace/skills/` — loaded only when relevant, not every turn
 
-## Hermes-Specific Configuration
+## Why This Doesn't Apply to Hermes
 
-Hermes manages context differently:
-- **MEMORY.md** is capped at ~2,200 chars and **USER.md** at ~1,375 chars (configurable in `config.yaml`)
-- **Context files** (`.hermes.md`, `AGENTS.md`, etc.) are loaded per-directory based on the CWD
-- Hermes has built-in **context compression** that activates automatically when context exceeds a threshold
+Hermes has built-in automatic context management:
+- **MEMORY.md** is capped at ~2,200 chars and **USER.md** at ~1,375 chars
+- **Context compression** activates automatically when context exceeds a configurable threshold
+- `/compress` manually triggers compression; `/usage` shows token counts
+- Skills are loaded progressively on-demand
 
-To adjust Hermes context limits:
-
-```yaml
-# In ~/.hermes/config.yaml
-memory:
-  memory_char_limit: 2200    # MEMORY.md max chars
-  user_char_limit: 1375      # USER.md max chars
-
-compression:
-  enabled: true
-  threshold: 0.50            # Compress when context exceeds 50% of model window
-  summary_model: "your-model"
-```
-
-To check current context usage in a Hermes session:
-```
-/usage          # Shows token counts
-/compress       # Manually compress context
-/insights       # Usage analytics
-```
-
-Hermes skills are also loaded on-demand. Moving reference material from workspace files into skills (at `~/.hermes/skills/`) has the same benefit — reduces per-message context overhead.
+No manual optimization is needed — skip this bootstrap entirely for Hermes agents.
