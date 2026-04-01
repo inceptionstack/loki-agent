@@ -44,7 +44,13 @@ yaml_parse_ok() {
 }
 
 # ── Packs to test ─────────────────────────────────────────────────────────────
-PACKS=(bedrockify openclaw hermes)
+# Dynamically discover all packs (directories with manifest.yaml)
+PACKS=()
+for _dir in "${SCRIPT_DIR}"/*/; do
+  _pack=$(basename "$_dir")
+  [[ -f "${_dir}/manifest.yaml" ]] && PACKS+=("$_pack")
+done
+unset _dir _pack
 
 # ── Test: common.sh ───────────────────────────────────────────────────────────
 header "Test: common.sh"
@@ -290,7 +296,7 @@ done
 # ── Test: resources/ directory ────────────────────────────────────────────────
 header "Test: resources/"
 
-# Expected resources per pack
+# Expected resources per pack (packs not listed here skip the per-file check)
 declare -A PACK_RESOURCES
 PACK_RESOURCES[bedrockify]="bedrockify.service.tpl"
 PACK_RESOURCES[openclaw]="config-gen.py openclaw-gateway.service.tpl"
@@ -303,6 +309,12 @@ for pack in "${PACKS[@]}"; do
     pass "${pack}/resources/ directory exists"
   else
     fail "${pack}/resources/ directory missing"
+    continue
+  fi
+
+  # Skip per-file checks for packs without a resource manifest
+  if [[ -z "${PACK_RESOURCES[$pack]+x}" ]]; then
+    skip "${pack}/resources/ — no expected resources defined (directory exists, OK)"
     continue
   fi
 
@@ -327,10 +339,12 @@ done
 header "Test: shellcheck (lint)"
 
 if command -v shellcheck &>/dev/null; then
-  for script in "${SCRIPT_DIR}/common.sh" \
-                "${SCRIPT_DIR}/bedrockify/install.sh" \
-                "${SCRIPT_DIR}/openclaw/install.sh" \
-                "${SCRIPT_DIR}/hermes/install.sh"; do
+  # Dynamically lint common.sh + all pack install scripts
+  _lint_scripts=("${SCRIPT_DIR}/common.sh")
+  for _p in "${PACKS[@]}"; do
+    [[ -f "${SCRIPT_DIR}/${_p}/install.sh" ]] && _lint_scripts+=("${SCRIPT_DIR}/${_p}/install.sh")
+  done
+  for script in "${_lint_scripts[@]}"; do
     if [[ -f "${script}" ]]; then
       SCRIPT_NAME="$(basename "$(dirname "${script}")")/$(basename "${script}")"
       if shellcheck -S warning "${script}" 2>/dev/null; then

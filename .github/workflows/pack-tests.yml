@@ -7,12 +7,16 @@ on:
       - 'packs/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'deploy/**'
+      - 'install.sh'
       - '.github/workflows/pack-tests.yml'
   pull_request:
     paths:
       - 'packs/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'deploy/**'
+      - 'install.sh'
 
 permissions:
   contents: read
