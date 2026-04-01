@@ -383,6 +383,11 @@ ok "mise + Node.js setup complete"
 PACK_PROFILE="${PACKS_DIR}/${PACK_NAME}/resources/shell-profile.sh"
 if [[ -f "$PACK_PROFILE" ]]; then
   # Source pack profile to get PACK_ALIASES, PACK_BANNER_NAME, etc.
+  # Default all expected vars first — packs may omit optional ones
+  PACK_ALIASES=""
+  PACK_BANNER_NAME="${PACK_NAME}"
+  PACK_BANNER_EMOJI="🤖"
+  PACK_BANNER_COMMANDS=""
   source "$PACK_PROFILE"
 
   # Write aliases to ec2-user .bashrc

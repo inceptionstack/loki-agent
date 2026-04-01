@@ -993,10 +993,39 @@ wait_for_bootstrap() {
         echo -e "  ${BOLD}Last log output:${NC}"
         echo "$fail_log" | tail -20 | sed 's/^/    /'
       fi
+
+      # Auto-fetch full bootstrap log via SSM (saves the user from manual SSM + cat)
       echo ""
-      echo "  To debug, connect via SSM:"
-      echo "    $(ssm_connect_cmd "$INSTANCE_ID")"
-      echo "  Then check: cat /var/log/loki-bootstrap.log"
+      info "Fetching full bootstrap log from instance..."
+      local log_cmd_id
+      log_cmd_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+        --document-name AWS-RunShellScript \
+        --parameters 'commands=["cat /var/log/loki-bootstrap.log 2>/dev/null || echo LOG_NOT_FOUND"]' \
+        --region "$DEPLOY_REGION" --output text --query 'Command.CommandId' 2>/dev/null || echo "")
+      if [[ -n "$log_cmd_id" ]]; then
+        sleep 8  # give SSM time to execute
+        local full_log
+        full_log=$(aws ssm get-command-invocation --command-id "$log_cmd_id" \
+          --instance-id "$INSTANCE_ID" --region "$DEPLOY_REGION" \
+          --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
+        if [[ -n "$full_log" && "$full_log" != "LOG_NOT_FOUND" ]]; then
+          local log_file="/tmp/loki-bootstrap-${INSTANCE_ID}.log"
+          echo "$full_log" > "$log_file"
+          ok "Full bootstrap log saved to: ${log_file}"
+          echo ""
+          echo -e "  ${BOLD}Last 30 lines:${NC}"
+          echo "$full_log" | tail -30 | sed 's/^/    /'
+        else
+          warn "Could not retrieve bootstrap log via SSM"
+          echo "  Connect manually: $(ssm_connect_cmd "$INSTANCE_ID")"
+          echo "  Then check: cat /var/log/loki-bootstrap.log"
+        fi
+      else
+        warn "SSM command failed — instance may not be reachable yet"
+        echo "  Connect manually: $(ssm_connect_cmd "$INSTANCE_ID")"
+        echo "  Then check: cat /var/log/loki-bootstrap.log"
+      fi
+
       echo ""
       return 1
     fi
