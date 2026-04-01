@@ -1,0 +1,429 @@
+#!/usr/bin/env bash
+# scripts/verify-pack — Validate a pack directory meets all loki-agent requirements
+#
+# Usage:
+#   verify-pack ./packs/my-pack           Verify a single pack
+#   verify-pack ./packs/my-pack --fix     Show fix suggestions for failures
+#   verify-pack --all                     Verify all packs in packs/
+#
+# Exit: 0 = all checks pass, 1 = failures found
+#
+# This is the authoritative pre-submit check for pack authors.
+# The same contracts are enforced in CI (tests/test-pack-contracts.sh).
+
+set -euo pipefail
+
+# ── Colors ────────────────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+
+PASS=0; FAIL=0; WARN=0; SKIP=0
+FIX_MODE=false
+
+pass()  { printf "  ${GREEN}✓${NC} %s\n" "$1"; PASS=$((PASS + 1)); }
+fail_c() { printf "  ${RED}✗${NC} %s\n" "$1"; FAIL=$((FAIL + 1)); }
+warn_c() { printf "  ${YELLOW}⚠${NC} %s\n" "$1"; WARN=$((WARN + 1)); }
+skip_c() { printf "  ${DIM}○${NC} %s\n" "$1"; SKIP=$((SKIP + 1)); }
+hint()  { $FIX_MODE && printf "    ${DIM}→ %s${NC}\n" "$1" || true; }
+section() { printf "\n${BOLD}${CYAN}── %s${NC}\n" "$1"; }
+
+# ── Usage ─────────────────────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+Usage: verify-pack <pack-directory> [--fix]
+       verify-pack --all [--fix]
+
+Validates a loki-agent pack against all required contracts.
+
+Options:
+  --fix     Show fix suggestions for each failure
+  --all     Verify all packs in packs/ directory
+  --help    Show this help
+
+Examples:
+  verify-pack ./packs/ironclaw
+  verify-pack ./packs/ironclaw --fix
+  verify-pack --all
+EOF
+  exit 0
+}
+
+# ── Resolve repo root ────────────────────────────────────────────────────────
+# Try to find the repo root (where packs/, deploy/, install.sh live)
+find_repo_root() {
+  local dir="$1"
+  # Walk up from the pack dir looking for packs/ sibling or install.sh
+  local d
+  d=$(cd "$dir" 2>/dev/null && pwd)
+  while [[ "$d" != "/" ]]; do
+    if [[ -f "$d/install.sh" && -d "$d/packs" ]]; then
+      echo "$d"; return 0
+    fi
+    d=$(dirname "$d")
+  done
+  # Fallback: check if we're already in the repo
+  if [[ -f "./install.sh" && -d "./packs" ]]; then
+    pwd; return 0
+  fi
+  echo ""
+}
+
+# ── Pack validation ───────────────────────────────────────────────────────────
+verify_single_pack() {
+  local pack_dir="$1"
+
+  # Resolve to absolute path
+  pack_dir=$(cd "$pack_dir" 2>/dev/null && pwd) || {
+    fail_c "Directory not found: $1"
+    return
+  }
+
+  local pack_name
+  pack_name=$(basename "$pack_dir")
+  local repo_root
+  repo_root=$(find_repo_root "$pack_dir")
+
+  printf "\n${BOLD}╔══════════════════════════════════════════════════════════╗${NC}\n"
+  printf "${BOLD}║  Verifying pack: %-39s║${NC}\n" "$pack_name"
+  printf "${BOLD}╚══════════════════════════════════════════════════════════╝${NC}\n"
+
+  # ── 1. Directory structure ──────────────────────────────────────────────────
+  section "1. Directory Structure"
+
+  if [[ -d "$pack_dir" ]]; then
+    pass "Pack directory exists: $pack_name/"
+  else
+    fail_c "Pack directory missing"
+    return
+  fi
+
+  if [[ -d "$pack_dir/resources" ]]; then
+    pass "resources/ directory exists"
+  else
+    fail_c "resources/ directory missing"
+    hint "mkdir -p $pack_name/resources"
+  fi
+
+  # ── 2. manifest.yaml ───────────────────────────────────────────────────────
+  section "2. manifest.yaml"
+
+  local manifest="$pack_dir/manifest.yaml"
+  if [[ ! -f "$manifest" ]]; then
+    fail_c "manifest.yaml missing"
+    hint "Create $pack_name/manifest.yaml — see docs/pack-checklist.md"
+    return
+  fi
+  pass "manifest.yaml exists"
+
+  # Valid YAML
+  if python3 -c "import yaml; yaml.safe_load(open('$manifest'))" 2>/dev/null; then
+    pass "manifest.yaml is valid YAML"
+  else
+    fail_c "manifest.yaml is invalid YAML"
+    hint "Check for indentation errors, missing colons, or unquoted special chars"
+    return
+  fi
+
+  # Required keys
+  local required_keys=(name version type description deps requirements params health_check provides)
+  for key in "${required_keys[@]}"; do
+    if python3 -c "import yaml,sys; d=yaml.safe_load(open('$manifest')); sys.exit(0 if '$key' in d else 1)" 2>/dev/null; then
+      pass "manifest has '$key'"
+    else
+      fail_c "manifest MISSING '$key'"
+      case "$key" in
+        name)         hint "$key: $pack_name" ;;
+        version)      hint "$key: \"1.0.0\"" ;;
+        type)         hint "$key: agent  # or 'base'" ;;
+        deps)         hint "$key:\n  - bedrockify  # most agent packs depend on this" ;;
+        requirements) hint "$key:\n  arch: [arm64, amd64]\n  os: [al2023, ubuntu2204]\n  min_instance_type: t4g.medium" ;;
+        params)       hint "$key:\n  - name: region\n    description: \"AWS region\"\n    default: us-east-1" ;;
+        health_check) hint "$key:\n  command: \"$pack_name --version\"\n  timeout: 10" ;;
+        provides)     hint "$key:\n  commands: [$pack_name]\n  services: []" ;;
+      esac
+    fi
+  done
+
+  # Name matches directory
+  local manifest_name
+  manifest_name=$(python3 -c "import yaml; print(yaml.safe_load(open('$manifest')).get('name',''))" 2>/dev/null || echo "")
+  if [[ "$manifest_name" == "$pack_name" ]]; then
+    pass "manifest name matches directory ($pack_name)"
+  else
+    fail_c "manifest name '$manifest_name' does NOT match directory '$pack_name'"
+    hint "Change name: in manifest.yaml to '$pack_name'"
+  fi
+
+  # Type validation
+  local pack_type
+  pack_type=$(python3 -c "import yaml; print(yaml.safe_load(open('$manifest')).get('type',''))" 2>/dev/null || echo "")
+  if [[ "$pack_type" == "agent" || "$pack_type" == "base" ]]; then
+    pass "manifest type is valid: $pack_type"
+  else
+    fail_c "manifest type is invalid: '$pack_type' (must be 'agent' or 'base')"
+    hint "type: agent  # or 'base' for infrastructure-only packs like bedrockify"
+  fi
+
+  # Params have name + description + default
+  local param_count
+  param_count=$(python3 -c "import yaml; d=yaml.safe_load(open('$manifest')); print(len(d.get('params',[])))" 2>/dev/null || echo "0")
+  if [[ "$param_count" -gt 0 ]]; then
+    local bad_params
+    bad_params=$(python3 -c "
+import yaml
+d = yaml.safe_load(open('$manifest'))
+bad = []
+for p in d.get('params', []):
+    missing = [k for k in ('name','description','default') if k not in p]
+    if missing:
+        bad.append(f\"{p.get('name','?')}: missing {', '.join(missing)}\")
+if bad:
+    print('\n'.join(bad))
+" 2>/dev/null || echo "")
+    if [[ -z "$bad_params" ]]; then
+      pass "all $param_count params have name, description, default"
+    else
+      fail_c "some params incomplete:"
+      echo "$bad_params" | while IFS= read -r line; do
+        printf "      ${RED}→${NC} %s\n" "$line"
+      done
+    fi
+  else
+    warn_c "manifest has no params (unusual but valid)"
+  fi
+
+  # ── 3. install.sh ──────────────────────────────────────────────────────────
+  section "3. install.sh"
+
+  local install="$pack_dir/install.sh"
+  if [[ ! -f "$install" ]]; then
+    fail_c "install.sh missing"
+    hint "Create $pack_name/install.sh — must source ../common.sh and call write_done_marker"
+    return
+  fi
+  pass "install.sh exists"
+
+  # Executable
+  if [[ -x "$install" ]]; then
+    pass "install.sh is executable"
+  else
+    fail_c "install.sh is NOT executable"
+    hint "chmod +x $pack_name/install.sh"
+  fi
+
+  # Bash shebang
+  local shebang
+  shebang=$(head -1 "$install")
+  if [[ "$shebang" == "#!/usr/bin/env bash" || "$shebang" == "#!/bin/bash" ]]; then
+    pass "install.sh has bash shebang"
+  else
+    fail_c "install.sh has unexpected shebang: $shebang"
+    hint "First line must be: #!/usr/bin/env bash"
+  fi
+
+  # set -euo pipefail
+  if grep -q 'set -euo pipefail' "$install" 2>/dev/null; then
+    pass "install.sh uses set -euo pipefail"
+  else
+    fail_c "install.sh missing 'set -euo pipefail'"
+    hint "Add 'set -euo pipefail' near the top of install.sh"
+  fi
+
+  # Sources common.sh
+  if grep -q 'common\.sh' "$install" 2>/dev/null; then
+    pass "install.sh sources common.sh"
+  else
+    fail_c "install.sh does NOT source common.sh"
+    hint 'Add: source "\${SCRIPT_DIR}/../common.sh"'
+  fi
+
+  # Writes done marker
+  if grep -q 'write_done_marker' "$install" 2>/dev/null; then
+    pass "install.sh calls write_done_marker"
+  else
+    fail_c "install.sh does NOT call write_done_marker"
+    hint "Add at end: write_done_marker \"$pack_name\""
+  fi
+
+  # --help support
+  if grep -q '\-\-help' "$install" 2>/dev/null; then
+    pass "install.sh supports --help"
+  else
+    warn_c "install.sh has no --help handling (recommended)"
+    hint "Add a usage() function and check for --help in args"
+  fi
+
+  # --help actually works
+  if grep -q '\-\-help' "$install" 2>/dev/null; then
+    local help_rc=0
+    bash "$install" --help >/dev/null 2>&1 || help_rc=$?
+    if [[ $help_rc -eq 0 ]]; then
+      pass "install.sh --help exits 0"
+    else
+      fail_c "install.sh --help exits $help_rc (should exit 0)"
+    fi
+  fi
+
+  # Uses pack_config_get
+  if grep -q 'pack_config_get' "$install" 2>/dev/null; then
+    pass "install.sh reads config via pack_config_get"
+  else
+    warn_c "install.sh doesn't use pack_config_get (OK if no config needed)"
+  fi
+
+  # shellcheck (if available)
+  if command -v shellcheck &>/dev/null; then
+    if shellcheck -S warning "$install" 2>/dev/null; then
+      pass "install.sh passes shellcheck"
+    else
+      warn_c "install.sh has shellcheck warnings"
+      hint "Run: shellcheck -S warning $pack_name/install.sh"
+    fi
+  else
+    skip_c "shellcheck not installed — skipping lint"
+  fi
+
+  # ── 4. shell-profile.sh (agent packs only) ─────────────────────────────────
+  if [[ "$pack_type" == "agent" ]]; then
+    section "4. shell-profile.sh"
+
+    local profile="$pack_dir/resources/shell-profile.sh"
+    if [[ ! -f "$profile" ]]; then
+      fail_c "resources/shell-profile.sh missing (required for agent packs)"
+      hint "Create $pack_name/resources/shell-profile.sh with PACK_ALIASES, PACK_BANNER_NAME, PACK_BANNER_EMOJI, PACK_BANNER_COMMANDS"
+    else
+      pass "resources/shell-profile.sh exists"
+
+      local required_vars=(PACK_ALIASES PACK_BANNER_NAME PACK_BANNER_EMOJI PACK_BANNER_COMMANDS)
+      for var in "${required_vars[@]}"; do
+        if grep -qE "^${var}=" "$profile" 2>/dev/null; then
+          pass "shell-profile.sh defines $var"
+        else
+          fail_c "shell-profile.sh MISSING $var"
+          case "$var" in
+            PACK_ALIASES)
+              hint "PACK_ALIASES='\nalias ${pack_name:0:2}=\"$pack_name\"\n'" ;;
+            PACK_BANNER_NAME)
+              hint "PACK_BANNER_NAME=\"${pack_name^} Agent Environment\"" ;;
+            PACK_BANNER_EMOJI)
+              hint "PACK_BANNER_EMOJI=\"🤖\"" ;;
+            PACK_BANNER_COMMANDS)
+              hint "PACK_BANNER_COMMANDS='\n  $pack_name              → Run $pack_name\n  $pack_name --help       → Show options\n'" ;;
+          esac
+        fi
+      done
+
+      # Source test under strict mode
+      if bash -c "set -euo pipefail; source '$profile'" 2>/dev/null; then
+        pass "shell-profile.sh sources cleanly under set -euo pipefail"
+      else
+        fail_c "shell-profile.sh errors when sourced with set -euo pipefail"
+        hint "Run: bash -c \"set -euo pipefail; source '$profile'\" to see the error"
+      fi
+    fi
+  fi
+
+  # ── 5. Registry entries ─────────────────────────────────────────────────────
+  if [[ -n "$repo_root" ]]; then
+    section "5. Registry Entries"
+
+    local reg_yaml="$repo_root/packs/registry.yaml"
+    local reg_json="$repo_root/packs/registry.json"
+
+    if [[ -f "$reg_yaml" ]]; then
+      if python3 -c "import yaml,sys; d=yaml.safe_load(open('$reg_yaml')); sys.exit(0 if '$pack_name' in d.get('packs',{}) else 1)" 2>/dev/null; then
+        pass "Listed in registry.yaml"
+      else
+        fail_c "NOT listed in registry.yaml"
+        hint "Add '$pack_name' entry under packs: in registry.yaml"
+      fi
+    else
+      skip_c "registry.yaml not found"
+    fi
+
+    if [[ -f "$reg_json" ]]; then
+      if jq -e --arg p "$pack_name" '.packs[$p]' "$reg_json" >/dev/null 2>&1; then
+        pass "Listed in registry.json"
+      else
+        fail_c "NOT listed in registry.json"
+        hint "Add '$pack_name' entry in registry.json under .packs"
+      fi
+    else
+      skip_c "registry.json not found"
+    fi
+  else
+    skip_c "Could not find repo root — skipping registry checks"
+  fi
+
+  # ── 6. test.sh (recommended) ───────────────────────────────────────────────
+  section "6. Tests"
+
+  if [[ -f "$pack_dir/test.sh" ]]; then
+    pass "test.sh exists"
+    if [[ -x "$pack_dir/test.sh" ]]; then
+      pass "test.sh is executable"
+    else
+      warn_c "test.sh is not executable"
+      hint "chmod +x $pack_name/test.sh"
+    fi
+  else
+    warn_c "No test.sh — strongly recommended for CI"
+    hint "Create $pack_name/test.sh for offline validation (see ironclaw/test.sh or pi/test.sh as examples)"
+  fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+TARGETS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --help|-h)   usage ;;
+    --fix)       FIX_MODE=true; shift ;;
+    --all)
+      # Find all pack directories
+      REPO=$(find_repo_root ".")
+      if [[ -z "$REPO" ]]; then
+        echo "Error: Could not find loki-agent repo root. Run from within the repo." >&2
+        exit 1
+      fi
+      for d in "$REPO"/packs/*/; do
+        [[ -f "$d/manifest.yaml" ]] && TARGETS+=("$d")
+      done
+      shift
+      ;;
+    *)
+      TARGETS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+  echo "Error: No pack directory specified."
+  echo ""
+  usage
+fi
+
+for target in "${TARGETS[@]}"; do
+  verify_single_pack "$target"
+done
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+printf "\n${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+printf "${BOLD}  Pack Verification Summary${NC}\n"
+printf "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
+printf "  ${GREEN}Passed:${NC}   %d\n" "$PASS"
+printf "  ${RED}Failed:${NC}   %d\n" "$FAIL"
+printf "  ${YELLOW}Warnings:${NC} %d\n" "$WARN"
+printf "  ${DIM}Skipped:${NC}  %d\n" "$SKIP"
+printf "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+
+if [[ $FAIL -gt 0 ]]; then
+  printf "${RED}✗ %d check(s) failed — fix before submitting${NC}\n" "$FAIL"
+  [[ "$FIX_MODE" == false ]] && printf "${DIM}  Tip: re-run with --fix to see fix suggestions${NC}\n"
+  echo ""
+  exit 1
+else
+  printf "${GREEN}✓ Pack is ready to submit!${NC}\n\n"
+  exit 0
+fi
