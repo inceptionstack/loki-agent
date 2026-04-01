@@ -323,6 +323,18 @@ ok "SSM log publisher running (pid=$SSM_PUB_PID)"
 
 # ---- System updates ----
 step "System Updates"
+
+# Ensure ec2-user has passwordless sudo (cloud-init usually sets this, but
+# some AMIs or custom configs may not; pack install scripts need sudo for
+# dnf, systemctl, etc.)
+if [[ ! -f /etc/sudoers.d/ec2-user-nopasswd ]]; then
+  echo "ec2-user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ec2-user-nopasswd
+  chmod 440 /etc/sudoers.d/ec2-user-nopasswd
+  ok "Passwordless sudo configured for ec2-user"
+else
+  ok "Passwordless sudo already configured"
+fi
+
 dnf update -y 2>&1 | tail -5
 ok "System updated"
 
