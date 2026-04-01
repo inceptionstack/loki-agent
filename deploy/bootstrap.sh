@@ -371,6 +371,15 @@ export PATH="/home/ec2-user/.local/bin:$PATH"
 eval "$(/home/ec2-user/.local/bin/mise activate bash)"
 ok "mise installed: $(mise --version 2>/dev/null || echo unknown)"
 
+# Persist mise activation to .bashrc so SSM sessions have node/npm/openclaw on PATH
+if ! grep -q 'mise activate' "${HOME}/.bashrc" 2>/dev/null; then
+  echo '' >> "${HOME}/.bashrc"
+  echo '# mise — runtime version manager (node, python, etc.)' >> "${HOME}/.bashrc"
+  echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${HOME}/.bashrc"
+  echo 'eval "$(~/.local/bin/mise activate bash 2>/dev/null)"' >> "${HOME}/.bashrc"
+  ok "mise activation added to .bashrc"
+fi
+
 step "Node.js"
 export MISE_NODE_VERIFY=false
 mise use -g node@latest
