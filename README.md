@@ -1,5 +1,4 @@
-# Loki: A Harness for Safely Deploying Stateful Full-Stack Builder Agents based on OpenClaw, Hermes and more into your AWS Account.
-
+# Loki: Turn OpenClaw and friends into FullStack Builder Agents in your AWS account.
 [![Loki Agent Demo](https://img.youtube.com/vi/dJSk8DYlHvI/maxresdefault.jpg)](https://www.youtube.com/watch?v=dJSk8DYlHvI)
 
 ▶️ [Watch the full walkthrough on YouTube](https://www.youtube.com/watch?v=dJSk8DYlHvI)
