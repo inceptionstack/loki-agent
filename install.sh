@@ -32,7 +32,7 @@ REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 SSM_DOC_NAME="Loki-Session"
-INSTALLER_VERSION="0.5.20"
+INSTALLER_VERSION="0.5.21"
 
 # --yes / -y: accept all defaults, minimal prompts
 AUTO_YES=false
