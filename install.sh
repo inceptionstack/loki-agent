@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Loki Agent — One-Shot Installer
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
+# Flags: --yes / -y  Accept all defaults (non-interactive deploy)
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -33,6 +34,14 @@ TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/ma
 SSM_DOC_NAME="Loki-Session"
 INSTALLER_VERSION="0.5.17"
 
+# --yes / -y: accept all defaults, minimal prompts
+AUTO_YES=false
+for arg in "$@"; do
+  case "$arg" in
+    --yes|-y) AUTO_YES=true ;;
+  esac
+done
+
 # Deploy method constants
 DEPLOY_CFN_CONSOLE=1
 DEPLOY_CFN_CLI=2
@@ -60,6 +69,10 @@ fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
 
 prompt() {
   local text="$1" var="$2" default="${3:-}"
+  if [[ "$AUTO_YES" == true && -n "$default" ]]; then
+    printf -v "$var" '%s' "$default"
+    return
+  fi
   local display="$text"; [[ -n "$default" ]] && display="$text [$default]"
   read -rp "$(echo -e "${BOLD}${display}:${NC} ")" value
   printf -v "$var" '%s' "${value:-$default}"
@@ -67,6 +80,7 @@ prompt() {
 
 confirm() {
   local text="$1" default="${2:-default_no}"
+  if [[ "$AUTO_YES" == true ]]; then return 0; fi
   local hint="[y/N]"; [[ "$default" == "default_yes" ]] && hint="[Y/n]"
   read -rp "$(echo -e "${BOLD}${text} ${hint}:${NC} ")" answer
   case "$default" in
@@ -77,6 +91,10 @@ confirm() {
 
 toggle() {
   local text="$1" var="$2" default="${3:-true}"
+  if [[ "$AUTO_YES" == true ]]; then
+    printf -v "$var" '%s' "$default"
+    return
+  fi
   local hint="[Y/n]"; [[ "$default" == "false" ]] && hint="[y/N]"
   read -rp "$(echo -e "    ${text} ${hint}: ")" answer
   case "$default" in
@@ -199,6 +217,10 @@ show_banner() {
   echo -e "${BOLD}║       🤖 Loki Agent — AWS Installer         ║${NC}"
   printf "${BOLD}║${NC}  %-42s${BOLD}║${NC}\n" "$version_line"
   echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+  if [[ "$AUTO_YES" == true ]]; then
+    echo ""
+    info "Running in auto mode (--yes) — using defaults, minimal prompts"
+  fi
   echo ""
 }
 
@@ -583,6 +605,13 @@ show_summary() {
 prepare_repo() {
   echo ""
   local current; current=$(pwd)
+
+  if [[ "$AUTO_YES" == true ]]; then
+    # Auto mode: pick ~/.loki-agent (persistent, safe default)
+    CLONE_DIR="$HOME/.loki-agent"
+    mkdir -p "$(dirname "$CLONE_DIR")"
+    info "Clone destination: ${CLONE_DIR} (auto)"
+  else
   echo "  Clone destination:"
   echo "    1) Current directory -- ${current}/loki-agent"
   echo "    2) ~/.loki-agent     -- persistent home directory"
@@ -603,6 +632,7 @@ prepare_repo() {
     3) CLONE_DIR="/tmp/loki-agent-$$" ;;
     *) CLONE_DIR="${current}/loki-agent" ;;
   esac
+  fi
 
   echo ""
   info "Cloning loki-agent into ${CLONE_DIR}..."
