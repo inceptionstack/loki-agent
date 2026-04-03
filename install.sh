@@ -45,8 +45,7 @@ done
 # Deploy method constants
 DEPLOY_CFN_CONSOLE=1
 DEPLOY_CFN_CLI=2
-DEPLOY_SAM=3
-DEPLOY_TERRAFORM=4
+DEPLOY_TERRAFORM=3
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$(dirname "$0")" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
@@ -380,16 +379,44 @@ check_existing_deployments() {
 
       EXISTING_VPC_ID="$chosen_vpc"
 
-      # Find the public subnet in the chosen VPC
-      local subnet_id
-      subnet_id=$(aws ec2 describe-subnets \
+      # Find a public subnet in the chosen VPC (one with an internet gateway route)
+      local subnet_id=""
+      local candidate_subnets
+      # First try subnets tagged with "public"
+      candidate_subnets=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=tag:Name,Values=*public*" \
-        --query 'Subnets[0].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "None")
-      if [[ "$subnet_id" == "None" || -z "$subnet_id" ]]; then
-        subnet_id=$(aws ec2 describe-subnets \
+        --query 'Subnets[*].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "")
+      # Fallback: subnets with auto-assign public IP
+      if [[ -z "$candidate_subnets" || "$candidate_subnets" == "None" ]]; then
+        candidate_subnets=$(aws ec2 describe-subnets \
           --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=mapPublicIpOnLaunch,Values=true" \
-          --query 'Subnets[0].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "")
+          --query 'Subnets[*].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "")
       fi
+      # Verify at least one candidate has an IGW route (0.0.0.0/0 → igw-*)
+      for candidate in $candidate_subnets; do
+        [[ "$candidate" == "None" || -z "$candidate" ]] && continue
+        local rtb_id
+        rtb_id=$(aws ec2 describe-route-tables \
+          --filters "Name=association.subnet-id,Values=${candidate}" \
+          --query 'RouteTables[0].RouteTableId' --output text --region "$check_region" 2>/dev/null || echo "")
+        # Fall back to main route table if no explicit association
+        if [[ -z "$rtb_id" || "$rtb_id" == "None" ]]; then
+          rtb_id=$(aws ec2 describe-route-tables \
+            --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=association.main,Values=true" \
+            --query 'RouteTables[0].RouteTableId' --output text --region "$check_region" 2>/dev/null || echo "")
+        fi
+        if [[ -n "$rtb_id" && "$rtb_id" != "None" ]]; then
+          local has_igw
+          has_igw=$(aws ec2 describe-route-tables \
+            --route-table-ids "$rtb_id" \
+            --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' \
+            --output text --region "$check_region" 2>/dev/null || echo "")
+          if [[ "$has_igw" == igw-* ]]; then
+            subnet_id="$candidate"
+            break
+          fi
+        fi
+      done
 
       if [[ -n "$subnet_id" && "$subnet_id" != "None" ]]; then
         EXISTING_SUBNET_ID="$subnet_id"
@@ -424,8 +451,7 @@ choose_deploy_method() {
   echo ""
   echo "    1) CloudFormation Console -- opens browser wizard to review & launch"
   echo "    2) CloudFormation CLI     -- deploy from terminal"
-  echo "    3) SAM                    -- for SAM CLI users"
-  echo -e "    ${GREEN}4) Terraform${NC}              -- for Terraform shops (auto-installs if needed)"
+  echo -e "    ${GREEN}3) Terraform${NC}              -- for Terraform shops (auto-installs if needed)"
   echo ""
   prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_TERRAFORM"
   DEPLOY_METHOD=$(echo "$DEPLOY_METHOD" | tr -d '[:space:]')
@@ -511,11 +537,14 @@ collect_config() {
   fi
   ok "Selected pack: ${PACK_NAME}"
 
+  prompt "AWS region" DEPLOY_REGION "$REGION"
+
   # Count existing deployments to generate a smart default env name
+  # Must be after region prompt so we count in the right region
   local existing_count
   existing_count=$(aws ec2 describe-vpcs \
     --filters "Name=tag:loki:managed,Values=true" \
-    --region "$REGION" \
+    --region "$DEPLOY_REGION" \
     --query 'length(Vpcs)' --output text 2>/dev/null || echo "0")
   local default_env_name="${PACK_NAME}-$((existing_count + 1))"
 
@@ -547,7 +576,6 @@ collect_config() {
     *) INSTANCE_TYPE="t4g.xlarge" ;;
   esac
 
-  prompt "AWS region" DEPLOY_REGION "$REGION"
   collect_security_config
 }
 
@@ -1259,8 +1287,6 @@ main() {
   case "$DEPLOY_METHOD" in
     "$DEPLOY_CFN_CLI") info "Deploying with CloudFormation..."
        deploy_cfn_stack "deploy/cloudformation/template.yaml" "CAPABILITY_NAMED_IAM" ;;
-    "$DEPLOY_SAM") info "Deploying with SAM..."
-       deploy_cfn_stack "deploy/sam/template.yaml" "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND" ;;
     "$DEPLOY_TERRAFORM") info "Deploying with Terraform..."
        deploy_terraform ;;
     *) fail "Invalid choice: $DEPLOY_METHOD" ;;

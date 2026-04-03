@@ -290,6 +290,11 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref ExistingSubnetId, '']]
         AssertDescription: "ExistingSubnetId is required when ExistingVpcId is provided."
+  VpcRequiredWithSubnet:
+    RuleCondition: !Not [!Equals [!Ref ExistingSubnetId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingVpcId, '']]
+        AssertDescription: "ExistingVpcId is required when ExistingSubnetId is provided."
 
 # ============================================================================
 # CONDITIONS
