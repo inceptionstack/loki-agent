@@ -21,6 +21,17 @@ locals {
   subnet_id = var.existing_subnet_id != "" ? var.existing_subnet_id : (length(aws_subnet.public) > 0 ? aws_subnet.public[0].id : "")
 }
 
+# Validate: if existing_vpc_id is set, existing_subnet_id must also be set
+resource "terraform_data" "vpc_subnet_validation" {
+  count = var.existing_vpc_id != "" && var.existing_subnet_id == "" ? 1 : 0
+  lifecycle {
+    precondition {
+      condition     = false
+      error_message = "existing_subnet_id is required when existing_vpc_id is set."
+    }
+  }
+}
+
 # ============================================================================
 # VPC & Networking
 # ============================================================================
@@ -80,7 +91,7 @@ resource "aws_route_table_association" "public" {
 # Security Group
 # ============================================================================
 resource "aws_security_group" "main" {
-  name        = "${var.environment_name}-sg"
+  name        = "${var.environment_name}-${var.pack_name}-sg"
   description = "Security group for ${var.environment_name} EC2 instance"
   vpc_id      = local.vpc_id
 

@@ -198,10 +198,18 @@ variable "existing_vpc_id" {
   type        = string
   default     = ""
   description = "Reuse an existing Loki VPC. Leave empty to create a new VPC."
+  validation {
+    condition     = var.existing_vpc_id == "" || can(regex("^vpc-[a-z0-9]+$", var.existing_vpc_id))
+    error_message = "existing_vpc_id must be empty or a valid VPC ID (vpc-xxx)."
+  }
 }
 
 variable "existing_subnet_id" {
   type        = string
   default     = ""
   description = "Public subnet ID in the existing VPC. Required if existing_vpc_id is set."
+  validation {
+    condition     = var.existing_subnet_id == "" || can(regex("^subnet-[a-z0-9]+$", var.existing_subnet_id))
+    error_message = "existing_subnet_id must be empty or a valid subnet ID (subnet-xxx)."
+  }
 }

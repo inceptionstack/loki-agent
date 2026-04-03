@@ -274,11 +274,23 @@ Parameters:
     Type: String
     Default: ''
     Description: "Reuse an existing Loki VPC instead of creating a new one. Leave empty to create a new VPC."
+    AllowedPattern: '^(vpc-[a-z0-9]+)?$'
 
   ExistingSubnetId:
     Type: String
     Default: ''
     Description: "Public subnet ID in the existing VPC. Required if ExistingVpcId is set."
+    AllowedPattern: '^(subnet-[a-z0-9]+)?$'
+
+# ============================================================================
+# RULES
+# ============================================================================
+Rules:
+  SubnetRequiredWithVpc:
+    RuleCondition: !Not [!Equals [!Ref ExistingVpcId, '']]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ExistingSubnetId, '']]
+        AssertDescription: "ExistingSubnetId is required when ExistingVpcId is provided."
 
 # ============================================================================
 # CONDITIONS
@@ -395,7 +407,7 @@ Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub '${EnvironmentName}-sg'
+      GroupName: !Sub '${AWS::StackName}-sg'
       GroupDescription: !Sub 'Security group for ${EnvironmentName} EC2 instance'
       VpcId: !If [CreateNewVpc, !Ref VPC, !Ref ExistingVpcId]
       SecurityGroupIngress:

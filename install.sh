@@ -250,7 +250,6 @@ preflight_checks() {
   confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
 
   check_permissions
-  check_existing_deployments
 }
 
 check_vpc_quota() {
@@ -325,12 +324,13 @@ check_permissions() {
 }
 
 check_existing_deployments() {
+  local check_region="${DEPLOY_REGION:-$REGION}"
   echo ""
-  info "Checking for existing Loki deployments..."
+  info "Checking for existing Loki deployments in ${check_region}..."
   local vpcs
   vpcs=$(aws ec2 describe-vpcs \
     --filters "Name=tag:loki:managed,Values=true" \
-    --region "$REGION" \
+    --region "$check_region" \
     --query 'Vpcs[*].[VpcId, Tags[?Key==`loki:watermark`].Value|[0], Tags[?Key==`loki:deploy-method`].Value|[0], Tags[?Key==`Name`].Value|[0]]' \
     --output text 2>/dev/null || echo "")
 
@@ -384,11 +384,11 @@ check_existing_deployments() {
       local subnet_id
       subnet_id=$(aws ec2 describe-subnets \
         --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=tag:Name,Values=*public*" \
-        --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || echo "None")
+        --query 'Subnets[0].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "None")
       if [[ "$subnet_id" == "None" || -z "$subnet_id" ]]; then
         subnet_id=$(aws ec2 describe-subnets \
           --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=mapPublicIpOnLaunch,Values=true" \
-          --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || echo "")
+          --query 'Subnets[0].SubnetId' --output text --region "$check_region" 2>/dev/null || echo "")
       fi
 
       if [[ -n "$subnet_id" && "$subnet_id" != "None" ]]; then
@@ -1236,6 +1236,7 @@ main() {
   preflight_checks
   choose_deploy_method
   collect_config
+  check_existing_deployments  # Must run AFTER collect_config so DEPLOY_REGION is set
   # Skip VPC quota check when reusing an existing VPC
   if [[ -z "${EXISTING_VPC_ID:-}" ]]; then
     check_vpc_quota  # Run after collect_config so we use DEPLOY_REGION
