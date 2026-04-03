@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-sonnet-4-6")"
-PACK_ARG_HAIKU_MODEL="$(pack_config_get haiku_model "us.anthropic.claude-haiku-4-5-20251001-v1:0")"
+PACK_ARG_HAIKU_MODEL="$(pack_config_get "haiku-model" "us.anthropic.claude-haiku-4-5-20251001-v1:0")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -66,7 +66,7 @@ log "region=${REGION} model=${MODEL} haiku-model=${HAIKU_MODEL}"
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
-require_cmd curl
+require_cmd curl aws
 
 # Verify AWS credentials are available (instance profile or env vars)
 if ! aws sts get-caller-identity --region "${REGION}" &>/dev/null; then
@@ -83,7 +83,10 @@ if command -v claude &>/dev/null; then
 fi
 
 # Use the official Claude Code native installer
-curl -fsSL https://claude.ai/install.sh | bash
+# Download first, then execute — avoids partial-download execution race
+curl -fsSL https://claude.ai/install.sh -o /tmp/claude-code-install.sh
+bash /tmp/claude-code-install.sh
+rm -f /tmp/claude-code-install.sh
 
 # Add ~/.local/bin to PATH for current session (installer places binary there)
 export PATH="${HOME}/.local/bin:${PATH}"
@@ -98,8 +101,20 @@ ok "Claude Code installed: ${CLAUDE_VERSION}"
 # ── Configure Bedrock environment ─────────────────────────────────────────────
 step "Configuring Bedrock environment"
 
-# Write /etc/profile.d script so env vars are available to all login sessions
-cat > /etc/profile.d/claude-code-bedrock.sh <<EOF
+# Write env vars — /etc/profile.d if root, else ~/.claude/bedrock-env.sh
+if [[ $EUID -eq 0 ]]; then
+  PROFILE_TARGET="/etc/profile.d/claude-code-bedrock.sh"
+else
+  PROFILE_TARGET="${HOME}/.claude/bedrock-env.sh"
+  mkdir -p "${HOME}/.claude"
+  # Ensure ~/.bashrc sources it
+  if ! grep -q 'claude/bedrock-env.sh' "${HOME}/.bashrc" 2>/dev/null; then
+    printf '\n[ -f "%s/.claude/bedrock-env.sh" ] && source "%s/.claude/bedrock-env.sh"\n' "${HOME}" "${HOME}" >> "${HOME}/.bashrc"
+  fi
+fi
+
+mkdir -p "$(dirname "${PROFILE_TARGET}")"
+cat > "${PROFILE_TARGET}" <<EOF
 # Claude Code — Bedrock configuration
 # Managed by loki-agent packs/claude-code/install.sh — do not edit manually.
 export CLAUDE_CODE_USE_BEDROCK=1
@@ -108,12 +123,12 @@ export ANTHROPIC_MODEL="${MODEL}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${HAIKU_MODEL}"
 EOF
 
-chmod 644 /etc/profile.d/claude-code-bedrock.sh
-ok "Bedrock env vars written to /etc/profile.d/claude-code-bedrock.sh"
+chmod 644 "${PROFILE_TARGET}"
+ok "Bedrock env vars written to ${PROFILE_TARGET}"
 
 # Source now for the current session
 # shellcheck source=/dev/null
-source /etc/profile.d/claude-code-bedrock.sh
+source "${PROFILE_TARGET}"
 
 # ── Configure Claude Code permissions ────────────────────────────────────────
 step "Configuring Claude Code permissions"

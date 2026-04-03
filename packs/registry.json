@@ -69,7 +69,7 @@
     },
     "claude-code": {
       "type": "agent",
-      "description": "Claude Code -- Anthropic's coding agent with native Bedrock support",
+      "description": "Claude Code — Anthropic's coding agent with native Bedrock support",
       "deps": [],
       "instance_type": "t4g.large",
       "root_volume_gb": 40,

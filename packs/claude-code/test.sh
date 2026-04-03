@@ -43,7 +43,7 @@ else
   fail "manifest.yaml missing"
 fi
 
-if command -v python3 &>/dev/null; then
+if command -v python3 &>/dev/null && python3 -c "import yaml" 2>/dev/null; then
   if python3 -c "import yaml; yaml.safe_load(open('${MANIFEST}'))" 2>/dev/null; then
     pass "manifest.yaml is valid YAML"
   else
@@ -110,7 +110,7 @@ sys.exit(0 if 'claude' in cmds else 1)
     fail "manifest.yaml provides.commands missing claude"
   fi
 else
-  skip "manifest.yaml structure tests: python3 not available"
+  skip "manifest.yaml YAML tests: python3 or pyyaml not available"
 fi
 
 # ── Test: install.sh interface ────────────────────────────────────────────────
