@@ -338,12 +338,71 @@ check_existing_deployments() {
     local count; count=$(echo "$vpcs" | wc -l | tr -d ' ')
     warn "Found ${count} existing Loki deployment(s) in this account/region:"
     echo ""
+    local -a vpc_ids=()
     while IFS=$'\t' read -r vpc_id watermark method name; do
       echo -e "    ${BOLD}${vpc_id}${NC}  watermark=${watermark:-n/a}  method=${method:-n/a}  name=${name:-n/a}"
+      vpc_ids+=("$vpc_id")
     done <<< "$vpcs"
     echo ""
-    warn "Deploying another Loki will create a separate VPC and resources."
-    confirm_or_abort "Continue with a new deployment?"
+
+    # Offer to reuse an existing VPC instead of creating a new one
+    local reuse_vpc=true
+    if [[ "$AUTO_YES" == true ]]; then
+      info "Auto mode: reusing first existing VPC"
+    else
+      if ! confirm "Reuse an existing VPC?" "default_yes"; then
+        reuse_vpc=false
+      fi
+    fi
+
+    if [[ "$reuse_vpc" == true ]]; then
+      local chosen_vpc
+      if [[ ${#vpc_ids[@]} -eq 1 || "$AUTO_YES" == true ]]; then
+        chosen_vpc="${vpc_ids[0]}"
+        info "Using VPC: ${chosen_vpc}"
+      else
+        echo ""
+        echo "  Select a VPC to reuse:"
+        local i
+        for i in "${!vpc_ids[@]}"; do
+          echo "    $((i+1))) ${vpc_ids[$i]}"
+        done
+        echo ""
+        local vpc_choice
+        prompt "VPC number" vpc_choice "1"
+        vpc_choice="${vpc_choice//[^0-9]/}"
+        [[ -z "$vpc_choice" ]] && vpc_choice=1
+        local vpc_idx=$(( vpc_choice - 1 ))
+        [[ $vpc_idx -lt 0 || $vpc_idx -ge ${#vpc_ids[@]} ]] && vpc_idx=0
+        chosen_vpc="${vpc_ids[$vpc_idx]}"
+        info "Selected VPC: ${chosen_vpc}"
+      fi
+
+      EXISTING_VPC_ID="$chosen_vpc"
+
+      # Find the public subnet in the chosen VPC
+      local subnet_id
+      subnet_id=$(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=tag:Name,Values=*public*" \
+        --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || echo "None")
+      if [[ "$subnet_id" == "None" || -z "$subnet_id" ]]; then
+        subnet_id=$(aws ec2 describe-subnets \
+          --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=mapPublicIpOnLaunch,Values=true" \
+          --query 'Subnets[0].SubnetId' --output text --region "$REGION" 2>/dev/null || echo "")
+      fi
+
+      if [[ -n "$subnet_id" && "$subnet_id" != "None" ]]; then
+        EXISTING_SUBNET_ID="$subnet_id"
+        ok "Reusing VPC: ${EXISTING_VPC_ID}  subnet: ${EXISTING_SUBNET_ID}"
+      else
+        warn "Could not find a public subnet in ${chosen_vpc} — creating new VPC instead"
+        EXISTING_VPC_ID=""
+        EXISTING_SUBNET_ID=""
+      fi
+    else
+      # User declined reuse — proceed with a new VPC
+      confirm_or_abort "Continue with a new deployment (new VPC)?"
+    fi
   else
     ok "No existing Loki deployments found"
   fi
@@ -527,8 +586,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder)
-PARAM_TF_NAMES=(environment_name pack_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder)
+PARAM_CFN_NAMES=(EnvironmentName PackName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
+PARAM_TF_NAMES=(environment_name pack_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
@@ -545,6 +604,8 @@ build_deploy_params() {
     "$INSPECTOR"
     "$ACCESS_ANALYZER"
     "$CONFIG_RECORDER"
+    "${EXISTING_VPC_ID:-}"
+    "${EXISTING_SUBNET_ID:-}"
   )
   # Validate parallel arrays are in sync
   [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \
@@ -591,6 +652,9 @@ show_summary() {
   echo -e "  ${BOLD}│${NC}  Instance:     ${INSTANCE_TYPE}"
   echo -e "  ${BOLD}│${NC}  Region:       ${DEPLOY_REGION}"
   echo -e "  ${BOLD}│${NC}  Watermark:    ${LOKI_WATERMARK}"
+  if [[ -n "${EXISTING_VPC_ID:-}" ]]; then
+    echo -e "  ${BOLD}│${NC}  VPC:          reuse ${EXISTING_VPC_ID} (existing)"
+  fi
   echo -e "  ${BOLD}│${NC}  SecurityHub:  ${SECURITY_HUB}  GuardDuty: ${GUARDDUTY}"
   echo -e "  ${BOLD}│${NC}  Inspector:    ${INSPECTOR}  Analyzer:  ${ACCESS_ANALYZER}"
   echo -e "  ${BOLD}│${NC}  Config:       ${CONFIG_RECORDER}"
@@ -791,6 +855,10 @@ TF_STATE_KEY=""
 TF_LOCK_TABLE=""
 TF_WORKDIR=""  # Set if Terraform work is moved to /tmp (CloudShell low-disk)
 PACK_NAME="openclaw"  # Default pack; overridden by collect_config
+
+# VPC reuse: set by check_existing_deployments(); empty = create new VPC
+EXISTING_VPC_ID=""
+EXISTING_SUBNET_ID=""
 
 # ============================================================================
 # Deploy: Terraform (option 4)
@@ -1168,7 +1236,12 @@ main() {
   preflight_checks
   choose_deploy_method
   collect_config
-  check_vpc_quota  # Run after collect_config so we use DEPLOY_REGION
+  # Skip VPC quota check when reusing an existing VPC
+  if [[ -z "${EXISTING_VPC_ID:-}" ]]; then
+    check_vpc_quota  # Run after collect_config so we use DEPLOY_REGION
+  else
+    ok "Skipping VPC quota check (reusing existing VPC ${EXISTING_VPC_ID})"
+  fi
   build_deploy_params  # Populate parameter arrays from user config
   show_summary
 

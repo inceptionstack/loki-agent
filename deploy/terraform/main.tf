@@ -17,12 +17,15 @@ locals {
     "loki:version"       = "1.0"
     "loki:pack"          = var.pack_name
   }
+  vpc_id    = var.existing_vpc_id != "" ? var.existing_vpc_id : (length(aws_vpc.main) > 0 ? aws_vpc.main[0].id : "")
+  subnet_id = var.existing_subnet_id != "" ? var.existing_subnet_id : (length(aws_subnet.public) > 0 ? aws_subnet.public[0].id : "")
 }
 
 # ============================================================================
 # VPC & Networking
 # ============================================================================
 resource "aws_vpc" "main" {
+  count                = var.existing_vpc_id == "" ? 1 : 0
   cidr_block           = var.vpc_cidr
   enable_dns_support   = true
   enable_dns_hostnames = true
@@ -33,7 +36,8 @@ resource "aws_vpc" "main" {
 }
 
 resource "aws_internet_gateway" "main" {
-  vpc_id = aws_vpc.main.id
+  count  = var.existing_vpc_id == "" ? 1 : 0
+  vpc_id = aws_vpc.main[0].id
 
   tags = merge(local.loki_tags, {
     Name = "${var.environment_name}-igw"
@@ -41,7 +45,8 @@ resource "aws_internet_gateway" "main" {
 }
 
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.main.id
+  count                   = var.existing_vpc_id == "" ? 1 : 0
+  vpc_id                  = aws_vpc.main[0].id
   cidr_block              = var.public_subnet_cidr
   map_public_ip_on_launch = true
   availability_zone       = data.aws_availability_zones.available.names[0]
@@ -52,11 +57,12 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main.id
+  count  = var.existing_vpc_id == "" ? 1 : 0
+  vpc_id = aws_vpc.main[0].id
 
   route {
     cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.main.id
+    gateway_id = aws_internet_gateway.main[0].id
   }
 
   tags = merge(local.loki_tags, {
@@ -65,8 +71,9 @@ resource "aws_route_table" "public" {
 }
 
 resource "aws_route_table_association" "public" {
-  subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
+  count          = var.existing_vpc_id == "" ? 1 : 0
+  subnet_id      = aws_subnet.public[0].id
+  route_table_id = aws_route_table.public[0].id
 }
 
 # ============================================================================
@@ -75,7 +82,7 @@ resource "aws_route_table_association" "public" {
 resource "aws_security_group" "main" {
   name        = "${var.environment_name}-sg"
   description = "Security group for ${var.environment_name} EC2 instance"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = local.vpc_id
 
   ingress {
     from_port   = 22
@@ -605,7 +612,7 @@ resource "aws_instance" "main" {
   instance_type          = var.instance_type
   iam_instance_profile   = aws_iam_instance_profile.main.name
   key_name               = var.key_pair_name != "" ? var.key_pair_name : null
-  subnet_id              = aws_subnet.public.id
+  subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.main.id]
   ebs_optimized          = true
 

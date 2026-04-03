@@ -270,6 +270,16 @@ Parameters:
     Default: 'loki-agent'
     Description: "Custom identifier tag applied to all resources. Use to distinguish multiple Loki deployments or mark team ownership (e.g. 'team-alpha', 'dev-loki')."
 
+  ExistingVpcId:
+    Type: String
+    Default: ''
+    Description: "Reuse an existing Loki VPC instead of creating a new one. Leave empty to create a new VPC."
+
+  ExistingSubnetId:
+    Type: String
+    Default: ''
+    Description: "Public subnet ID in the existing VPC. Required if ExistingVpcId is set."
+
 # ============================================================================
 # CONDITIONS
 # ============================================================================
@@ -279,6 +289,8 @@ Conditions:
   IsLiteLLM: !Equals [!Ref ModelMode, 'litellm']
   IsApiKey: !Equals [!Ref ModelMode, 'api-key']
   IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
+  CreateNewVpc: !Equals [!Ref ExistingVpcId, '']
+  UseExistingVpc: !Not [!Equals [!Ref ExistingVpcId, '']]
 
 # ============================================================================
 # RESOURCES
@@ -290,6 +302,7 @@ Resources:
   # --------------------------------------------------------------------------
   VPC:
     Type: AWS::EC2::VPC
+    Condition: CreateNewVpc
     Properties:
       CidrBlock: !Ref VpcCidr
       EnableDnsSupport: true
@@ -308,6 +321,7 @@ Resources:
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
+    Condition: CreateNewVpc
     Properties:
       Tags:
         - Key: Name
@@ -321,12 +335,14 @@ Resources:
 
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateNewVpc
     Properties:
       VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
+    Condition: CreateNewVpc
     Properties:
       VpcId: !Ref VPC
       CidrBlock: !Ref PublicSubnetCidr
@@ -344,6 +360,7 @@ Resources:
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
+    Condition: CreateNewVpc
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -358,6 +375,7 @@ Resources:
 
   PublicRoute:
     Type: AWS::EC2::Route
+    Condition: CreateNewVpc
     DependsOn: VPCGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
@@ -366,6 +384,7 @@ Resources:
 
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateNewVpc
     Properties:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
@@ -378,7 +397,7 @@ Resources:
     Properties:
       GroupName: !Sub '${EnvironmentName}-sg'
       GroupDescription: !Sub 'Security group for ${EnvironmentName} EC2 instance'
-      VpcId: !Ref VPC
+      VpcId: !If [CreateNewVpc, !Ref VPC, !Ref ExistingVpcId]
       SecurityGroupIngress:
         - IpProtocol: tcp
           FromPort: 22
@@ -850,7 +869,6 @@ Resources:
   Instance:
     Type: AWS::EC2::Instance
     DependsOn:
-      - VPCGatewayAttachment
       - BedrockFormCustomResource
     CreationPolicy:
       ResourceSignal:
@@ -860,7 +878,7 @@ Resources:
       ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-arm64}}'
       IamInstanceProfile: !Ref InstanceProfile
       KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
-      SubnetId: !Ref PublicSubnet
+      SubnetId: !If [CreateNewVpc, !Ref PublicSubnet, !Ref ExistingSubnetId]
       SecurityGroupIds:
         - !Ref InstanceSecurityGroup
       EbsOptimized: true
@@ -962,7 +980,7 @@ Outputs:
 
   VpcId:
     Description: VPC ID
-    Value: !Ref VPC
+    Value: !If [CreateNewVpc, !Ref VPC, !Ref ExistingVpcId]
 
   SecurityGroupId:
     Description: Security Group ID

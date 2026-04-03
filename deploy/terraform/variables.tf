@@ -193,3 +193,15 @@ variable "loki_watermark" {
   default     = "loki-agent"
   description = "Custom identifier tag applied to all resources. Use to distinguish multiple Loki deployments or mark team ownership (e.g. 'team-alpha', 'dev-loki')."
 }
+
+variable "existing_vpc_id" {
+  type        = string
+  default     = ""
+  description = "Reuse an existing Loki VPC. Leave empty to create a new VPC."
+}
+
+variable "existing_subnet_id" {
+  type        = string
+  default     = ""
+  description = "Public subnet ID in the existing VPC. Required if existing_vpc_id is set."
+}

@@ -15,7 +15,7 @@ output "private_ip" {
 
 output "vpc_id" {
   description = "VPC ID"
-  value       = aws_vpc.main.id
+  value       = local.vpc_id
 }
 
 output "security_group_id" {
