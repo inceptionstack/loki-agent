@@ -608,8 +608,14 @@ prepare_repo() {
   info "Cloning loki-agent into ${CLONE_DIR}..."
 
   if [[ -d "$CLONE_DIR/.git" ]]; then
-    info "Directory exists, pulling latest..."
-    git -C "$CLONE_DIR" pull --ff-only 2>&1 | tail -1
+    info "Directory exists, syncing to latest..."
+    git -C "$CLONE_DIR" fetch origin 2>&1 | tail -1
+    local branch
+    branch=$(git -C "$CLONE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo "main")
+    if ! git -C "$CLONE_DIR" merge --ff-only "origin/$branch" 2>/dev/null; then
+      warn "Local repo diverged from remote — resetting to origin/$branch"
+      git -C "$CLONE_DIR" reset --hard "origin/$branch" 2>&1 | tail -1
+    fi
     clean_stale_terraform "$CLONE_DIR"
   else
     rm -rf "$CLONE_DIR" 2>/dev/null || true
