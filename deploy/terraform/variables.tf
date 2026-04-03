@@ -5,12 +5,12 @@ variable "aws_region" {
 }
 
 variable "pack_name" {
-  description = "Agent pack to deploy (openclaw, hermes, pi, or ironclaw)"
+  description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, or ironclaw)"
   type        = string
   default     = "openclaw"
   validation {
-    condition     = contains(["openclaw", "hermes", "pi", "ironclaw"], var.pack_name)
-    error_message = "pack_name must be openclaw, hermes, pi, or ironclaw."
+    condition     = contains(["openclaw", "claude-code", "hermes", "pi", "ironclaw"], var.pack_name)
+    error_message = "pack_name must be openclaw, claude-code, hermes, pi, or ironclaw."
   }
 }
 

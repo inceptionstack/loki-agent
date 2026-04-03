@@ -66,6 +66,19 @@
       "brain": false,
       "claude_code": false,
       "experimental": true
+    },
+    "claude-code": {
+      "type": "agent",
+      "description": "Claude Code -- Anthropic's coding agent with native Bedrock support",
+      "deps": [],
+      "instance_type": "t4g.large",
+      "root_volume_gb": 40,
+      "data_volume_gb": 0,
+      "default_model": "us.anthropic.claude-sonnet-4-6",
+      "ports": {},
+      "brain": false,
+      "claude_code": false,
+      "experimental": false
     }
   }
 }

@@ -108,6 +108,7 @@ Parameters:
     Default: openclaw
     AllowedValues:
       - openclaw
+      - claude-code
       - hermes
       - pi
       - ironclaw

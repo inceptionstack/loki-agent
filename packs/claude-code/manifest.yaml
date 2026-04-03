@@ -1,0 +1,35 @@
+name: claude-code
+version: "1.0.0"
+type: agent
+description: "Claude Code — Anthropic's coding agent with native Bedrock support"
+
+deps: []
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.large
+
+params:
+  - name: region
+    description: "AWS region for Bedrock"
+    default: us-east-1
+  - name: model
+    description: "Bedrock model ID for Claude Code (ANTHROPIC_MODEL env var)"
+    default: "us.anthropic.claude-sonnet-4-6"
+  - name: haiku-model
+    description: "Bedrock model ID for Claude Code's Haiku fast-path (ANTHROPIC_DEFAULT_HAIKU_MODEL env var)"
+    default: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+health_check:
+  command: "claude --version"
+  timeout: 10
+
+provides:
+  commands:
+    - claude
+  services: []
