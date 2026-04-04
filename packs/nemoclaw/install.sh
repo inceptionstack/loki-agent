@@ -164,6 +164,25 @@ check_bedrockify_health "${BEDROCKIFY_PORT}"
 # ── Step 3: Install NemoClaw + OpenShell ─────────────────────────────────────
 step "Installing NemoClaw + OpenShell"
 
+# AL2023 has sha256sum but not shasum — NemoClaw's OpenShell installer needs shasum
+# Must be installed BEFORE nemoclaw onboard (which auto-installs OpenShell)
+if ! command -v shasum &>/dev/null && command -v sha256sum &>/dev/null; then
+  log "Creating shasum wrapper for AL2023 compatibility (NemoClaw/OpenShell needs shasum)..."
+  cat > /tmp/shasum-wrapper.sh << 'SHAWRAP'
+#!/usr/bin/env bash
+# shasum compatibility wrapper for AL2023 (sha256sum → shasum -a 256)
+if [[ "$1" == "-a" && "$2" == "256" ]]; then
+  shift 2
+  sha256sum "$@"
+else
+  sha256sum "$@"
+fi
+SHAWRAP
+  chmod +x /tmp/shasum-wrapper.sh
+  sudo cp /tmp/shasum-wrapper.sh /usr/local/bin/shasum
+  ok "shasum wrapper installed at /usr/local/bin/shasum"
+fi
+
 if command -v nemoclaw &>/dev/null; then
   NEMOCLAW_EXISTING="$(nemoclaw --version 2>/dev/null || echo unknown)"
   log "nemoclaw already installed (${NEMOCLAW_EXISTING}) — reinstalling"
@@ -184,24 +203,6 @@ fi
 
 NEMOCLAW_VERSION="$(nemoclaw --version 2>/dev/null || echo unknown)"
 ok "NemoClaw installed: ${NEMOCLAW_VERSION}"
-
-# AL2023 has sha256sum but not shasum — NemoClaw's OpenShell installer needs shasum
-if ! command -v shasum &>/dev/null && command -v sha256sum &>/dev/null; then
-  log "Creating shasum wrapper for AL2023 compatibility (NemoClaw/OpenShell needs shasum)..."
-  cat > /tmp/shasum-wrapper.sh << 'SHAWRAP'
-#!/usr/bin/env bash
-# shasum compatibility wrapper for AL2023 (sha256sum → shasum -a 256)
-if [[ "$1" == "-a" && "$2" == "256" ]]; then
-  shift 2
-  sha256sum "$@"
-else
-  sha256sum "$@"
-fi
-SHAWRAP
-  chmod +x /tmp/shasum-wrapper.sh
-  sudo cp /tmp/shasum-wrapper.sh /usr/local/bin/shasum
-  ok "shasum wrapper installed at /usr/local/bin/shasum"
-fi
 
 if ! command -v openshell &>/dev/null; then
   warn "openshell command not found — may be installed in a non-standard location"
