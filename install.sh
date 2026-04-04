@@ -34,7 +34,7 @@ REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 SSM_DOC_NAME="Loki-Session"
-INSTALLER_VERSION="0.5.58"
+INSTALLER_VERSION="0.5.59"
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
 # --pack <name>: pre-select agent pack
