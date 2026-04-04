@@ -1017,7 +1017,7 @@ Resources:
               --value "FAILED: userdata error at line $LINENO" \
               --type String --overwrite --region "$REGION" 2>/dev/null || true
             touch /tmp/loki-bootstrap-done
-            /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
+            /opt/aws/bin/cfn-signal -e 1 --stack "${!STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
           ' ERR
           # Ensure git is available (not present on all AMIs)
           command -v git &>/dev/null || dnf install -y git 2>/dev/null || yum install -y git
