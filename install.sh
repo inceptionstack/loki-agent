@@ -3,6 +3,7 @@
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 # Flags: --yes / -y  Accept all defaults (non-interactive deploy)
 #        --pack <name>  Pre-select agent pack (e.g. --pack claude-code, --pack openclaw)
+#        --method <m>   Pre-select deploy method: cfn-console, cfn, terraform (or tf)
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -37,8 +38,10 @@ INSTALLER_VERSION="0.5.35"
 
 # --yes / -y: accept all defaults, minimal prompts
 # --pack <name>: pre-select agent pack
+# --method <m>: pre-select deploy method (cfn-console, cfn, terraform/tf)
 AUTO_YES=false
 PRESELECT_PACK=""
+PRESELECT_METHOD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --yes|-y) AUTO_YES=true; shift ;;
@@ -48,6 +51,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       PRESELECT_PACK="$2"; shift 2 ;;
+    --method)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --method requires a value (cfn-console, cfn, terraform, tf)" >&2
+        exit 1
+      fi
+      PRESELECT_METHOD="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -230,6 +239,7 @@ show_banner() {
     echo ""
     local auto_msg="Running in auto mode (--yes) — using defaults, minimal prompts"
     [[ -n "${PRESELECT_PACK}" ]] && auto_msg+=", pack: ${PRESELECT_PACK}"
+    [[ -n "${PRESELECT_METHOD}" ]] && auto_msg+=", method: ${PRESELECT_METHOD}"
     info "$auto_msg"
   fi
   echo ""
@@ -458,6 +468,32 @@ terraform_version_string() {
 }
 
 choose_deploy_method() {
+  # If method was pre-selected via --method, validate and set it
+  if [[ -n "${PRESELECT_METHOD}" ]]; then
+    case "${PRESELECT_METHOD}" in
+      cfn-console|console)  DEPLOY_METHOD="$DEPLOY_CFN_CONSOLE" ;;
+      cfn|cloudformation)   DEPLOY_METHOD="$DEPLOY_CFN_CLI" ;;
+      terraform|tf)         DEPLOY_METHOD="$DEPLOY_TERRAFORM" ;;
+      *)
+        echo ""
+        echo -e "  ${RED}✗ Unknown deploy method: '${PRESELECT_METHOD}'${NC}"
+        echo ""
+        echo "  Valid methods:"
+        echo "    cfn-console  — CloudFormation Console wizard"
+        echo "    cfn          — CloudFormation CLI"
+        echo "    terraform    — Terraform (or 'tf')"
+        echo ""
+        fail "Use --method <cfn-console|cfn|terraform> with one of the methods listed above."
+        ;;
+    esac
+    local method_name
+    case "$DEPLOY_METHOD" in
+      "$DEPLOY_CFN_CONSOLE") method_name="CloudFormation Console" ;;
+      "$DEPLOY_CFN_CLI")     method_name="CloudFormation CLI" ;;
+      "$DEPLOY_TERRAFORM")   method_name="Terraform" ;;
+    esac
+    ok "Deploy method pre-selected: ${method_name}"
+  else
   echo ""
   echo "  Deployment methods:"
   echo ""
@@ -467,6 +503,7 @@ choose_deploy_method() {
   echo ""
   prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_TERRAFORM"
   DEPLOY_METHOD=$(echo "$DEPLOY_METHOD" | tr -d '[:space:]')
+  fi
 
   # If Terraform selected and not installed, handle it now — before config questions.
   # This avoids the user filling out all config only to be blocked at deploy time.
