@@ -67,6 +67,21 @@
       "claude_code": false,
       "experimental": true
     },
+    "nemoclaw": {
+      "type": "agent",
+      "description": "NemoClaw -- OpenClaw in sandboxed OpenShell with Bedrock inference",
+      "deps": ["bedrockify"],
+      "instance_type": "t4g.xlarge",
+      "root_volume_gb": 40,
+      "data_volume_gb": 80,
+      "default_model": "us.anthropic.claude-sonnet-4-6",
+      "ports": {},
+      "brain": true,
+      "claude_code": false,
+      "experimental": true,
+      "requires_docker": true,
+      "compatible_profiles": ["personal_assistant"]
+    },
     "claude-code": {
       "type": "agent",
       "description": "Claude Code — Anthropic's coding agent with native Bedrock support",
