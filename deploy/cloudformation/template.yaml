@@ -1025,8 +1025,8 @@ Resources:
               /opt/aws/bin/cfn-signal -e 1 --stack "${!STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
             else
               _IMDS_TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
-              _IID=$([[ -n "$_IMDS_TOKEN" ]] && curl -sf -H "X-aws-ec2-metadata-token: $_IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
-              aws cloudformation signal-resource --stack-name "${!STACK_NAME}" --logical-resource-id Instance --unique-id "$_IID" --status FAILURE --region "$REGION" 2>/dev/null || true
+              _INSTANCE_ID=$([[ -n "$_IMDS_TOKEN" ]] && curl -sf -H "X-aws-ec2-metadata-token: $_IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+              aws cloudformation signal-resource --stack-name "${!STACK_NAME}" --logical-resource-id Instance --unique-id "$_INSTANCE_ID" --status FAILURE --region "$REGION" 2>/dev/null || true
             fi
           ' ERR
           # Ensure git is available (not present on all AMIs)
