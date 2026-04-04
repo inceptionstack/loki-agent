@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Git pre-commit hook — runs all unit tests before allowing commit.
+# Install: cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# Or run: bash scripts/setup-hooks.sh
+
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+FAILED=0
+
+run_test() {
+  local test_script="$1"
+  local name
+  name="$(basename "$(dirname "$test_script")")/$(basename "$test_script")"
+  printf "${CYAN}▸${NC} Running %s..." "$name"
+  if bash "$test_script" > /dev/null 2>&1; then
+    printf " ${GREEN}✓${NC}\n"
+  else
+    printf " ${RED}✗${NC}\n"
+    FAILED=$((FAILED + 1))
+  fi
+}
+
+echo ""
+printf "${BOLD}Pre-commit: running tests...${NC}\n"
+echo ""
+
+# Discover and run all test scripts (same as CI)
+while IFS= read -r test_script; do
+  [[ -f "$test_script" ]] && run_test "$test_script"
+done < <(find "${REPO_ROOT}/packs" -maxdepth 2 -name "test.sh" -type f 2>/dev/null; \
+         find "${REPO_ROOT}/tests" -name "test-*.sh" -type f 2>/dev/null; \
+         find "${REPO_ROOT}/packs" -maxdepth 1 -name "test-packs.sh" -type f 2>/dev/null)
+
+echo ""
+if [[ "$FAILED" -gt 0 ]]; then
+  printf "${RED}✗ %d test(s) failed — commit blocked.${NC}\n" "$FAILED"
+  printf "  Fix failures and try again. Skip with: git commit --no-verify\n\n"
+  exit 1
+else
+  printf "${GREEN}✓ All tests passed.${NC}\n\n"
+fi
