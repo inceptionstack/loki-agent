@@ -12,24 +12,31 @@
 > curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 > ```
 >
-> **Express install (accept all defaults, zero prompts):**
+> **Non-interactive install (accept all defaults, zero prompts):**
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --yes
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive
 > ```
 >
-> **Express install with a specific pack:**
+> **Non-interactive with a specific pack and deploy method:**
 > ```sh
-> # Deploy Claude Code
-> bash /tmp/loki-install.sh --yes --pack claude-code
+> # Deploy Claude Code via CloudFormation
+> bash /tmp/loki-install.sh --non-interactive --pack claude-code --method cfn
 >
-> # Deploy OpenClaw (default)
-> bash /tmp/loki-install.sh --yes --pack openclaw
+> # Deploy OpenClaw via Terraform (default)
+> bash /tmp/loki-install.sh --non-interactive --pack openclaw --method terraform
 >
-> # Deploy Hermes
-> bash /tmp/loki-install.sh --yes --pack hermes
+> # Deploy Hermes via CloudFormation
+> bash /tmp/loki-install.sh --non-interactive --pack hermes --method cfn
 > ```
 >
-> Requires: AWS CLI configured, admin access on a dedicated AWS account. Without `--yes`, the script walks you through everything interactively.
+> Requires: AWS CLI configured, admin access on a dedicated AWS account. Without `--non-interactive`, the script walks you through everything interactively.
+>
+> **CLI flags:**
+> | Flag | Description |
+> |------|-------------|
+> | `--non-interactive` | Accept all defaults, skip prompts (aliases: `--yes`, `-y`) |
+> | `--pack <name>` | Pre-select agent pack (`openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw`) |
+> | `--method <method>` | Pre-select deploy method (`cfn`, `terraform` / `tf`) |
 >
 > ⚠️ **We highly recommend deploying Loki in a brand-new, dedicated AWS account.** Loki has admin-level access and LLMs can make mistakes — a clean account limits the blast radius. Start with prototyping work as you learn and get acquainted with its capabilities. Like any powerful tool, it carries risks; isolating it in its own account is the simplest way to manage them.
 >
@@ -51,7 +58,7 @@
 
 Run the install command from the TL;DR above. The installer verifies AWS permissions, lets you select your **agent pack**, instance size, and deployment method (CloudFormation / SAM / Terraform), then deploys automatically.
 
-Use `--yes` (or `-y`) to skip all prompts and deploy with defaults: Terraform, OpenClaw pack, t4g.xlarge, all security services enabled. Add `--pack <name>` to pre-select a pack (e.g. `--pack claude-code`).
+Use `--non-interactive` (or `--yes` / `-y`) to skip all prompts and deploy with defaults: Terraform, OpenClaw pack, t4g.xlarge, all security services enabled. Add `--pack <name>` to pre-select a pack and `--method <cfn|terraform>` to pre-select the deploy method.
 
 **Agent packs available:**
 | Pack | Description | Instance | Data Volume |
