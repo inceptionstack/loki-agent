@@ -40,7 +40,7 @@ packs:
     ports:
       gateway: 3001
     brain: true
-    claude_code: true
+    claude_code: false
     experimental: false
 
   hermes:
