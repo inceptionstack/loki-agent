@@ -148,8 +148,8 @@ if id ec2-user &>/dev/null; then
   sudo usermod -aG docker ec2-user 2>/dev/null || true
 fi
 
-# Verify Docker is functional
-if ! docker info &>/dev/null; then
+# Verify Docker is functional (use sudo — group membership requires new session)
+if ! sudo docker info &>/dev/null; then
   fail "Docker is installed but not functional. Check systemctl status docker."
 fi
 ok "Docker is running and functional"
@@ -235,9 +235,9 @@ BRAIN_DIR="${HOME}/.openclaw/workspace"
 BRAIN_FILES=(SOUL.md USER.md IDENTITY.md AGENTS.md)
 
 # Get running container ID for the sandbox (exact match first, fallback to substring)
-CONTAINER_ID="$(docker ps --filter "name=^/${SANDBOX_NAME}$" --format '{{.ID}}' 2>/dev/null | head -1)"
+CONTAINER_ID="$(sudo docker ps --filter "name=^/${SANDBOX_NAME}$" --format '{{.ID}}' 2>/dev/null | head -1)"
 if [[ -z "${CONTAINER_ID}" ]]; then
-  CONTAINER_ID="$(docker ps --filter "name=${SANDBOX_NAME}" -q 2>/dev/null | head -1)"
+  CONTAINER_ID="$(sudo docker ps --filter "name=${SANDBOX_NAME}" -q 2>/dev/null | head -1)"
 fi
 
 if [[ -z "${CONTAINER_ID}" ]]; then
@@ -248,7 +248,7 @@ else
   for brain_file in "${BRAIN_FILES[@]}"; do
     src="${BRAIN_DIR}/${brain_file}"
     if [[ -f "${src}" ]]; then
-      docker cp "${src}" "${CONTAINER_ID}:${SANDBOX_WORKSPACE}/" 2>/dev/null && \
+      sudo docker cp "${src}" "${CONTAINER_ID}:${SANDBOX_WORKSPACE}/" 2>/dev/null && \
         ok "Injected ${brain_file}" || \
         warn "Failed to inject ${brain_file} (container may not have ${SANDBOX_WORKSPACE})"
     else
