@@ -148,8 +148,10 @@ if id ec2-user &>/dev/null; then
   sudo usermod -aG docker ec2-user 2>/dev/null || true
 fi
 
-# Verify Docker is functional (use sg docker — group membership requires new session)
-if ! sg docker -c "docker info" &>/dev/null; then
+# Verify Docker is functional
+# NOTE: bootstrap.sh runs packs via 'sudo -u ec2-user' which doesn't pick up
+# newly added groups. Use 'sudo docker' for verification.
+if ! sudo docker info &>/dev/null; then
   fail "Docker is installed but not functional. Check systemctl status docker."
 fi
 ok "Docker is running and functional"
@@ -193,23 +195,30 @@ fi
 # ── Step 4: Create sandbox (non-interactive onboard) ─────────────────────────
 step "Creating NemoClaw sandbox (non-interactive)"
 
-export NEMOCLAW_SANDBOX_NAME="${SANDBOX_NAME}"
-export NEMOCLAW_PROVIDER=custom
-export COMPATIBLE_API_KEY=unused           # bedrockify uses IAM, not API keys
-export NEMOCLAW_COMPATIBLE_BASE_URL="http://127.0.0.1:${BEDROCKIFY_PORT}/v1"
-export NEMOCLAW_MODEL="${MODEL}"
-export NEMOCLAW_POLICY_MODE=suggested
-
 # Apply network policy
 NETWORK_POLICY="${SCRIPT_DIR}/resources/network-policy.yaml"
 if [[ -f "${NETWORK_POLICY}" ]]; then
-  export NEMOCLAW_NETWORK_POLICY="${NETWORK_POLICY}"
   log "Network policy: ${NETWORK_POLICY}"
 fi
 
-# CRITICAL: NemoClaw's onboard checks Docker as current user.
-# The docker group was just added — needs 'sg docker' to activate without a new login session.
-sg docker -c "nemoclaw onboard --non-interactive --yes-i-accept-third-party-software"
+# CRITICAL: NemoClaw's onboard checks Docker internally as the current user.
+# bootstrap.sh runs packs via 'sudo -u ec2-user' which doesn't pick up newly
+# added docker group. We need to re-exec with the docker group active.
+# Use 'sg docker' to spawn a subshell with the group, then run onboard inside it.
+sg docker -c "
+  export NEMOCLAW_NON_INTERACTIVE=1
+  export NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE=1
+  export NEMOCLAW_SANDBOX_NAME='${SANDBOX_NAME}'
+  export NEMOCLAW_PROVIDER=custom
+  export COMPATIBLE_API_KEY=unused
+  export NEMOCLAW_COMPATIBLE_BASE_URL='http://127.0.0.1:${BEDROCKIFY_PORT}/v1'
+  export NEMOCLAW_MODEL='${MODEL}'
+  export NEMOCLAW_POLICY_MODE=suggested
+  export NEMOCLAW_NETWORK_POLICY='${NETWORK_POLICY}'
+  export PATH='/home/ec2-user/.local/bin:/usr/local/bin:${PATH}'
+  eval \"\$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)\" 2>/dev/null || true
+  nemoclaw onboard --non-interactive --yes-i-accept-third-party-software
+"
 
 # Verify sandbox created
 if ! nemoclaw "${SANDBOX_NAME}" status &>/dev/null; then
@@ -237,7 +246,7 @@ BRAIN_DIR="${HOME}/.openclaw/workspace"
 BRAIN_FILES=(SOUL.md USER.md IDENTITY.md AGENTS.md)
 
 # Get running container ID for the sandbox (exact match first, fallback to substring)
-CONTAINER_ID="$(sg docker -c "docker ps --filter 'name=^/${SANDBOX_NAME}$' --format '{{.ID}}'" 2>/dev/null | head -1)"
+CONTAINER_ID="$(sg docker -c "docker ps --filter 'name=^/${SANDBOX_NAME}\$' --format '{{.ID}}'" 2>/dev/null | head -1)"
 if [[ -z "${CONTAINER_ID}" ]]; then
   CONTAINER_ID="$(sg docker -c "docker ps --filter 'name=${SANDBOX_NAME}' -q" 2>/dev/null | head -1)"
 fi
