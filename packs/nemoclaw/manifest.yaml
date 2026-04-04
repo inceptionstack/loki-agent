@@ -40,8 +40,8 @@ params:
 
 health_check:
   # NemoClaw manages its own lifecycle — no systemd service
-  # Polling loop instead of systemctl is-active:
-  command: "nemoclaw loki-assistant status --json 2>/dev/null | jq -r .sandbox.status"
+  # Uses default sandbox name; override sandbox-name param to change
+  command: "nemoclaw ${NEMOCLAW_SANDBOX_NAME:-loki-assistant} status --json 2>/dev/null | jq -r .sandbox.status"
   expect: "running"
   timeout: 120
   poll_interval: 5

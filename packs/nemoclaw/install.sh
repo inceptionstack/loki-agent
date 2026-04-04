@@ -83,6 +83,9 @@ PROFILE="${PACK_ARG_PROFILE}"
 
 pack_banner "nemoclaw"
 log "region=${REGION} model=${MODEL} bedrockify-port=${BEDROCKIFY_PORT} sandbox-name=${SANDBOX_NAME}"
+if [[ -n "${TELEGRAM_TOKEN}" ]]; then
+  log "telegram-token=<set> allowed-chat-ids=${ALLOWED_CHAT_IDS:-<none>}"
+fi
 
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 require_cmd curl python3
@@ -250,10 +253,23 @@ step "Configuring Telegram bridge"
 
 if [[ -n "${TELEGRAM_TOKEN}" ]]; then
   log "Setting up Telegram bridge for sandbox '${SANDBOX_NAME}'..."
+
+  # Persist Telegram config to ~/.nemoclaw/telegram.env so the bridge can read it
+  # across reboots and service restarts (env vars don't survive script exit)
+  TELEGRAM_ENV="${HOME}/.nemoclaw/telegram.env"
+  mkdir -p "${HOME}/.nemoclaw"
+  cat > "${TELEGRAM_ENV}" << TGEOF
+# NemoClaw Telegram bridge config (written by nemoclaw pack installer)
+TELEGRAM_BOT_TOKEN=${TELEGRAM_TOKEN}
+ALLOWED_CHAT_IDS=${ALLOWED_CHAT_IDS}
+TGEOF
+  chmod 600 "${TELEGRAM_ENV}"
+  ok "Telegram config persisted to ${TELEGRAM_ENV}"
+
+  # Also export for current session in case bridge starts now
   export TELEGRAM_BOT_TOKEN="${TELEGRAM_TOKEN}"
   export ALLOWED_CHAT_IDS="${ALLOWED_CHAT_IDS}"
-  # NemoClaw's host-side bridge picks up these env vars automatically
-  ok "Telegram bridge environment configured (token set)"
+  ok "Telegram bridge configured (token set, config persisted)"
 else
   log "No Telegram token provided — Telegram bridge skipped"
 fi
