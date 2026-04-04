@@ -7,48 +7,29 @@
 
 > **TL;DR — deploy Loki:**
 >
-> **Interactive (walks you through everything):**
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
 > ```
 >
-> **Non-interactive — OpenClaw (recommended, full AI agent with 24/7 gateway):**
+> The installer walks you through pack, profile, and deploy method interactively.
+>
+> **One-liner examples (non-interactive):**
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive --pack openclaw
+> # Full builder agent (can create/modify/delete AWS resources)
+> curl -sfL .../install.sh | bash -s -- --non-interactive --pack openclaw --profile builder
+>
+> # Read-only advisor (can see everything, change nothing)
+> curl -sfL .../install.sh | bash -s -- --non-interactive --pack openclaw --profile account_assistant
+>
+> # Personal assistant (Bedrock only, no AWS access)
+> curl -sfL .../install.sh | bash -s -- --non-interactive --pack claude-code --profile personal_assistant
 > ```
 >
-> **Non-interactive — Claude Code (Anthropic's coding agent):**
-> ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive --pack claude-code --method cfn
-> ```
+> Requires: AWS CLI + admin access on a **dedicated sandbox account**.
 >
-> **More examples:**
-> ```sh
-> # Pick a deploy method: cfn (CloudFormation) or terraform
-> bash /tmp/loki-install.sh --non-interactive --pack openclaw --method terraform
-> bash /tmp/loki-install.sh --non-interactive --pack hermes --method cfn
-> ```
+> ⚠️ Deploy in a clean account — LLMs make mistakes, a sandbox limits the blast radius.
 >
-> Requires: AWS CLI configured, admin access on a dedicated AWS account. Without `--non-interactive`, the script walks you through everything interactively.
->
-> **CLI flags:**
-> | Flag | Description |
-> |------|-------------|
-> | `--non-interactive` | Accept all defaults, skip prompts (aliases: `--yes`, `-y`) |
-> | `--pack <name>` | Pre-select agent pack (`openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw`) |
-> | `--method <method>` | Pre-select deploy method (`cfn`, `terraform` / `tf`) |
->
-> ⚠️ **We highly recommend deploying Loki in a brand-new, dedicated AWS account.** Loki has admin-level access and LLMs can make mistakes — a clean account limits the blast radius. Start with prototyping work as you learn and get acquainted with its capabilities. Like any powerful tool, it carries risks; isolating it in its own account is the simplest way to manage them.
->
-> ⚠️ **This is an experiment, not a security product.** Loki can enable AWS security services and flag findings, but it does not replace professional security review, compliance auditing, or threat modeling. An LLM with admin access can cause damage — treat it accordingly.
->
-> After deploying, run the [Essential Bootstraps](https://github.com/inceptionstack/loki-agent/tree/main/bootstraps/essential) — see [Getting Started](#getting-started) below.
->
-> **To remove a Loki deployment:**
-> ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh -o /tmp/loki-uninstall.sh && bash /tmp/loki-uninstall.sh
-> ```
->
+> **Uninstall:** `curl -sfL .../uninstall.sh | bash`
 
 ---
 
@@ -56,11 +37,26 @@
 
 ### Step 1: Install Loki
 
-Run the install command from the TL;DR above. The installer verifies AWS permissions, lets you select your **agent pack**, instance size, and deployment method (CloudFormation / SAM / Terraform), then deploys automatically.
+Run the install command from the TL;DR above. The installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
 
-Use `--non-interactive` (or `--yes` / `-y`) to skip all prompts and deploy with defaults: Terraform, OpenClaw pack, t4g.xlarge, all security services enabled. Add `--pack <name>` to pre-select a pack and `--method <cfn|terraform>` to pre-select the deploy method.
+**CLI flags for non-interactive deploys:**
 
-**Agent packs available:**
+| Flag | Description |
+|------|-------------|
+| `--non-interactive` | Skip all prompts, use defaults (aliases: `--yes`, `-y`) |
+| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw` |
+| `--profile <name>` | Permission profile: `builder`, `account_assistant`, `personal_assistant` |
+| `--method <method>` | Deploy method: `cfn` (CloudFormation), `terraform` / `tf` |
+
+**Permission profiles:**
+
+| Profile | IAM | Instance | Use case |
+|---------|-----|----------|----------|
+| 🔴 `builder` | AdministratorAccess | t4g.xlarge | Build apps, deploy infra, manage pipelines |
+| 🟡 `account_assistant` | ReadOnlyAccess + Bedrock | t4g.medium | Cost analysis, architecture review, debugging |
+| 🟢 `personal_assistant` | Bedrock only | t4g.medium | Writing, research, coding help, daily tasks |
+
+**Agent packs:**
 | Pack | Description | Instance | Data Volume |
 |------|-------------|----------|-------------|
 | **OpenClaw** (default) | Stateful AI agent with 24/7 gateway, persistent memory, Telegram/Discord/Slack | t4g.xlarge recommended | 80GB |
