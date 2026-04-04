@@ -1041,6 +1041,8 @@ Resources:
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
             --provider-api-key "$PROVIDER_API_KEY"
+          # Signal CFN success
+          /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION"
 # ============================================================================
 # OUTPUTS
 # ============================================================================
