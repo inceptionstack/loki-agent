@@ -23,6 +23,9 @@
 >
 > # Personal assistant (Bedrock only, no AWS access)
 > curl -sfL .../install.sh | bash -s -- --non-interactive --pack claude-code --profile personal_assistant
+>
+> # Sandboxed personal assistant (NemoClaw — isolated in OpenShell sandbox)
+> curl -sfL .../install.sh | bash -s -- --non-interactive --pack nemoclaw --profile personal_assistant
 > ```
 >
 > Requires: AWS CLI + admin access on a **dedicated sandbox account**.
@@ -44,7 +47,7 @@ Run the install command from the TL;DR above. The installer walks you through **
 | Flag | Description |
 |------|-------------|
 | `--non-interactive` | Skip all prompts, use defaults (aliases: `--yes`, `-y`) |
-| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw` |
+| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `nemoclaw`, `pi`, `ironclaw` |
 | `--profile <name>` | Permission profile: `builder`, `account_assistant`, `personal_assistant` |
 | `--method <method>` | Deploy method: `cfn` (CloudFormation), `terraform` / `tf` |
 
@@ -64,6 +67,7 @@ Run the install command from the TL;DR above. The installer walks you through **
 | **Hermes** *(experimental)* | NousResearch CLI agent — lighter, terminal-focused, self-improving skills | t4g.medium sufficient | None needed (set to 0) |
 | **Pi** *(experimental)* | Minimal terminal coding harness — read, write, edit, bash tools | t4g.medium sufficient | None needed (set to 0) |
 | **IronClaw** *(experimental)* | Rust-based AI agent by NEAR AI — static binary, fast startup | t4g.medium sufficient | None needed (set to 0) |
+| **NemoClaw** *(experimental)* | OpenClaw in NVIDIA OpenShell sandbox — Landlock + seccomp + netns isolation, Bedrock via bedrockify. `personal_assistant` profile only. | t4g.xlarge required | 80GB |
 
 The installer discovers packs dynamically and asks which to deploy. Experimental packs are clearly marked.
 
@@ -179,6 +183,7 @@ Loki uses a **pack-based architecture** for deploying different AI agent runtime
 | `hermes` | Agent *(experimental)* | NousResearch Hermes CLI agent. Self-improving skills, learning loop, lightweight. Uses bedrockify for model access. |
 | `pi` | Agent *(experimental)* | Pi Coding Agent. Minimal terminal coding harness with read, write, edit, bash tools. Pure Node.js. |
 | `ironclaw` | Agent *(experimental)* | IronClaw by NEAR AI. Rust-based agent with shell/file tools, MCP support. Single static binary. |
+| `nemoclaw` | Agent *(experimental)* | NemoClaw — OpenClaw inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with Landlock, seccomp, and network namespace isolation. Inference routed through bedrockify on the host (no NVIDIA API key needed). **Only compatible with `personal_assistant` profile** — the sandbox blocks all AWS API access. Requires Docker + t4g.xlarge. |
 
 ### How It Works
 
@@ -210,6 +215,9 @@ bash packs/hermes/install.sh --region us-east-1 --hermes-model anthropic/claude-
 
 # Or for OpenClaw
 bash packs/openclaw/install.sh --region us-east-1 --model us.anthropic.claude-opus-4-6-v1 --port 3001
+
+# Or for NemoClaw (sandboxed OpenClaw — needs Docker, personal_assistant only)
+bash packs/nemoclaw/install.sh --region us-east-1 --model us.anthropic.claude-sonnet-4-6 --profile personal_assistant
 ```
 
 ### Adding New Packs
@@ -460,7 +468,7 @@ Loki is:
 
 Loki is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-agent](https://github.com/inceptionstack/loki-agent).
 
-Built on [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes](https://github.com/NousResearch/hermes-agent) — choose your agent runtime at deploy time.
+Built on [OpenClaw](https://github.com/openclaw/openclaw), [Hermes](https://github.com/NousResearch/hermes-agent), and [NemoClaw](https://github.com/NVIDIA/NemoClaw) — choose your agent runtime at deploy time.
 
 ### InceptionStack Repositories
 
