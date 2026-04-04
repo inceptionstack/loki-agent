@@ -100,7 +100,7 @@ prompt() {
     return
   fi
   local display="$text"; [[ -n "$default" ]] && display="$text [$default]"
-  read -rp "$(echo -e "${BOLD}${display}:${NC} ")" value
+  read -rp "$(echo -e "${BOLD}${display}:${NC} ")" value < /dev/tty
   printf -v "$var" '%s' "${value:-$default}"
 }
 
@@ -108,7 +108,7 @@ confirm() {
   local text="$1" default="${2:-default_no}"
   if [[ "$AUTO_YES" == true ]]; then return 0; fi
   local hint="[y/N]"; [[ "$default" == "default_yes" ]] && hint="[Y/n]"
-  read -rp "$(echo -e "${BOLD}${text} ${hint}:${NC} ")" answer
+  read -rp "$(echo -e "${BOLD}${text} ${hint}:${NC} ")" answer < /dev/tty
   case "$default" in
     default_yes) [[ ! "$answer" =~ ^[Nn]$ ]] ;;
     *)           [[ "$answer" =~ ^[Yy]$ ]] ;;
@@ -122,7 +122,7 @@ toggle() {
     return
   fi
   local hint="[Y/n]"; [[ "$default" == "false" ]] && hint="[y/N]"
-  read -rp "$(echo -e "    ${text} ${hint}: ")" answer
+  read -rp "$(echo -e "    ${text} ${hint}: ")" answer < /dev/tty
   case "$default" in
     true)  [[ "$answer" =~ ^[Nn]$ ]] && printf -v "$var" '%s' "false" || printf -v "$var" '%s' "true" ;;
     false) [[ "$answer" =~ ^[Yy]$ ]] && printf -v "$var" '%s' "true"  || printf -v "$var" '%s' "false" ;;
