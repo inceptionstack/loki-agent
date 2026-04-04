@@ -1,0 +1,39 @@
+version: 1
+
+profiles:
+  builder:
+    description: "Full-stack AWS builder — can create, modify, and delete any AWS resource"
+    instance_type: t4g.xlarge
+    iam_mode: managed
+    managed_policies:
+      - arn:aws:iam::aws:policy/AdministratorAccess
+    inline_policies: []
+    deny_policies: []
+    bootstrap_policies: []
+    security_services: true
+
+  account_assistant:
+    description: "Read-only AWS advisor — can see everything, change nothing"
+    instance_type: t4g.medium
+    iam_mode: managed
+    managed_policies:
+      - arn:aws:iam::aws:policy/ReadOnlyAccess
+    inline_policies:
+      - profiles/account_assistant_bedrock.json
+    deny_policies:
+      - profiles/account_assistant_deny.json
+    bootstrap_policies:
+      - profiles/bootstrap_operations.json
+    security_services: true
+
+  personal_assistant:
+    description: "Personal helper — Bedrock inference only, no AWS access"
+    instance_type: t4g.medium
+    iam_mode: inline
+    managed_policies: []
+    inline_policies:
+      - profiles/personal_assistant.json
+    deny_policies: []
+    bootstrap_policies:
+      - profiles/bootstrap_operations.json
+    security_services: false

@@ -11,6 +11,7 @@ Metadata:
         Parameters:
           - EnvironmentName
           - PackName
+          - ProfileName
           - InstanceType
           - DefaultModel
       - Label:
@@ -53,6 +54,8 @@ Metadata:
     ParameterLabels:
       EnvironmentName:
         default: "Environment Name"
+      ProfileName:
+        default: "Permission Profile"
       InstanceType:
         default: "Instance Size"
       DefaultModel:
@@ -118,6 +121,14 @@ Parameters:
       - pi
       - ironclaw
     Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter). 'pi' and 'ironclaw' are experimental."
+
+  ProfileName:
+    Type: String
+    AllowedValues:
+      - builder
+      - account_assistant
+      - personal_assistant
+    Description: "Permission profile. 'builder' = full admin (AdministratorAccess). 'account_assistant' = read-only (ReadOnlyAccess). 'personal_assistant' = Bedrock inference only, no AWS access."
 
   EnvironmentName:
     Type: String
@@ -312,6 +323,12 @@ Conditions:
   IsApiKey: !Equals [!Ref ModelMode, 'api-key']
   IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
   CreateNewVpc: !Equals [!Ref ExistingVpcId, '']
+  IsBuilder: !Equals [!Ref ProfileName, 'builder']
+  IsNotBuilder: !Not [!Condition IsBuilder]
+  IsAccountAssistant: !Equals [!Ref ProfileName, 'account_assistant']
+  IsPersonalAssistant: !Equals [!Ref ProfileName, 'personal_assistant']
+  NeedsAdminUser: !Condition IsBuilder
+  RunSecurityServices: !Not [!Condition IsPersonalAssistant]
 
 # ============================================================================
 # RESOURCES
@@ -455,7 +472,8 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/AdministratorAccess
+        - !If [IsBuilder, 'arn:aws:iam::aws:policy/AdministratorAccess', !Ref 'AWS::NoValue']
+        - !If [IsAccountAssistant, 'arn:aws:iam::aws:policy/ReadOnlyAccess', !Ref 'AWS::NoValue']
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-role'
@@ -465,6 +483,126 @@ Resources:
           Value: !Ref LokiWatermark
         - Key: loki:deploy-method
           Value: cloudformation
+
+  # Bootstrap operations for non-builder profiles (SSM status + cfn-signal)
+  # Builder has AdministratorAccess which already includes these permissions.
+  BootstrapOperationsPolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsNotBuilder
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-bootstrap-ops'
+      Roles:
+        - !Ref InstanceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: BootstrapOperations
+            Effect: Allow
+            Action:
+              - ssm:PutParameter
+              - ssm:DeleteParameter
+              - cloudformation:SignalResource
+            Resource:
+              - !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/loki/*'
+              - !Sub 'arn:aws:cloudformation:*:${AWS::AccountId}:stack/*'
+
+  # Bedrock inference for account_assistant (ReadOnlyAccess does not include invoke)
+  AccountAssistantBedrockPolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsAccountAssistant
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-bedrock-inference'
+      Roles:
+        - !Ref InstanceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: BedrockInference
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+              - bedrock:GetUseCaseForModelAccess
+              - bedrock:ListFoundationModels
+              - bedrock:GetFoundationModel
+              - bedrock:ListInferenceProfiles
+            Resource: '*'
+
+  # Deny policy for account_assistant — secrets, S3 objects, Lambda code
+  AccountAssistantDenyPolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsAccountAssistant
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-deny-secrets-s3'
+      Roles:
+        - !Ref InstanceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenySecretValues
+            Effect: Deny
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:GetResourcePolicy
+            Resource: '*'
+          - Sid: DenyS3ObjectAccess
+            Effect: Deny
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:GetObjectAcl
+            Resource: '*'
+          - Sid: DenyLambdaCodeAccess
+            Effect: Deny
+            Action:
+              - lambda:GetFunction
+            Resource: '*'
+
+  # Inline policy for personal_assistant (Bedrock + SSM connectivity + STS only)
+  PersonalAssistantPolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsPersonalAssistant
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-bedrock-only'
+      Roles:
+        - !Ref InstanceRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: BedrockInference
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+              - bedrock:GetUseCaseForModelAccess
+            Resource: '*'
+          - Sid: SSMConnectivity
+            Effect: Allow
+            Action:
+              - ssm:UpdateInstanceInformation
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Resource: '*'
+          - Sid: BedrockDiscovery
+            Effect: Allow
+            Action:
+              - bedrock:ListFoundationModels
+              - bedrock:GetFoundationModel
+              - bedrock:ListInferenceProfiles
+            Resource: '*'
+          - Sid: Identity
+            Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: '*'
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -844,6 +982,7 @@ Resources:
 
   SecurityEnablementCustomResource:
     Type: Custom::SecurityEnablement
+    Condition: RunSecurityServices
     DependsOn: SecurityEnablementRole
     Properties:
       ServiceToken: !GetAtt SecurityEnablementFunction.Arn
@@ -854,10 +993,11 @@ Resources:
       EnableConfigRecorder: !Ref EnableConfigRecorder
 
   # --------------------------------------------------------------------------
-  # Admin Console User
+  # Admin Console User — only for builder profile
   # --------------------------------------------------------------------------
   AdminUser:
     Type: AWS::IAM::User
+    Condition: NeedsAdminUser
     Properties:
       UserName: !Sub '${EnvironmentName}-admin'
       ManagedPolicyArns:
@@ -876,11 +1016,13 @@ Resources:
 
   AdminAccessKey:
     Type: AWS::IAM::AccessKey
+    Condition: NeedsAdminUser
     Properties:
       UserName: !Ref AdminUser
 
   AdminSetupRole:
     Type: AWS::IAM::Role
+    Condition: NeedsAdminUser
     Properties:
       RoleName: !Sub '${EnvironmentName}-admin-pw-role'
       AssumeRolePolicyDocument:
@@ -895,6 +1037,7 @@ Resources:
 
   AdminSetupFunction:
     Type: AWS::Lambda::Function
+    Condition: NeedsAdminUser
     Properties:
       FunctionName: !Sub '${EnvironmentName}-admin-setup'
       Runtime: python3.12
@@ -930,6 +1073,7 @@ Resources:
 
   AdminSetupCustomResource:
     Type: Custom::AdminSetup
+    Condition: NeedsAdminUser
     DependsOn:
       - AdminUser
       - AdminSetupRole
@@ -996,6 +1140,8 @@ Resources:
           Value: '1.0'
         - Key: loki:pack
           Value: !Ref PackName
+        - Key: loki:profile
+          Value: !Ref ProfileName
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
@@ -1013,6 +1159,7 @@ Resources:
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
           export PACK_NAME="${PackName}"
+          export PROFILE_NAME="${ProfileName}"
           # Publish failure to SSM and signal CFN on any error
           trap '
             aws ssm put-parameter --name "/loki/setup-status" \
@@ -1043,6 +1190,7 @@ Resources:
           fi
           bash /tmp/loki-agent/deploy/bootstrap.sh \
             --pack "$PACK_NAME" \
+            --profile "$PROFILE_NAME" \
             --region "$BEDROCK_REGION" \
             --model "$DEFAULT_MODEL" \
             --gw-port "$GW_PORT" \
@@ -1107,4 +1255,8 @@ Outputs:
   PackName:
     Description: "Deployed agent pack"
     Value: !Ref PackName
+
+  ProfileName:
+    Description: "Deployed permission profile"
+    Value: !Ref ProfileName
 

@@ -16,6 +16,7 @@ locals {
     "loki:deploy-method" = "terraform"
     "loki:version"       = "1.0"
     "loki:pack"          = var.pack_name
+    "loki:profile"       = var.profile_name
   }
   vpc_id    = var.existing_vpc_id != "" ? var.existing_vpc_id : (length(aws_vpc.main) > 0 ? aws_vpc.main[0].id : "")
   subnet_id = var.existing_subnet_id != "" ? var.existing_subnet_id : (length(aws_subnet.public) > 0 ? aws_subnet.public[0].id : "")
@@ -151,9 +152,51 @@ resource "aws_iam_role_policy_attachment" "instance_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# builder: AdministratorAccess managed policy
 resource "aws_iam_role_policy_attachment" "instance_admin" {
+  count      = var.profile_name == "builder" ? 1 : 0
   role       = aws_iam_role.instance.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+# account_assistant: ReadOnlyAccess managed policy
+resource "aws_iam_role_policy_attachment" "instance_readonly" {
+  count      = var.profile_name == "account_assistant" ? 1 : 0
+  role       = aws_iam_role.instance.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+# account_assistant: Bedrock inference (ReadOnlyAccess doesn't include invoke)
+resource "aws_iam_role_policy" "account_assistant_bedrock" {
+  count  = var.profile_name == "account_assistant" ? 1 : 0
+  name   = "${var.environment_name}-bedrock-inference"
+  role   = aws_iam_role.instance.id
+  policy = file("${path.module}/policies/account_assistant_bedrock.json")
+}
+
+# account_assistant: Deny secrets, S3 objects, Lambda code
+resource "aws_iam_role_policy" "account_assistant_deny" {
+  count  = var.profile_name == "account_assistant" ? 1 : 0
+  name   = "${var.environment_name}-deny-secrets-s3"
+  role   = aws_iam_role.instance.id
+  policy = file("${path.module}/policies/account_assistant_deny.json")
+}
+
+# personal_assistant: Bedrock + SSM connectivity only
+resource "aws_iam_role_policy" "personal_assistant" {
+  count  = var.profile_name == "personal_assistant" ? 1 : 0
+  name   = "${var.environment_name}-bedrock-only"
+  role   = aws_iam_role.instance.id
+  policy = file("${path.module}/policies/personal_assistant.json")
+}
+
+# non-builder: scoped bootstrap operations (SSM status + cfn-signal)
+# builder has AdministratorAccess which already covers these
+resource "aws_iam_role_policy" "bootstrap_operations" {
+  count  = var.profile_name != "builder" ? 1 : 0
+  name   = "${var.environment_name}-bootstrap-ops"
+  role   = aws_iam_role.instance.id
+  policy = file("${path.module}/policies/bootstrap_operations.json")
 }
 
 resource "aws_iam_instance_profile" "main" {
@@ -527,6 +570,7 @@ resource "aws_lambda_function" "security_enablement" {
 }
 
 resource "null_resource" "security_enablement_invoke" {
+  count      = var.profile_name != "personal_assistant" ? 1 : 0
   depends_on = [aws_lambda_function.security_enablement]
 
   provisioner "local-exec" {
@@ -542,10 +586,11 @@ resource "null_resource" "security_enablement_invoke" {
 }
 
 # ============================================================================
-# Admin Console User
+# Admin Console User — only for builder profile
 # ============================================================================
 resource "aws_iam_user" "admin" {
-  name = "${var.environment_name}-admin"
+  count = var.profile_name == "builder" ? 1 : 0
+  name  = "${var.environment_name}-admin"
 
   tags = merge(local.loki_tags, {
     Name      = "${var.environment_name}-admin"
@@ -554,17 +599,20 @@ resource "aws_iam_user" "admin" {
 }
 
 resource "aws_iam_user_policy_attachment" "admin" {
-  user       = aws_iam_user.admin.name
+  count      = var.profile_name == "builder" ? 1 : 0
+  user       = aws_iam_user.admin[0].name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
 
 resource "aws_iam_access_key" "admin" {
-  user = aws_iam_user.admin.name
+  count = var.profile_name == "builder" ? 1 : 0
+  user  = aws_iam_user.admin[0].name
 }
 
 # Admin password Lambda
 resource "aws_iam_role" "admin_setup_lambda" {
-  name = "${var.environment_name}-admin-pw-role"
+  count = var.profile_name == "builder" ? 1 : 0
+  name  = "${var.environment_name}-admin-pw-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -577,7 +625,8 @@ resource "aws_iam_role" "admin_setup_lambda" {
 }
 
 resource "aws_iam_role_policy_attachment" "admin_setup_basic" {
-  role       = aws_iam_role.admin_setup_lambda.name
+  count      = var.profile_name == "builder" ? 1 : 0
+  role       = aws_iam_role.admin_setup_lambda[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
@@ -599,8 +648,9 @@ def handler(event, context):
 }
 
 resource "aws_lambda_function" "admin_setup" {
+  count            = var.profile_name == "builder" ? 1 : 0
   function_name    = "${var.environment_name}-admin-setup"
-  role             = aws_iam_role.admin_setup_lambda.arn
+  role             = aws_iam_role.admin_setup_lambda[0].arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 30
@@ -611,6 +661,7 @@ resource "aws_lambda_function" "admin_setup" {
 }
 
 resource "null_resource" "admin_setup_invoke" {
+  count      = var.profile_name == "builder" ? 1 : 0
   depends_on = [aws_lambda_function.admin_setup, aws_iam_user.admin]
 
   provisioner "local-exec" {
@@ -655,6 +706,7 @@ resource "aws_instance" "main" {
     region           = data.aws_region.current.name
     environment_name = var.environment_name
     pack_name        = var.pack_name
+    profile_name     = var.profile_name
     default_model    = var.default_model
     bedrock_region   = var.bedrock_region
     gw_port          = var.openclaw_gateway_port

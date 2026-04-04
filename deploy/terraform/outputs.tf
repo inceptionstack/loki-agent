@@ -37,3 +37,8 @@ output "pack_name" {
   description = "Deployed agent pack"
   value       = var.pack_name
 }
+
+output "profile_name" {
+  description = "Deployed permission profile"
+  value       = var.profile_name
+}

@@ -110,6 +110,7 @@ EOF
 
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 PACK_NAME=""
+PROFILE_NAME="${PROFILE_NAME:-}"
 REGION="${REGION:-us-east-1}"
 STACK_NAME="${STACK_NAME:-}"
 # Pack-specific args (written to JSON config)
@@ -132,6 +133,11 @@ while [[ $# -gt 0 ]]; do
     --pack)
       [[ $# -gt 1 ]] || { echo "ERROR: --pack requires a value" >&2; exit 1; }
       PACK_NAME="$2"
+      shift 2
+      ;;
+    --profile)
+      [[ $# -gt 1 ]] || { echo "ERROR: --profile requires a value" >&2; exit 1; }
+      PROFILE_NAME="$2"
       shift 2
       ;;
     --region)
@@ -209,6 +215,7 @@ fi
 PACK_CONFIG="/tmp/loki-pack-config.json"
 jq -n \
   --arg pack "$PACK_NAME" \
+  --arg profile "$PROFILE_NAME" \
   --arg region "$REGION" \
   --arg model "$MODEL" \
   --arg gw_port "$GW_PORT" \
@@ -219,7 +226,7 @@ jq -n \
   --arg litellm_key "$LITELLM_KEY" \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_key "$PROVIDER_KEY" \
-  '{pack:$pack, region:$region, model:$model, gw_port:$gw_port,
+  '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     hermes_model:$hermes_model, litellm_url:$litellm_url,
     litellm_key:$litellm_key, litellm_model:$litellm_model,
@@ -237,7 +244,7 @@ PACKS_DIR="${REPO_DIR}/packs"
 REGISTRY="${PACKS_DIR}/registry.yaml"
 
 step "Bootstrap Dispatcher"
-info "Pack: ${PACK_NAME} | Region: ${REGION}${STACK_NAME:+ | Stack: $STACK_NAME}"
+info "Pack: ${PACK_NAME} | Profile: ${PROFILE_NAME:-unset} | Region: ${REGION}${STACK_NAME:+ | Stack: $STACK_NAME}"
 info "Repo: ${REPO_DIR}"
 info "Instance: $(get_instance_id)"
 
@@ -491,6 +498,18 @@ step "Enable Linger"
 loginctl enable-linger ec2-user
 ok "Linger enabled for ec2-user"
 
+# ---- Write profile marker file ----
+step "Profile Marker"
+sudo -u ec2-user bash << PROFILE_EOF
+set -euo pipefail
+ok()   { echo "[OK]    \$(date -u '+%H:%M:%S') \$1"; }
+info() { echo "[INFO]  \$(date -u '+%H:%M:%S') \$1"; }
+mkdir -p "\${HOME}/.openclaw/workspace"
+echo "${PROFILE_NAME:-}" > "\${HOME}/.openclaw/workspace/.profile"
+chmod 644 "\${HOME}/.openclaw/workspace/.profile"
+ok "Profile marker written: ${PROFILE_NAME:-unset} -> \${HOME}/.openclaw/workspace/.profile"
+PROFILE_EOF
+
 # ── Phase 2: PACKS ────────────────────────────────────────────────────────────
 step "Phase 2: Pack Dispatch"
 
@@ -627,7 +646,7 @@ LOKIPROFILE
 chmod 644 /etc/profile.d/loki.sh
 ok "Shell profile installed (/etc/profile.d/loki.sh)"
 
-# ---- Bedrock model access check ----
+# ---- Bedrock model access check (runs for ALL profiles — all need inference) ----
 step "Bedrock Model Access Check"
 sudo -u ec2-user bash << 'BEDROCK_EOF'
 set -euo pipefail
@@ -640,6 +659,13 @@ else
   fail "Bedrock access form not submitted — complete it at: https://us-east-1.console.aws.amazon.com/bedrock/home#/modelaccess"
 fi
 BEDROCK_EOF
+
+# ---- Security services check (skip for personal_assistant — no AWS read access) ----
+if [[ "${PROFILE_NAME:-}" == "personal_assistant" ]]; then
+  info "Security checks: skipped for personal_assistant profile (agent cannot read findings)"
+else
+  info "Security checks: applicable for profile '${PROFILE_NAME:-builder}'"
+fi
 
 # ---- Complete ----
 # ---- Clean up config file (contains secrets) ----

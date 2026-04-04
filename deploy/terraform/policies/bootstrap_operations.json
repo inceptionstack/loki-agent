@@ -1,0 +1,18 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BootstrapOperations",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter",
+        "ssm:DeleteParameter",
+        "cloudformation:SignalResource"
+      ],
+      "Resource": [
+        "arn:aws:ssm:*:*:parameter/loki/*",
+        "arn:aws:cloudformation:*:*:stack/*"
+      ]
+    }
+  ]
+}

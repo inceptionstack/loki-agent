@@ -4,6 +4,16 @@ variable "aws_region" {
   description = "AWS region for infrastructure deployment. Defaults to us-east-1."
 }
 
+variable "profile_name" {
+  type        = string
+  description = "Permission profile. 'builder' = full admin. 'account_assistant' = read-only. 'personal_assistant' = Bedrock only."
+  # No default — must be explicitly specified
+  validation {
+    condition     = contains(["builder", "account_assistant", "personal_assistant"], var.profile_name)
+    error_message = "profile_name must be one of: builder, account_assistant, personal_assistant."
+  }
+}
+
 variable "pack_name" {
   description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, or ironclaw)"
   type        = string

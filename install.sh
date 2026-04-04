@@ -39,9 +39,11 @@ INSTALLER_VERSION="0.5.37"
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
 # --pack <name>: pre-select agent pack
 # --method <m>: pre-select deploy method (cfn, terraform/tf)
+# --profile <p>: pre-select permission profile (builder, account_assistant, personal_assistant)
 AUTO_YES=false
 PRESELECT_PACK=""
 PRESELECT_METHOD=""
+PRESELECT_PROFILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
@@ -57,6 +59,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       PRESELECT_METHOD="$2"; shift 2 ;;
+    --profile)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --profile requires a value (builder, account_assistant, personal_assistant)" >&2
+        exit 1
+      fi
+      PRESELECT_PROFILE="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -240,6 +248,7 @@ show_banner() {
     local auto_msg="Running in non-interactive mode — using defaults, minimal prompts"
     [[ -n "${PRESELECT_PACK}" ]] && auto_msg+=", pack: ${PRESELECT_PACK}"
     [[ -n "${PRESELECT_METHOD}" ]] && auto_msg+=", method: ${PRESELECT_METHOD}"
+    [[ -n "${PRESELECT_PROFILE}" ]] && auto_msg+=", profile: ${PRESELECT_PROFILE}"
     info "$auto_msg"
   fi
   echo ""
@@ -527,6 +536,81 @@ choose_deploy_method() {
   fi
 }
 
+# ============================================================================
+# Profile selection — REQUIRED, no default
+# ============================================================================
+PROFILE_NAME=""  # set by choose_profile()
+
+choose_profile() {
+  local valid_profiles=("builder" "account_assistant" "personal_assistant")
+
+  # Validate a profile name against allowed values
+  _is_valid_profile() {
+    local p="$1"
+    for vp in "${valid_profiles[@]}"; do [[ "$p" == "$vp" ]] && return 0; done
+    return 1
+  }
+
+  if [[ -n "${PRESELECT_PROFILE}" ]]; then
+    if ! _is_valid_profile "${PRESELECT_PROFILE}"; then
+      echo ""
+      echo -e "  ${RED}✗ Unknown profile: '${PRESELECT_PROFILE}'${NC}"
+      echo ""
+      echo "  Valid profiles:"
+      echo "    builder             — Full AWS admin access"
+      echo "    account_assistant   — Read-only AWS access"
+      echo "    personal_assistant  — Bedrock only, no AWS"
+      echo ""
+      fail "Use --profile <builder|account_assistant|personal_assistant> with one of the profiles listed above."
+    fi
+    PROFILE_NAME="${PRESELECT_PROFILE}"
+    ok "Profile pre-selected: ${PROFILE_NAME}"
+    return
+  fi
+
+  # Non-interactive without --profile: fail — no silent default
+  if [[ "$AUTO_YES" == true ]]; then
+    fail "Profile is required in non-interactive mode. Use --profile <builder|account_assistant|personal_assistant>"
+  fi
+
+  # Interactive: show menu and prompt
+  echo ""
+  echo "  Permission profiles (REQUIRED — choose one):"
+  echo ""
+  echo -e "    1) ${RED}builder${NC}            — Full AWS admin access."
+  echo "                         Can create, modify, and delete any AWS resource."
+  echo "                         Best for: building apps, deploying infra, managing pipelines."
+  echo ""
+  echo -e "    2) ${YELLOW}account_assistant${NC}  — Read-only AWS access."
+  echo "                         Can see everything, change nothing."
+  echo "                         Best for: cost analysis, architecture review, debugging help."
+  echo ""
+  echo -e "    3) ${GREEN}personal_assistant${NC} — Bedrock only. No AWS access."
+  echo "                         Best for: writing, research, coding help, daily tasks."
+  echo ""
+
+  local profile_choice
+  prompt "Select profile" profile_choice ""
+
+  case "$profile_choice" in
+    1|builder)            PROFILE_NAME="builder" ;;
+    2|account_assistant)  PROFILE_NAME="account_assistant" ;;
+    3|personal_assistant) PROFILE_NAME="personal_assistant" ;;
+    "")
+      fail "Profile is required. Enter 1, 2, or 3 (or a profile name)."
+      ;;
+    *)
+      if _is_valid_profile "$profile_choice"; then
+        PROFILE_NAME="$profile_choice"
+      else
+        fail "Invalid profile '${profile_choice}'. Choose: builder, account_assistant, or personal_assistant."
+      fi
+      ;;
+  esac
+
+  ok "Profile selected: ${PROFILE_NAME}"
+}
+
 collect_config() {
   echo ""
   info "Configuration"
@@ -612,6 +696,9 @@ collect_config() {
   ok "Selected pack: ${PACK_NAME}"
   fi  # end of interactive pack selection
 
+  # ---- Profile selection (REQUIRED) ----------------------------------------
+  choose_profile
+
   prompt "AWS region" DEPLOY_REGION "$REGION"
 
   # Count existing deployments to generate a smart default env name
@@ -628,14 +715,23 @@ collect_config() {
   ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
   prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
 
-  # Adjust instance size default based on pack registry
+  # Adjust instance size default: profile takes precedence, pack registry as fallback
   local default_size_choice="3"  # default → t4g.xlarge
-  local pack_instance_type
-  pack_instance_type=$([ -n "$registry" ] && jq -r --arg p "$PACK_NAME" '.packs[$p].instance_type // "t4g.xlarge"' "$registry" 2>/dev/null || echo "t4g.xlarge")
-  case "$pack_instance_type" in
-    t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
-    t4g.large)   default_size_choice="2" ;;
-    *)           default_size_choice="3" ;;
+  # Profile-driven defaults (profile wins over pack registry)
+  case "${PROFILE_NAME:-}" in
+    builder)             default_size_choice="3" ;;  # t4g.xlarge
+    account_assistant)   default_size_choice="1" ;;  # t4g.medium
+    personal_assistant)  default_size_choice="1" ;;  # t4g.medium
+    *)
+      # Fallback: pack registry instance_type
+      local pack_instance_type
+      pack_instance_type=$([ -n "$registry" ] && jq -r --arg p "$PACK_NAME" '.packs[$p].instance_type // "t4g.xlarge"' "$registry" 2>/dev/null || echo "t4g.xlarge")
+      case "$pack_instance_type" in
+        t4g.medium)  default_size_choice="1"; info "${PACK_NAME} is lightweight — defaulting to t4g.medium" ;;
+        t4g.large)   default_size_choice="2" ;;
+        *)           default_size_choice="3" ;;
+      esac
+      ;;
   esac
   echo ""
   echo "  Instance sizes:"
@@ -689,8 +785,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
-PARAM_TF_NAMES=(environment_name pack_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
@@ -698,6 +794,7 @@ build_deploy_params() {
   PARAM_VALUES=(
     "$ENV_NAME"
     "$PACK_NAME"
+    "$PROFILE_NAME"
     "$INSTANCE_TYPE"
     "bedrock"
     "$DEPLOY_REGION"
@@ -752,6 +849,7 @@ show_summary() {
   echo -e "  ${BOLD}╭─────────────── Deploy Summary ───────────────╮${NC}"
   echo -e "  ${BOLD}│${NC}  Environment:  ${ENV_NAME}"
   echo -e "  ${BOLD}│${NC}  Pack:         ${PACK_NAME}"
+  echo -e "  ${BOLD}│${NC}  Profile:      ${PROFILE_NAME}"
   echo -e "  ${BOLD}│${NC}  Instance:     ${INSTANCE_TYPE}"
   echo -e "  ${BOLD}│${NC}  Region:       ${DEPLOY_REGION}"
   echo -e "  ${BOLD}│${NC}  Watermark:    ${LOKI_WATERMARK}"

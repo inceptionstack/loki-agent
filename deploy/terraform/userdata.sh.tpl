@@ -11,6 +11,7 @@ export LITELLM_API_KEY="${litellm_api_key}"
 export LITELLM_MODEL="${litellm_model}"
 export PROVIDER_API_KEY="${provider_api_key}"
 export PACK_NAME="${pack_name}"
+export PROFILE_NAME="${profile_name}"
 
 # Publish failure to SSM on any error so the installer can detect it
 trap '
@@ -36,6 +37,7 @@ if [[ "$_cloned" != "true" ]]; then
 fi
 bash /tmp/loki-agent/deploy/bootstrap.sh \
   --pack "$PACK_NAME" \
+  --profile "$PROFILE_NAME" \
   --region "$BEDROCK_REGION" \
   --model "$DEFAULT_MODEL" \
   --gw-port "$GW_PORT" \

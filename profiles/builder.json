@@ -1,0 +1,3 @@
+{
+  "_comment": "builder profile uses AWS Managed Policy arn:aws:iam::aws:policy/AdministratorAccess — no inline policy needed"
+}
