@@ -86,8 +86,15 @@ KIROCLI_VERSION="$(kiro-cli --version 2>/dev/null || echo unknown)"
 ok "Kiro CLI installed: ${KIROCLI_VERSION}"
 
 # ── Step 2: Install MCP server prerequisites ──────────────────────────────────
-step "Installing MCP server prerequisites (uv + pip)"
+step "Installing MCP server prerequisites (uv + uvenv + build tools)"
 
+# Install build tools for MCP servers with C extensions (matches AWS sample repo)
+log "Installing build tools for MCP servers..."
+if command -v dnf &>/dev/null; then
+  sudo dnf install -y -q gcc python3-devel 2>/dev/null || warn "Failed to install build tools (gcc, python3-devel)"
+fi
+
+# Install uv (fast Python package manager) if not present
 if ! command -v uv &>/dev/null; then
   log "Installing uv (Python package manager)..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -100,16 +107,22 @@ else
   warn "uv not found after install — MCP servers may not install correctly"
 fi
 
-if ! command -v uvx &>/dev/null; then
-  warn "uvx not found — MCP tool runner unavailable; skipping MCP server installs"
+# Install uvenv (MCP server installer used by AWS samples)
+if ! command -v uvenv &>/dev/null; then
+  log "Installing uvenv..."
+  pip3 install uvenv 2>/dev/null || warn "pip3 install uvenv failed"
+fi
+
+if command -v uvenv &>/dev/null; then
+  ok "uvenv available"
 else
-  ok "uvx available"
+  warn "uvenv not found — will skip MCP server installs"
 fi
 
 # ── Step 3: Install common AWS MCP servers ────────────────────────────────────
 step "Installing common AWS MCP servers"
 
-if command -v uvx &>/dev/null; then
+if command -v uvenv &>/dev/null; then
   MCP_SERVERS=(
     "awslabs.terraform-mcp-server"
     "awslabs.ecs-mcp-server"
@@ -119,13 +132,13 @@ if command -v uvx &>/dev/null; then
   )
 
   for mcp_server in "${MCP_SERVERS[@]}"; do
-    log "Caching MCP server: ${mcp_server}"
-    uvx --from "${mcp_server}" true 2>/dev/null && \
-      ok "Cached: ${mcp_server}" || \
-      warn "Could not pre-cache ${mcp_server} (will be fetched on first use)"
+    log "Installing MCP server: ${mcp_server}"
+    uvenv install "${mcp_server}" 2>/dev/null && \
+      ok "Installed: ${mcp_server}" || \
+      warn "Could not install ${mcp_server} (will be fetched on first use)"
   done
 else
-  warn "uvx not available — skipping MCP server pre-cache (servers will be fetched on first use)"
+  warn "uvenv not available — skipping MCP server installs (install manually with: uvenv install awslabs.<server>)"
 fi
 
 # ── Step 4: Post-install instructions ────────────────────────────────────────

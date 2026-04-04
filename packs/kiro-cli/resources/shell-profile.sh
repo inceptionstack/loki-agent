@@ -19,9 +19,7 @@ PACK_BANNER_COMMANDS='
   kiro-cli settings chat.defaultAgent → Show/set default agent
 '
 
-# ⚠ Login reminder: check if kiro-cli is authenticated
+# ⚠ Login reminder: check if kiro-cli is installed but remind about auth
 if command -v kiro-cli &>/dev/null; then
-  if ! kiro-cli status &>/dev/null 2>&1; then
-    printf '\n\033[0;33m⚠  Kiro CLI: not authenticated. Run: kiro-cli login --use-device-flow\033[0m\n\n'
-  fi
+  printf '\n\033[0;33m⚠  Kiro CLI installed. If not yet authenticated, run: kiro-cli login --use-device-flow\033[0m\n\n'
 fi
