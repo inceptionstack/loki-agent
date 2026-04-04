@@ -45,14 +45,14 @@ trap '
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-# IMDSv2-safe instance ID fetch (falls back to IMDSv1 if token request fails)
+# IMDSv2-only instance ID fetch (instance enforces HttpTokens=required)
 get_instance_id() {
   local token
   token=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
   if [[ -n "$token" ]]; then
     curl -sf -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown
   else
-    curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown
+    echo unknown
   fi
 }
 
