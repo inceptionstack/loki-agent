@@ -2,6 +2,7 @@
 # Loki Agent — One-Shot Installer
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 # Flags: --yes / -y  Accept all defaults (non-interactive deploy)
+#        --pack <name> or --<packname>  Pre-select agent pack (e.g. --claude-code, --openclaw)
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -35,10 +36,25 @@ SSM_DOC_NAME="Loki-Session"
 INSTALLER_VERSION="0.5.25"
 
 # --yes / -y: accept all defaults, minimal prompts
+# --pack <name> or --<packname>: pre-select agent pack
 AUTO_YES=false
+PRESELECT_PACK=""
 for arg in "$@"; do
   case "$arg" in
     --yes|-y) AUTO_YES=true ;;
+    --pack) ;; # value handled below
+    --openclaw)    PRESELECT_PACK="openclaw" ;;
+    --claude-code) PRESELECT_PACK="claude-code" ;;
+    --hermes)      PRESELECT_PACK="hermes" ;;
+    --pi)          PRESELECT_PACK="pi" ;;
+    --ironclaw)    PRESELECT_PACK="ironclaw" ;;
+  esac
+done
+# Handle --pack <name> (two-arg form)
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pack) [[ $# -gt 1 ]] && PRESELECT_PACK="$2" && shift 2 || shift ;;
+    *) shift ;;
   esac
 done
 
@@ -218,7 +234,12 @@ show_banner() {
   echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
   if [[ "$AUTO_YES" == true ]]; then
     echo ""
-    info "Running in auto mode (--yes) — using defaults, minimal prompts"
+    local auto_msg="Running in auto mode (--yes) — using defaults, minimal prompts"
+    [[ -n "${PRESELECT_PACK}" ]] && auto_msg+=", pack: ${PRESELECT_PACK}"
+    info "$auto_msg"
+  elif [[ -n "${PRESELECT_PACK}" ]]; then
+    echo ""
+    info "Pack pre-selected: ${PRESELECT_PACK}"
   fi
   echo ""
 }
@@ -511,6 +532,27 @@ collect_config() {
   ' "$registry" 2>/dev/null \
     || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
 
+  # If pack was pre-selected via --pack or --<packname>, find and use it
+  if [[ -n "${PRESELECT_PACK}" ]]; then
+    local found=false
+    for i in "${!pack_names[@]}"; do
+      if [[ "${pack_names[$i]}" == "${PRESELECT_PACK}" ]]; then
+        PACK_NAME="${pack_names[$i]}"
+        found=true
+        if [[ "${pack_experimental[$i]}" == "true" ]]; then
+          warn "${PACK_NAME} is experimental — expect rough edges"
+        fi
+        ok "Pack pre-selected: ${PACK_NAME}"
+        break
+      fi
+    done
+    if [[ "$found" != true ]]; then
+      warn "Unknown pack '${PRESELECT_PACK}' — falling back to interactive selection"
+      PRESELECT_PACK=""
+    fi
+  fi
+
+  if [[ -z "${PRESELECT_PACK}" ]]; then
   echo "  Agent to deploy:"
   local i
   for i in "${!pack_names[@]}"; do
@@ -536,6 +578,7 @@ collect_config() {
     warn "${PACK_NAME} is experimental — expect rough edges"
   fi
   ok "Selected pack: ${PACK_NAME}"
+  fi  # end of interactive pack selection
 
   prompt "AWS region" DEPLOY_REGION "$REGION"
 
