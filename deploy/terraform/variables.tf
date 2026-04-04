@@ -15,12 +15,12 @@ variable "profile_name" {
 }
 
 variable "pack_name" {
-  description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, ironclaw, or nemoclaw)"
+  description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, or kiro-cli)"
   type        = string
   default     = "openclaw"
   validation {
-    condition     = contains(["openclaw", "claude-code", "hermes", "pi", "ironclaw", "nemoclaw"], var.pack_name)
-    error_message = "pack_name must be openclaw, claude-code, hermes, pi, ironclaw, or nemoclaw."
+    condition     = contains(["openclaw", "claude-code", "hermes", "pi", "ironclaw", "nemoclaw", "kiro-cli"], var.pack_name)
+    error_message = "pack_name must be openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, or kiro-cli."
   }
 }
 

@@ -121,7 +121,8 @@ Parameters:
       - pi
       - ironclaw
       - nemoclaw
-    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter). 'pi' and 'ironclaw' are experimental."
+      - kiro-cli
+    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter). 'pi', 'ironclaw', and 'kiro-cli' are experimental."
 
   ProfileName:
     Type: String

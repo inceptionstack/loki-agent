@@ -77,6 +77,7 @@ assert_contains "includes hermes" "hermes|" "$output"
 assert_contains "includes pi" "pi|" "$output"
 assert_contains "includes ironclaw" "ironclaw|" "$output"
 assert_contains "includes nemoclaw" "nemoclaw|" "$output"
+assert_contains "includes kiro-cli" "kiro-cli|" "$output"
 bedrockify_as_pack=$(echo "$output" | grep -c '^bedrockify|' || true)
 assert_eq "excludes base packs (bedrockify)" "0" "$bedrockify_as_pack"
 

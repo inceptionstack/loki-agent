@@ -1,0 +1,35 @@
+name: kiro-cli
+version: "1.0.0"
+type: agent
+description: "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)"
+
+deps: []
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.medium
+
+params:
+  - name: region
+    description: "AWS region (informational; Kiro CLI uses its own cloud inference)"
+    default: us-east-1
+
+health_check:
+  command: "kiro-cli --version"
+  timeout: 10
+
+provides:
+  commands:
+    - kiro-cli
+  services: []
+
+instance_type: t4g.medium
+root_volume_gb: 40
+data_volume_gb: 0
+
+experimental: true

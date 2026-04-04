@@ -82,6 +82,18 @@
       "requires_docker": true,
       "compatible_profiles": ["personal_assistant"]
     },
+    "kiro-cli": {
+      "type": "agent",
+      "description": "Kiro CLI -- AWS agentic IDE terminal client with MCP server support (experimental)",
+      "deps": [],
+      "instance_type": "t4g.medium",
+      "root_volume_gb": 40,
+      "data_volume_gb": 0,
+      "ports": {},
+      "brain": false,
+      "claude_code": false,
+      "experimental": true
+    },
     "claude-code": {
       "type": "agent",
       "description": "Claude Code — Anthropic's coding agent with native Bedrock support",

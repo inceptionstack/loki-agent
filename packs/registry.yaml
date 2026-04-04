@@ -101,3 +101,15 @@ packs:
     requires_docker: true
     compatible_profiles:
       - personal_assistant          # Sandbox blocks AWS API access
+
+  kiro-cli:
+    type: agent
+    description: "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)"
+    deps: []
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    ports: {}
+    brain: false
+    claude_code: false
+    experimental: true
