@@ -7,25 +7,25 @@
 
 > **TL;DR — deploy Loki:**
 >
-> **macOS / Linux / WSL / CloudShell:**
+> **Interactive (walks you through everything):**
 > ```sh
 > curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 > ```
 >
-> **Non-interactive install (accept all defaults, zero prompts):**
+> **Non-interactive — OpenClaw (recommended, full AI agent with 24/7 gateway):**
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive --pack openclaw
 > ```
 >
-> **Non-interactive with a specific pack and deploy method:**
+> **Non-interactive — Claude Code (Anthropic's coding agent):**
 > ```sh
-> # Deploy Claude Code via CloudFormation
-> bash /tmp/loki-install.sh --non-interactive --pack claude-code --method cfn
+> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh --non-interactive --pack claude-code --method cfn
+> ```
 >
-> # Deploy OpenClaw via Terraform (default)
+> **More examples:**
+> ```sh
+> # Pick a deploy method: cfn (CloudFormation) or terraform
 > bash /tmp/loki-install.sh --non-interactive --pack openclaw --method terraform
->
-> # Deploy Hermes via CloudFormation
 > bash /tmp/loki-install.sh --non-interactive --pack hermes --method cfn
 > ```
 >
