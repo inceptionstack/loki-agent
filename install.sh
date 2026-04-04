@@ -699,6 +699,21 @@ collect_config() {
   # ---- Profile selection (REQUIRED) ----------------------------------------
   choose_profile
 
+  # ---- Profile + Pack compatibility check ----------------------------------
+  if [[ "$PACK_NAME" == "nemoclaw" && "${PROFILE_NAME:-}" != "personal_assistant" ]]; then
+    echo ""
+    echo -e "  ${RED}✗ NemoClaw is only compatible with the personal_assistant profile.${NC}"
+    echo ""
+    echo "  NemoClaw runs the agent in an isolated sandbox that blocks all AWS API"
+    echo "  access. The ${PROFILE_NAME} profile requires AWS access to function."
+    echo ""
+    echo "  Options:"
+    echo "    • Use --pack openclaw with --profile ${PROFILE_NAME}"
+    echo "    • Use --pack nemoclaw with --profile personal_assistant"
+    echo ""
+    fail "Incompatible pack/profile combination: ${PACK_NAME} + ${PROFILE_NAME}"
+  fi
+
   prompt "AWS region" DEPLOY_REGION "$REGION"
 
   # Count existing deployments to generate a smart default env name
@@ -734,6 +749,26 @@ collect_config() {
       esac
       ;;
   esac
+
+  # Pack minimum override: if the pack requires a larger instance than the profile default, upgrade
+  if [ -n "$registry" ]; then
+    local pack_min_type
+    pack_min_type=$(jq -r --arg p "$PACK_NAME" '.packs[$p].instance_type // ""' "$registry" 2>/dev/null || echo "")
+    case "$pack_min_type" in
+      t4g.xlarge)
+        if [[ "$default_size_choice" == "1" || "$default_size_choice" == "2" ]]; then
+          default_size_choice="3"
+          info "${PACK_NAME} requires t4g.xlarge minimum — upgrading from profile default"
+        fi
+        ;;
+      t4g.large)
+        if [[ "$default_size_choice" == "1" ]]; then
+          default_size_choice="2"
+          info "${PACK_NAME} requires t4g.large minimum — upgrading from profile default"
+        fi
+        ;;
+    esac
+  fi
   echo ""
   echo "  Instance sizes:"
   echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"
