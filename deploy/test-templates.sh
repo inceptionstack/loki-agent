@@ -6,7 +6,6 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CFN_TEMPLATE="$REPO_ROOT/deploy/cloudformation/template.yaml"
-SAM_TEMPLATE="$REPO_ROOT/deploy/sam/template.yaml"
 TF_VARS="$REPO_ROOT/deploy/terraform/variables.tf"
 TF_MAIN="$REPO_ROOT/deploy/terraform/main.tf"
 TF_OUTPUTS="$REPO_ROOT/deploy/terraform/outputs.tf"
@@ -50,19 +49,6 @@ check_contains "$CFN_TEMPLATE" "git clone --depth 1" "CFN: UserData uses git clo
 check_contains "$CFN_TEMPLATE" "deploy/bootstrap.sh" "CFN: UserData calls bootstrap.sh"
 check_contains "$CFN_TEMPLATE" "--pack" "CFN: UserData passes --pack flag"
 check_contains "$CFN_TEMPLATE" "Deployed agent pack" "CFN: PackName in Outputs"
-
-echo ""
-
-# ── SAM ─────────────────────────────────────────────────────────────────────
-echo -e "${BOLD}SAM (deploy/sam/template.yaml)${NC}"
-check_contains "$SAM_TEMPLATE" "PackName:" "SAM: PackName parameter defined"
-check_contains "$SAM_TEMPLATE" "hermes" "SAM: PackName AllowedValues includes hermes"
-check_contains "$SAM_TEMPLATE" "- PackName" "SAM: PackName in Metadata ParameterGroups"
-check_contains "$SAM_TEMPLATE" 'loki:pack' "SAM: VPC has loki:pack tag"
-check_contains "$SAM_TEMPLATE" 'git clone --depth 1' "SAM: UserData uses git clone"
-check_contains "$SAM_TEMPLATE" 'deploy/bootstrap.sh' "SAM: UserData calls bootstrap.sh"
-check_contains "$SAM_TEMPLATE" '--pack' "SAM: UserData passes --pack flag"
-check_contains "$SAM_TEMPLATE" 'Deployed agent pack' "SAM: PackName in Outputs"
 
 echo ""
 
