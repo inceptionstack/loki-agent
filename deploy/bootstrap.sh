@@ -29,7 +29,17 @@ trap '
     --type String --overwrite --region "${REGION:-us-east-1}" >/dev/null 2>&1 || true
   touch /tmp/loki-bootstrap-done
   if [[ -n "${STACK_NAME:-}" ]]; then
-    /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "${REGION:-us-east-1}" 2>/dev/null || true
+    if [[ -x /opt/aws/bin/cfn-signal ]]; then
+      /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "${REGION:-us-east-1}" 2>/dev/null || true
+    else
+      _IID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+      aws cloudformation signal-resource \
+        --stack-name "${STACK_NAME}" \
+        --logical-resource-id Instance \
+        --unique-id "$_IID" \
+        --status FAILURE \
+        --region "${REGION:-us-east-1}" 2>/dev/null || true
+    fi
   fi
 ' ERR
 
@@ -340,8 +350,16 @@ ok "System updated"
 
 # ---- Dependencies ----
 step "System Dependencies"
-dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext
+dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext python3-pip
 ok "Packages installed"
+
+# Install aws-cfn-bootstrap for cfn-signal (not pre-installed on AL2023)
+if [[ ! -x /opt/aws/bin/cfn-signal ]]; then
+  info "Installing aws-cfn-bootstrap (provides cfn-signal)..."
+  pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz 2>/dev/null || \
+    python3 -m pip install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz 2>/dev/null || true
+  [[ -x /opt/aws/bin/cfn-signal ]] && ok "cfn-bootstrap installed (cfn-signal ready)" || warn "cfn-bootstrap install failed — stack may timeout waiting for signal"
+fi
 
 # ---- Mount data volume ----
 DATA_VOL_GB="$(registry_get_data_vol "${PACK_NAME}")"
@@ -623,11 +641,21 @@ ok "Pack '${PACK_NAME}' bootstrap complete at $(date -u)"
 # ---- cfn-signal ----
 if [[ -n "${STACK_NAME}" ]]; then
   step "CloudFormation Signal"
-  if aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --region "${REGION}" &>/dev/null; then
+  INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+  if [[ -x /opt/aws/bin/cfn-signal ]]; then
     /opt/aws/bin/cfn-signal -e 0 --stack "${STACK_NAME}" --resource Instance --region "${REGION}" \
       && ok "cfn-signal sent (stack=${STACK_NAME})" \
-      || fail "cfn-signal failed"
+      || fail "cfn-signal binary failed"
   else
-    info "Stack '${STACK_NAME}' not found in region ${REGION} — skipping cfn-signal"
+    # Fallback: signal via AWS CLI when cfn-bootstrap is not installed
+    info "cfn-signal binary not found — signalling via AWS CLI"
+    aws cloudformation signal-resource \
+      --stack-name "${STACK_NAME}" \
+      --logical-resource-id Instance \
+      --unique-id "${INSTANCE_ID}" \
+      --status SUCCESS \
+      --region "${REGION}" \
+      && ok "cfn-signal sent via CLI (stack=${STACK_NAME})" \
+      || fail "cfn-signal via CLI failed"
   fi
 fi

@@ -1017,7 +1017,12 @@ Resources:
               --value "FAILED: userdata error at line $LINENO" \
               --type String --overwrite --region "$REGION" 2>/dev/null || true
             touch /tmp/loki-bootstrap-done
-            /opt/aws/bin/cfn-signal -e 1 --stack "${!STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
+            if [[ -x /opt/aws/bin/cfn-signal ]]; then
+              /opt/aws/bin/cfn-signal -e 1 --stack "${!STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
+            else
+              _IID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+              aws cloudformation signal-resource --stack-name "${!STACK_NAME}" --logical-resource-id Instance --unique-id "$_IID" --status FAILURE --region "$REGION" 2>/dev/null || true
+            fi
           ' ERR
           # Ensure git is available (not present on all AMIs)
           command -v git &>/dev/null || dnf install -y git 2>/dev/null || yum install -y git
@@ -1043,9 +1048,21 @@ Resources:
             --provider-api-key "$PROVIDER_API_KEY"
           # Signal CFN success (install cfn-bootstrap if needed — not on AL2023 by default)
           if [[ ! -x /opt/aws/bin/cfn-signal ]]; then
+            dnf install -y python3-pip 2>/dev/null || true
             pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz 2>/dev/null || true
           fi
-          /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION" 2>/dev/null || true
+          if [[ -x /opt/aws/bin/cfn-signal ]]; then
+            /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION" 2>/dev/null || true
+          else
+            # Fallback: signal via AWS CLI
+            _INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+            aws cloudformation signal-resource \
+              --stack-name "$STACK_NAME" \
+              --logical-resource-id Instance \
+              --unique-id "$_INSTANCE_ID" \
+              --status SUCCESS \
+              --region "$REGION" 2>/dev/null || true
+          fi
 # ============================================================================
 # OUTPUTS
 # ============================================================================
