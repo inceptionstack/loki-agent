@@ -1020,7 +1020,12 @@ Resources:
             if [[ -x /opt/aws/bin/cfn-signal ]]; then
               /opt/aws/bin/cfn-signal -e 1 --stack "${!STACK_NAME}" --resource Instance --region "$REGION" 2>/dev/null || true
             else
-              _IID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+              _IMDS_TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+              if [[ -n "$_IMDS_TOKEN" ]]; then
+                _IID=$(curl -sf -H "X-aws-ec2-metadata-token: $_IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+              else
+                _IID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+              fi
               aws cloudformation signal-resource --stack-name "${!STACK_NAME}" --logical-resource-id Instance --unique-id "$_IID" --status FAILURE --region "$REGION" 2>/dev/null || true
             fi
           ' ERR
@@ -1046,7 +1051,10 @@ Resources:
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
             --provider-api-key "$PROVIDER_API_KEY"
-          # Signal CFN success (install cfn-bootstrap if needed — not on AL2023 by default)
+          # Signal CFN success — defense-in-depth: bootstrap.sh also signals,
+          # but this catches edge cases where bootstrap.sh signal fails silently.
+          # CFN ignores duplicate signals, so double-fire is safe.
+          # Install cfn-bootstrap if needed — not on AL2023 by default.
           if [[ ! -x /opt/aws/bin/cfn-signal ]]; then
             dnf install -y python3-pip 2>/dev/null || true
             pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz 2>/dev/null || true
@@ -1055,7 +1063,12 @@ Resources:
             /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION" 2>/dev/null || true
           else
             # Fallback: signal via AWS CLI
-            _INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+            _IMDS_TOKEN=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+            if [[ -n "$_IMDS_TOKEN" ]]; then
+              _INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $_IMDS_TOKEN" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+            else
+              _INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+            fi
             aws cloudformation signal-resource \
               --stack-name "$STACK_NAME" \
               --logical-resource-id Instance \

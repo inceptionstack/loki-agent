@@ -32,11 +32,11 @@ trap '
     if [[ -x /opt/aws/bin/cfn-signal ]]; then
       /opt/aws/bin/cfn-signal -e 1 --stack "${STACK_NAME}" --resource Instance --region "${REGION:-us-east-1}" 2>/dev/null || true
     else
-      _IID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+      _INSTANCE_ID=$(get_instance_id)
       aws cloudformation signal-resource \
         --stack-name "${STACK_NAME}" \
         --logical-resource-id Instance \
-        --unique-id "$_IID" \
+        --unique-id "$_INSTANCE_ID" \
         --status FAILURE \
         --region "${REGION:-us-east-1}" 2>/dev/null || true
     fi
@@ -44,6 +44,18 @@ trap '
 ' ERR
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+# IMDSv2-safe instance ID fetch (falls back to IMDSv1 if token request fails)
+get_instance_id() {
+  local token
+  token=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+  if [[ -n "$token" ]]; then
+    curl -sf -H "X-aws-ec2-metadata-token: $token" http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown
+  else
+    curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown
+  fi
+}
+
 STEP_COUNTER_FILE="/tmp/loki-step-counter"
 STEP_TOTAL_FILE="/tmp/loki-step-total"
 echo "0" > "$STEP_COUNTER_FILE"
@@ -227,7 +239,7 @@ REGISTRY="${PACKS_DIR}/registry.yaml"
 step "Bootstrap Dispatcher"
 info "Pack: ${PACK_NAME} | Region: ${REGION}${STACK_NAME:+ | Stack: $STACK_NAME}"
 info "Repo: ${REPO_DIR}"
-info "Instance: $(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)"
+info "Instance: $(get_instance_id)"
 
 # ── Validate pack exists in registry ─────────────────────────────────────────
 if [[ ! -f "$REGISTRY" ]]; then
@@ -641,7 +653,7 @@ ok "Pack '${PACK_NAME}' bootstrap complete at $(date -u)"
 # ---- cfn-signal ----
 if [[ -n "${STACK_NAME}" ]]; then
   step "CloudFormation Signal"
-  INSTANCE_ID=$(curl -sf http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown)
+  _INSTANCE_ID=$(get_instance_id)
   if [[ -x /opt/aws/bin/cfn-signal ]]; then
     /opt/aws/bin/cfn-signal -e 0 --stack "${STACK_NAME}" --resource Instance --region "${REGION}" \
       && ok "cfn-signal sent (stack=${STACK_NAME})" \
@@ -652,7 +664,7 @@ if [[ -n "${STACK_NAME}" ]]; then
     aws cloudformation signal-resource \
       --stack-name "${STACK_NAME}" \
       --logical-resource-id Instance \
-      --unique-id "${INSTANCE_ID}" \
+      --unique-id "${_INSTANCE_ID}" \
       --status SUCCESS \
       --region "${REGION}" \
       && ok "cfn-signal sent via CLI (stack=${STACK_NAME})" \
