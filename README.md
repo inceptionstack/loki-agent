@@ -20,12 +20,12 @@
 > **Express install with a specific pack:**
 > ```sh
 > # Deploy Claude Code
-> bash /tmp/loki-install.sh --yes --claude-code
+> bash /tmp/loki-install.sh --yes --pack claude-code
 >
 > # Deploy OpenClaw (default)
-> bash /tmp/loki-install.sh --yes --openclaw
+> bash /tmp/loki-install.sh --yes --pack openclaw
 >
-> # Or use --pack <name>
+> # Deploy Hermes
 > bash /tmp/loki-install.sh --yes --pack hermes
 > ```
 >
@@ -51,7 +51,7 @@
 
 Run the install command from the TL;DR above. The installer verifies AWS permissions, lets you select your **agent pack**, instance size, and deployment method (CloudFormation / SAM / Terraform), then deploys automatically.
 
-Use `--yes` (or `-y`) to skip all prompts and deploy with defaults: Terraform, OpenClaw pack, t4g.xlarge, all security services enabled. Add `--claude-code`, `--hermes`, `--pi`, or `--ironclaw` (or `--pack <name>`) to pre-select a pack.
+Use `--yes` (or `-y`) to skip all prompts and deploy with defaults: Terraform, OpenClaw pack, t4g.xlarge, all security services enabled. Add `--pack <name>` to pre-select a pack (e.g. `--pack claude-code`).
 
 **Agent packs available:**
 | Pack | Description | Instance | Data Volume |

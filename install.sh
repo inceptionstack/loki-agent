@@ -2,7 +2,7 @@
 # Loki Agent — One-Shot Installer
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 # Flags: --yes / -y  Accept all defaults (non-interactive deploy)
-#        --pack <name> or --<packname>  Pre-select agent pack (e.g. --claude-code, --openclaw)
+#        --pack <name>  Pre-select agent pack (e.g. --pack claude-code, --pack openclaw)
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -36,24 +36,18 @@ SSM_DOC_NAME="Loki-Session"
 INSTALLER_VERSION="0.5.26"
 
 # --yes / -y: accept all defaults, minimal prompts
-# --pack <name> or --<packname>: pre-select agent pack
+# --pack <name>: pre-select agent pack
 AUTO_YES=false
 PRESELECT_PACK=""
-for arg in "$@"; do
-  case "$arg" in
-    --yes|-y) AUTO_YES=true ;;
-    --pack) ;; # value handled below
-    --openclaw)    PRESELECT_PACK="openclaw" ;;
-    --claude-code) PRESELECT_PACK="claude-code" ;;
-    --hermes)      PRESELECT_PACK="hermes" ;;
-    --pi)          PRESELECT_PACK="pi" ;;
-    --ironclaw)    PRESELECT_PACK="ironclaw" ;;
-  esac
-done
-# Handle --pack <name> (two-arg form)
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pack) [[ $# -gt 1 ]] && PRESELECT_PACK="$2" && shift 2 || shift ;;
+    --yes|-y) AUTO_YES=true; shift ;;
+    --pack)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --pack requires a pack name (e.g. --pack openclaw, --pack claude-code)" >&2
+        exit 1
+      fi
+      PRESELECT_PACK="$2"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -237,9 +231,6 @@ show_banner() {
     local auto_msg="Running in auto mode (--yes) — using defaults, minimal prompts"
     [[ -n "${PRESELECT_PACK}" ]] && auto_msg+=", pack: ${PRESELECT_PACK}"
     info "$auto_msg"
-  elif [[ -n "${PRESELECT_PACK}" ]]; then
-    echo ""
-    info "Pack pre-selected: ${PRESELECT_PACK}"
   fi
   echo ""
 }
@@ -532,7 +523,7 @@ collect_config() {
   ' "$registry" 2>/dev/null \
     || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
 
-  # If pack was pre-selected via --pack or --<packname>, find and use it
+  # If pack was pre-selected via --pack, find and validate it
   if [[ -n "${PRESELECT_PACK}" ]]; then
     local found=false
     for i in "${!pack_names[@]}"; do
@@ -547,8 +538,15 @@ collect_config() {
       fi
     done
     if [[ "$found" != true ]]; then
-      warn "Unknown pack '${PRESELECT_PACK}' — falling back to interactive selection"
-      PRESELECT_PACK=""
+      echo ""
+      echo -e "  ${RED}✗ Unknown pack: '${PRESELECT_PACK}'${NC}"
+      echo ""
+      echo "  Available packs:"
+      for i in "${!pack_names[@]}"; do
+        echo "    - ${pack_names[$i]}"
+      done
+      echo ""
+      fail "Pack '${PRESELECT_PACK}' not found. Use --pack <name> with one of the packs listed above."
     fi
   fi
 
