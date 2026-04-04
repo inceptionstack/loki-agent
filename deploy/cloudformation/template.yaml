@@ -41,6 +41,8 @@ Metadata:
         Parameters:
           - VpcCidr
           - PublicSubnetCidr
+          - ExistingVpcId
+          - ExistingSubnetId
           - SSHAllowedCidr
           - KeyPairName
       - Label:
@@ -97,6 +99,10 @@ Metadata:
         default: "Agent Pack"
       LokiWatermark:
         default: "Loki Watermark Tag"
+      ExistingVpcId:
+        default: "Existing VPC ID (leave empty to create new)"
+      ExistingSubnetId:
+        default: "Existing Public Subnet ID"
 
 # ============================================================================
 # PARAMETERS
@@ -306,7 +312,6 @@ Conditions:
   IsApiKey: !Equals [!Ref ModelMode, 'api-key']
   IsBedrock: !Equals [!Ref ModelMode, 'bedrock']
   CreateNewVpc: !Equals [!Ref ExistingVpcId, '']
-  UseExistingVpc: !Not [!Equals [!Ref ExistingVpcId, '']]
 
 # ============================================================================
 # RESOURCES
