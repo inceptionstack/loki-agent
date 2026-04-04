@@ -63,14 +63,15 @@ get_value() {
 }
 
 # ---- Test: real registry.json -----------------------------------------------
-echo "=== Test: real registry.json (5 agent packs) ==="
+echo "=== Test: real registry.json (6 agent packs) ==="
 output=$(list_agents "$REGISTRY")
-assert_count "lists exactly 5 agents" 5 "$output"
+assert_count "lists exactly 6 agents" 6 "$output"
 assert_contains "includes openclaw" "openclaw|" "$output"
 assert_contains "includes claude-code" "claude-code|" "$output"
 assert_contains "includes hermes" "hermes|" "$output"
 assert_contains "includes pi" "pi|" "$output"
 assert_contains "includes ironclaw" "ironclaw|" "$output"
+assert_contains "includes nemoclaw" "nemoclaw|" "$output"
 bedrockify_as_pack=$(echo "$output" | grep -c '^bedrockify|' || true)
 assert_eq "excludes base packs (bedrockify)" "0" "$bedrockify_as_pack"
 
