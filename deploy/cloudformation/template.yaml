@@ -1041,8 +1041,11 @@ Resources:
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
             --provider-api-key "$PROVIDER_API_KEY"
-          # Signal CFN success
-          /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION"
+          # Signal CFN success (install cfn-bootstrap if needed — not on AL2023 by default)
+          if [[ ! -x /opt/aws/bin/cfn-signal ]]; then
+            pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz 2>/dev/null || true
+          fi
+          /opt/aws/bin/cfn-signal -e 0 --stack "$STACK_NAME" --resource Instance --region "$REGION" 2>/dev/null || true
 # ============================================================================
 # OUTPUTS
 # ============================================================================
