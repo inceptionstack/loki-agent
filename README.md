@@ -8,34 +8,34 @@
 > **TL;DR — deploy Loki:**
 >
 > ```sh
-> curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash
+> curl -sfL loki.run | bash
 > ```
 >
-> The installer walks you through pack, profile, and deploy method interactively.
+> Works in **bash**, **zsh**, and **AWS CloudShell**. The installer walks you through pack, profile, and deploy method interactively.
 >
 > **One-liner examples (non-interactive):**
 > ```sh
 > # Full builder agent (can create/modify/delete AWS resources)
-> curl -sfL .../install.sh | bash -s -- --non-interactive --pack openclaw --profile builder
+> curl -sfL loki.run | bash -s -- -y --pack openclaw --profile builder
 >
 > # Read-only advisor (can see everything, change nothing)
-> curl -sfL .../install.sh | bash -s -- --non-interactive --pack openclaw --profile account_assistant
+> curl -sfL loki.run | bash -s -- -y --pack openclaw --profile account_assistant
 >
 > # Personal assistant (Bedrock only, no AWS access)
-> curl -sfL .../install.sh | bash -s -- --non-interactive --pack claude-code --profile personal_assistant
+> curl -sfL loki.run | bash -s -- -y --pack claude-code --profile personal_assistant
 >
 > # Sandboxed personal assistant (NemoClaw — isolated in OpenShell sandbox)
-> curl -sfL .../install.sh | bash -s -- --non-interactive --pack nemoclaw --profile personal_assistant
+> curl -sfL loki.run | bash -s -- -y --pack nemoclaw --profile personal_assistant
 >
 > # Kiro CLI agent (AWS agentic IDE — requires interactive login after deploy)
-> curl -sfL .../install.sh | bash -s -- --non-interactive --pack kiro-cli --profile builder
+> curl -sfL loki.run | bash -s -- -y --pack kiro-cli --profile builder
 > ```
 >
 > Requires: AWS CLI + admin access on a **dedicated sandbox account**.
 >
 > ⚠️ Deploy in a clean account — LLMs make mistakes, a sandbox limits the blast radius.
 >
-> **Uninstall:** `curl -sfL .../uninstall.sh | bash`
+> **Uninstall:** `curl -sfL uninstall.loki.run | bash`
 
 ---
 
@@ -43,7 +43,7 @@
 
 ### Step 1: Install Loki
 
-Run the install command from the TL;DR above. The installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
+Run `curl -sfL loki.run | bash` — the installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
 
 **CLI flags for non-interactive deploys:**
 
@@ -166,7 +166,7 @@ If you want to use Loki via Telegram, run the Telegram bootstraps located at: [`
 Remove one or all Loki deployments from your account:
 
 ```sh
-curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/uninstall.sh -o /tmp/loki-uninstall.sh && bash /tmp/loki-uninstall.sh
+curl -sfL uninstall.loki.run | bash
 ```
 
 Finds deployments by tag, lets you pick which to remove, deletes CloudFormation stacks or cleans up resources manually (Terraform deploys), and optionally removes state buckets/lock tables.
