@@ -105,9 +105,9 @@ if systemctl is-active --quiet docker 2>/dev/null; then
 else
   log "Installing Docker..."
   if command -v dnf &>/dev/null; then
-    dnf install -y docker
+    sudo dnf install -y docker
   elif command -v apt-get &>/dev/null; then
-    apt-get install -y docker.io
+    sudo apt-get install -y docker.io
   else
     fail "Unsupported package manager — cannot install Docker"
   fi
@@ -118,13 +118,13 @@ DAEMON_JSON="/etc/docker/daemon.json"
 DOCKER_NEEDS_RESTART=false
 if [[ ! -f "${DAEMON_JSON}" ]] || ! grep -q '"default-cgroupns-mode"' "${DAEMON_JSON}" 2>/dev/null; then
   log "Configuring Docker cgroup v2 mode..."
-  mkdir -p /etc/docker
+  sudo mkdir -p /etc/docker
   if [[ -f "${DAEMON_JSON}" ]] && [[ -s "${DAEMON_JSON}" ]] && command -v jq &>/dev/null; then
     # Merge into existing config to avoid clobbering other settings
-    jq '. + {"default-cgroupns-mode": "host"}' "${DAEMON_JSON}" > "${DAEMON_JSON}.tmp" \
-      && mv "${DAEMON_JSON}.tmp" "${DAEMON_JSON}"
+    jq '. + {"default-cgroupns-mode": "host"}' "${DAEMON_JSON}" | sudo tee "${DAEMON_JSON}.tmp" > /dev/null \
+      && sudo mv "${DAEMON_JSON}.tmp" "${DAEMON_JSON}"
   else
-    echo '{"default-cgroupns-mode": "host"}' > "${DAEMON_JSON}"
+    echo '{"default-cgroupns-mode": "host"}' | sudo tee "${DAEMON_JSON}" > /dev/null
   fi
   DOCKER_NEEDS_RESTART=true
   ok "Docker daemon.json updated with cgroup v2 config"
@@ -134,18 +134,18 @@ fi
 
 # Enable and start Docker
 if ! systemctl is-enabled --quiet docker 2>/dev/null; then
-  systemctl enable docker
+  sudo systemctl enable docker
 fi
 if ! systemctl is-active --quiet docker 2>/dev/null; then
-  systemctl start docker
+  sudo systemctl start docker
 elif [[ "${DOCKER_NEEDS_RESTART}" == "true" ]]; then
   log "Restarting Docker to apply cgroup v2 config..."
-  systemctl restart docker
+  sudo systemctl restart docker
 fi
 
 # Add ec2-user to docker group (idempotent)
 if id ec2-user &>/dev/null; then
-  usermod -aG docker ec2-user 2>/dev/null || true
+  sudo usermod -aG docker ec2-user 2>/dev/null || true
 fi
 
 # Verify Docker is functional
@@ -278,7 +278,7 @@ write_done_marker "nemoclaw"
 # Install shell profile (aliases + banner) if /etc/profile.d exists
 SHELL_PROFILE="${SCRIPT_DIR}/resources/shell-profile.sh"
 if [[ -f "${SHELL_PROFILE}" && -d /etc/profile.d ]]; then
-  cp "${SHELL_PROFILE}" /etc/profile.d/nemoclaw.sh 2>/dev/null && \
+  sudo cp "${SHELL_PROFILE}" /etc/profile.d/nemoclaw.sh 2>/dev/null && \
     ok "Shell profile installed: /etc/profile.d/nemoclaw.sh" || \
     warn "Could not install shell profile (permission denied?)"
 fi
