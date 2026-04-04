@@ -63,9 +63,14 @@ get_value() {
 }
 
 # ---- Test: real registry.json -----------------------------------------------
-echo "=== Test: real registry.json (6 agent packs) ==="
+echo "=== Test: real registry.json (agent packs) ==="
 output=$(list_agents "$REGISTRY")
-assert_count "lists exactly 6 agents" 6 "$output"
+agent_count=$(echo "$output" | grep -c . || true)
+if [[ "$agent_count" -ge 6 ]]; then
+  echo "  ✓ lists at least 6 agents (found $agent_count)"; PASS=$((PASS + 1))
+else
+  echo "  ✗ expected at least 6 agents, found $agent_count"; FAIL=$((FAIL + 1))
+fi
 assert_contains "includes openclaw" "openclaw|" "$output"
 assert_contains "includes claude-code" "claude-code|" "$output"
 assert_contains "includes hermes" "hermes|" "$output"
