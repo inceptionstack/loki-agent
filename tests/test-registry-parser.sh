@@ -63,10 +63,11 @@ get_value() {
 }
 
 # ---- Test: real registry.json -----------------------------------------------
-echo "=== Test: real registry.json (4 agent packs) ==="
+echo "=== Test: real registry.json (5 agent packs) ==="
 output=$(list_agents "$REGISTRY")
-assert_count "lists exactly 4 agents" 4 "$output"
+assert_count "lists exactly 5 agents" 5 "$output"
 assert_contains "includes openclaw" "openclaw|" "$output"
+assert_contains "includes claude-code" "claude-code|" "$output"
 assert_contains "includes hermes" "hermes|" "$output"
 assert_contains "includes pi" "pi|" "$output"
 assert_contains "includes ironclaw" "ironclaw|" "$output"
