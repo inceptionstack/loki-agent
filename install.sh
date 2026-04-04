@@ -708,7 +708,8 @@ collect_config() {
     --filters "Name=tag:loki:managed,Values=true" \
     --region "$DEPLOY_REGION" \
     --query 'length(Vpcs)' --output text 2>/dev/null || echo "0")
-  local default_env_name="${PACK_NAME}-$((existing_count + 1))"
+  local ts_suffix; ts_suffix=$(date +%s | tail -c 4)
+  local default_env_name="${PACK_NAME}-${ts_suffix}"
 
   echo ""
   prompt "Environment name (lowercase, resource prefix)" ENV_NAME "$default_env_name"
