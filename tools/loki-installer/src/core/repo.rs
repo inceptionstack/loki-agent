@@ -171,11 +171,30 @@ fn sync_cached_repo() -> Result<RepoSyncEvent, RepoError> {
         });
     }
 
-    let ref_name = current_cached_ref(&repo_dir).unwrap_or_else(|| "main".into());
+    let current_ref = current_cached_ref(&repo_dir).unwrap_or_else(|| "main".into());
+    if current_ref != desired_ref {
+        run_git(
+            [
+                OsStr::new("-C"),
+                repo_dir.as_os_str(),
+                OsStr::new("fetch"),
+                OsStr::new("--tags"),
+                OsStr::new("origin"),
+            ],
+            None,
+        )?;
+        let ref_name = select_remote_ref(&repo_url, &desired_ref).unwrap_or_else(|_| "main".into());
+        checkout_cached_ref(&repo_dir, &ref_name)?;
+        return Ok(RepoSyncEvent {
+            action: "checkout".into(),
+            path: repo_dir,
+            ref_name,
+        });
+    }
     Ok(RepoSyncEvent {
         action: "cached".into(),
         path: repo_dir,
-        ref_name,
+        ref_name: current_ref,
     })
 }
 
