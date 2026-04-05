@@ -299,10 +299,11 @@ fn select_remote_ref(repo_url: &str, desired_ref: &str) -> Result<String, RepoEr
 }
 
 fn is_cloudshell() -> bool {
-    std::env::var("AWS_EXECUTION_ENV")
-        .map(|v| v.contains("CloudShell"))
-        .unwrap_or(false)
-        || Path::new("/home/cloudshell-user").exists()
+    // AWS_CLOUDSHELL_HOME is the definitive env var (set to /home/cloudshell-user)
+    std::env::var_os("AWS_CLOUDSHELL_HOME").is_some()
+        || std::env::var("AWS_EXECUTION_ENV")
+            .map(|v| v.contains("CloudShell"))
+            .unwrap_or(false)
         || std::env::var("USER").map(|u| u == "cloudshell-user").unwrap_or(false)
 }
 
