@@ -289,8 +289,13 @@ if [[ ${#UNKNOWN_FLAGS[@]} -gt 0 ]]; then
   fallback_or_fail "unsupported_v2_flags:${UNKNOWN_FLAGS[*]}"
 fi
 
-if ! download_and_verify_v2 "$detected_os" "$detected_arch"; then
-  case "$?" in
+if download_and_verify_v2 "$detected_os" "$detected_arch"; then
+  download_rc=0
+else
+  download_rc=$?
+fi
+if [[ $download_rc -ne 0 ]]; then
+  case "$download_rc" in
     1) fallback_or_fail "binary_download_timeout_or_failure" ;;
     2) fallback_or_fail "checksum_fetch_failed" ;;
     3) fallback_or_fail "checksum_mismatch" ;;

@@ -110,7 +110,12 @@ MODEL=""
 GW_PORT=""
 MODEL_MODE=""
 BEDROCKIFY_PORT=""
+EMBED_MODEL=""
 HERMES_MODEL=""
+HAIKU_MODEL=""
+SANDBOX_NAME=""
+TELEGRAM_TOKEN=""
+ALLOWED_CHAT_IDS=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
@@ -125,7 +130,12 @@ while [[ $# -gt 0 ]]; do
     --gw-port)         GW_PORT="$2";      shift 2 ;;
     --model-mode)      MODEL_MODE="$2";   shift 2 ;;
     --bedrockify-port) BEDROCKIFY_PORT="$2"; shift 2 ;;
+    --embed-model)     EMBED_MODEL="$2"; shift 2 ;;
     --hermes-model)    HERMES_MODEL="$2"; shift 2 ;;
+    --haiku-model)     HAIKU_MODEL="$2"; shift 2 ;;
+    --sandbox-name)    SANDBOX_NAME="$2"; shift 2 ;;
+    --telegram-token)  TELEGRAM_TOKEN="$2"; shift 2 ;;
+    --allowed-chat-ids) ALLOWED_CHAT_IDS="$2"; shift 2 ;;
     --litellm-base-url|--litellm-url)     LITELLM_URL="$2"; shift 2 ;;
     --litellm-api-key|--litellm-key)      LITELLM_KEY="$2"; shift 2 ;;
     --litellm-model)   LITELLM_MODEL="$2"; shift 2 ;;
@@ -142,7 +152,14 @@ cat > "${TMPCONFIG}" << JSON
   "region": "${REGION}",
   "model": "${MODEL}",
   "gw_port": "${GW_PORT}",
-  "model_mode": "${MODEL_MODE}"
+  "model_mode": "${MODEL_MODE}",
+  "bedrockify_port": "${BEDROCKIFY_PORT}",
+  "embed_model": "${EMBED_MODEL}",
+  "hermes_model": "${HERMES_MODEL}",
+  "haiku_model": "${HAIKU_MODEL}",
+  "sandbox_name": "${SANDBOX_NAME}",
+  "telegram_token": "${TELEGRAM_TOKEN}",
+  "allowed_chat_ids": "${ALLOWED_CHAT_IDS}"
 }
 JSON
 

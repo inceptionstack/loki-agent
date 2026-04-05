@@ -354,11 +354,10 @@ impl CloudFormationContext {
 
         let mut parameter_overrides = Vec::new();
         parameter_overrides.push(("EnvironmentName".into(), stack_name.clone()));
-        if let Some(model) = plan.adapter_options.get("model") {
-            parameter_overrides.push(("DefaultModel".into(), model.clone()));
-        }
-        if let Some(port) = plan.adapter_options.get("port") {
-            parameter_overrides.push(("OpenClawGatewayPort".into(), port.clone()));
+        for (key, value) in &plan.adapter_options {
+            if let Some(parameter_name) = adapter_option_to_cfn_parameter(key) {
+                parameter_overrides.push((parameter_name.to_string(), value.clone()));
+            }
         }
 
         Ok(Self {
@@ -732,6 +731,22 @@ fn build_apply_stack_command(
     }
 }
 
+fn adapter_option_to_cfn_parameter(key: &str) -> Option<&'static str> {
+    match key {
+        "model" => Some("DefaultModel"),
+        "port" => Some("OpenClawGatewayPort"),
+        "bedrockify_port" => Some("BedrockifyPort"),
+        "embed_model" => Some("EmbedModel"),
+        "hermes_model" => Some("HermesModel"),
+        "haiku_model" => Some("HaikuModel"),
+        "sandbox_name" => Some("SandboxName"),
+        "telegram_token" => Some("TelegramToken"),
+        "allowed_chat_ids" => Some("AllowedChatIds"),
+        "template_path" | "capabilities" | "pack" | "profile" | "region" => None,
+        _ => None,
+    }
+}
+
 fn build_wait_stack_command(stack_name: &str, region: &str, waiter: WaiterKind) -> CommandSpec {
     let waiter_name = match waiter {
         WaiterKind::CreateComplete => "stack-create-complete",
@@ -874,8 +889,8 @@ fn map_aws_command_failure(
 #[cfg(test)]
 mod tests {
     use super::{
-        StackOperation, build_apply_stack_command, build_validate_identity_command,
-        parse_stack_artifacts,
+        StackOperation, adapter_option_to_cfn_parameter, build_apply_stack_command,
+        build_validate_identity_command, parse_stack_artifacts,
     };
 
     #[test]
@@ -946,11 +961,52 @@ mod tests {
                 .args
                 .contains(&"ParameterKey=EnvironmentName,ParameterValue=loki-openclaw".into())
         );
+        assert_eq!(
+            command
+                .args
+                .iter()
+                .filter(|arg| *arg == "ParameterKey=EnvironmentName,ParameterValue=loki-openclaw")
+                .count(),
+            1
+        );
         assert!(
             command
                 .args
                 .ends_with(&["--region".into(), "us-east-1".into()])
         );
+    }
+
+    #[test]
+    fn cfn_parameter_mapping_covers_pack_specific_options() {
+        assert_eq!(
+            adapter_option_to_cfn_parameter("bedrockify_port"),
+            Some("BedrockifyPort")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("embed_model"),
+            Some("EmbedModel")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("hermes_model"),
+            Some("HermesModel")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("haiku_model"),
+            Some("HaikuModel")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("sandbox_name"),
+            Some("SandboxName")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("telegram_token"),
+            Some("TelegramToken")
+        );
+        assert_eq!(
+            adapter_option_to_cfn_parameter("allowed_chat_ids"),
+            Some("AllowedChatIds")
+        );
+        assert_eq!(adapter_option_to_cfn_parameter("capabilities"), None);
     }
 
     #[test]

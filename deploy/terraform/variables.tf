@@ -103,6 +103,54 @@ variable "openclaw_gateway_port" {
   }
 }
 
+variable "bedrockify_port" {
+  type        = number
+  default     = 8090
+  description = "Local port where bedrockify listens for dependent packs."
+
+  validation {
+    condition     = var.bedrockify_port >= 1024 && var.bedrockify_port <= 65535
+    error_message = "Must be between 1024 and 65535."
+  }
+}
+
+variable "embed_model" {
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
+  description = "Default Bedrock embedding model served by bedrockify."
+}
+
+variable "hermes_model" {
+  type        = string
+  default     = "anthropic/claude-opus-4.6"
+  description = "OpenAI-style model identifier passed through bedrockify for Hermes."
+}
+
+variable "haiku_model" {
+  type        = string
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  description = "Fast-path Haiku model for Claude Code."
+}
+
+variable "sandbox_name" {
+  type        = string
+  default     = "loki-assistant"
+  description = "Sandbox name for NemoClaw."
+}
+
+variable "telegram_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Optional Telegram bot token for NemoClaw."
+}
+
+variable "allowed_chat_ids" {
+  type        = string
+  default     = ""
+  description = "Optional comma-separated Telegram chat IDs for NemoClaw."
+}
+
 variable "bedrock_region" {
   type        = string
   default     = "us-east-1"

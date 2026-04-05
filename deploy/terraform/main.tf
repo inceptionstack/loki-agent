@@ -710,6 +710,13 @@ resource "aws_instance" "main" {
     default_model    = var.default_model
     bedrock_region   = var.bedrock_region
     gw_port          = var.openclaw_gateway_port
+    bedrockify_port  = var.bedrockify_port
+    embed_model      = var.embed_model
+    hermes_model     = var.hermes_model
+    haiku_model      = var.haiku_model
+    sandbox_name     = var.sandbox_name
+    telegram_token   = var.telegram_token
+    allowed_chat_ids = var.allowed_chat_ids
     model_mode       = var.model_mode
     litellm_base_url = var.litellm_base_url
     litellm_api_key  = var.litellm_api_key

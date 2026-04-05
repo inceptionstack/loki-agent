@@ -22,8 +22,7 @@ struct TerraformContext {
     pack: String,
     profile: String,
     environment_name: String,
-    default_model: Option<String>,
-    gateway_port: Option<String>,
+    tf_vars: Vec<(String, String)>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,17 +199,20 @@ impl TerraformContext {
             .unwrap_or_else(|| format!("loki-{}", plan.resolved_pack.id));
 
         Ok(Self {
-            plan_file: Path::new(&working_dir)
-                .join("tfplan")
-                .display()
-                .to_string(),
+            plan_file: Path::new(&working_dir).join("tfplan").display().to_string(),
             working_dir,
             region: plan.resolved_region.clone(),
             pack: plan.resolved_pack.id.clone(),
             profile: plan.resolved_profile.id.clone(),
             environment_name,
-            default_model: plan.adapter_options.get("model").cloned(),
-            gateway_port: plan.adapter_options.get("port").cloned(),
+            tf_vars: plan
+                .adapter_options
+                .iter()
+                .filter_map(|(key, value)| {
+                    adapter_option_to_tf_var(key)
+                        .map(|var_name| (var_name.to_string(), value.clone()))
+                })
+                .collect(),
         })
     }
 }
@@ -235,13 +237,19 @@ async fn apply_terraform(
 
         match step.id.as_str() {
             "terraform-init" => {
-                let output = run_command(&build_terraform_init_command(&context.working_dir)).await?;
+                let output =
+                    run_command(&build_terraform_init_command(&context.working_dir)).await?;
                 ensure_terraform_success(
                     &output,
                     "Terraform init failed — run terraform init manually in deploy/terraform for details",
                 )?;
-                record_command_artifact("terraform_init_output", output, &mut artifacts, event_sink)
-                    .await;
+                record_command_artifact(
+                    "terraform_init_output",
+                    output,
+                    &mut artifacts,
+                    event_sink,
+                )
+                .await;
             }
             "terraform-plan" => {
                 let output = run_command(&build_terraform_plan_command(
@@ -251,16 +259,20 @@ async fn apply_terraform(
                     &context.pack,
                     &context.profile,
                     &context.environment_name,
-                    context.default_model.as_deref(),
-                    context.gateway_port.as_deref(),
+                    &context.tf_vars,
                 ))
                 .await?;
                 ensure_terraform_success(
                     &output,
                     "Terraform plan failed — fix the reported variable or provider issue and retry",
                 )?;
-                record_command_artifact("terraform_plan_output", output, &mut artifacts, event_sink)
-                    .await;
+                record_command_artifact(
+                    "terraform_plan_output",
+                    output,
+                    &mut artifacts,
+                    event_sink,
+                )
+                .await;
             }
             "terraform-apply" => {
                 let output = run_command(&build_terraform_apply_command(
@@ -331,8 +343,7 @@ fn build_terraform_plan_command(
     pack: &str,
     profile: &str,
     environment_name: &str,
-    default_model: Option<&str>,
-    gateway_port: Option<&str>,
+    tf_vars: &[(String, String)],
 ) -> CommandSpec {
     let mut args = vec![
         format!("-chdir={working_dir}"),
@@ -344,17 +355,30 @@ fn build_terraform_plan_command(
         format!("-var=profile_name={profile}"),
         format!("-var=environment_name={environment_name}"),
     ];
-    if let Some(default_model) = default_model {
-        args.push(format!("-var=default_model={default_model}"));
-    }
-    if let Some(gateway_port) = gateway_port {
-        args.push(format!("-var=openclaw_gateway_port={gateway_port}"));
+    for (name, value) in tf_vars {
+        args.push(format!("-var={name}={value}"));
     }
 
     CommandSpec {
         program: "terraform".into(),
         args,
         current_dir: None,
+    }
+}
+
+fn adapter_option_to_tf_var(key: &str) -> Option<&'static str> {
+    match key {
+        "model" => Some("default_model"),
+        "port" => Some("openclaw_gateway_port"),
+        "bedrockify_port" => Some("bedrockify_port"),
+        "embed_model" => Some("embed_model"),
+        "hermes_model" => Some("hermes_model"),
+        "haiku_model" => Some("haiku_model"),
+        "sandbox_name" => Some("sandbox_name"),
+        "telegram_token" => Some("telegram_token"),
+        "allowed_chat_ids" => Some("allowed_chat_ids"),
+        "working_dir" | "pack" | "profile" | "region" | "workspace" => None,
+        _ => None,
     }
 }
 
@@ -410,7 +434,10 @@ fn parse_terraform_outputs(raw: &str) -> Result<BTreeMap<String, String>, Adapte
     Ok(artifacts)
 }
 
-fn ensure_terraform_success(output: &CommandOutput, default_message: &str) -> Result<(), AdapterError> {
+fn ensure_terraform_success(
+    output: &CommandOutput,
+    default_message: &str,
+) -> Result<(), AdapterError> {
     if output.success() {
         return Ok(());
     }
@@ -497,8 +524,8 @@ async fn emit_step_finished(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_terraform_apply_command, build_terraform_init_command, build_terraform_plan_command,
-        parse_terraform_outputs,
+        adapter_option_to_tf_var, build_terraform_apply_command, build_terraform_init_command,
+        build_terraform_plan_command, parse_terraform_outputs,
     };
 
     #[test]
@@ -507,11 +534,7 @@ mod tests {
         assert_eq!(command.program, "terraform");
         assert_eq!(
             command.args,
-            vec![
-                "-chdir=/tmp/repo/deploy/terraform",
-                "init",
-                "-input=false",
-            ]
+            vec!["-chdir=/tmp/repo/deploy/terraform", "init", "-input=false",]
         );
     }
 
@@ -524,27 +547,78 @@ mod tests {
             "openclaw",
             "builder",
             "loki-openclaw",
-            Some("us.anthropic.claude-opus-4-6-v1"),
-            Some("3001"),
+            &[
+                (
+                    "default_model".into(),
+                    "us.anthropic.claude-opus-4-6-v1".into(),
+                ),
+                ("openclaw_gateway_port".into(), "3001".into()),
+                ("bedrockify_port".into(), "8090".into()),
+                (
+                    "haiku_model".into(),
+                    "us.anthropic.claude-haiku-4-5-20251001-v1:0".into(),
+                ),
+            ],
         );
         assert_eq!(command.program, "terraform");
         assert!(command.args.contains(&"plan".into()));
         assert!(command.args.contains(&"-input=false".into()));
-        assert!(command
-            .args
-            .contains(&"-out=/tmp/repo/deploy/terraform/tfplan".into()));
+        assert!(
+            command
+                .args
+                .contains(&"-out=/tmp/repo/deploy/terraform/tfplan".into())
+        );
         assert!(command.args.contains(&"-var=aws_region=us-east-1".into()));
         assert!(command.args.contains(&"-var=pack_name=openclaw".into()));
         assert!(command.args.contains(&"-var=profile_name=builder".into()));
-        assert!(command
-            .args
-            .contains(&"-var=environment_name=loki-openclaw".into()));
-        assert!(command
-            .args
-            .contains(&"-var=default_model=us.anthropic.claude-opus-4-6-v1".into()));
-        assert!(command
-            .args
-            .contains(&"-var=openclaw_gateway_port=3001".into()));
+        assert!(
+            command
+                .args
+                .contains(&"-var=environment_name=loki-openclaw".into())
+        );
+        assert!(
+            command
+                .args
+                .contains(&"-var=default_model=us.anthropic.claude-opus-4-6-v1".into())
+        );
+        assert!(
+            command
+                .args
+                .contains(&"-var=openclaw_gateway_port=3001".into())
+        );
+        assert!(command.args.contains(&"-var=bedrockify_port=8090".into()));
+        assert!(
+            command
+                .args
+                .contains(&"-var=haiku_model=us.anthropic.claude-haiku-4-5-20251001-v1:0".into())
+        );
+    }
+
+    #[test]
+    fn terraform_var_mapping_covers_pack_specific_options() {
+        assert_eq!(
+            adapter_option_to_tf_var("bedrockify_port"),
+            Some("bedrockify_port")
+        );
+        assert_eq!(adapter_option_to_tf_var("embed_model"), Some("embed_model"));
+        assert_eq!(
+            adapter_option_to_tf_var("hermes_model"),
+            Some("hermes_model")
+        );
+        assert_eq!(adapter_option_to_tf_var("haiku_model"), Some("haiku_model"));
+        assert_eq!(
+            adapter_option_to_tf_var("sandbox_name"),
+            Some("sandbox_name")
+        );
+        assert_eq!(
+            adapter_option_to_tf_var("telegram_token"),
+            Some("telegram_token")
+        );
+        assert_eq!(
+            adapter_option_to_tf_var("allowed_chat_ids"),
+            Some("allowed_chat_ids")
+        );
+        assert_eq!(adapter_option_to_tf_var("workspace"), None);
     }
 
     #[test]

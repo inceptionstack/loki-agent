@@ -118,7 +118,12 @@ MODEL=""
 GW_PORT=""
 MODEL_MODE=""
 BEDROCKIFY_PORT=""
+EMBED_MODEL=""
 HERMES_MODEL=""
+HAIKU_MODEL=""
+SANDBOX_NAME=""
+TELEGRAM_TOKEN=""
+ALLOWED_CHAT_IDS=""
 LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
@@ -165,9 +170,34 @@ while [[ $# -gt 0 ]]; do
       BEDROCKIFY_PORT="$2"
       shift 2
       ;;
+    --embed-model)
+      [[ $# -gt 1 ]] || { echo "ERROR: --embed-model requires a value" >&2; exit 1; }
+      EMBED_MODEL="$2"
+      shift 2
+      ;;
     --hermes-model)
       [[ $# -gt 1 ]] || { echo "ERROR: --hermes-model requires a value" >&2; exit 1; }
       HERMES_MODEL="$2"
+      shift 2
+      ;;
+    --haiku-model)
+      [[ $# -gt 1 ]] || { echo "ERROR: --haiku-model requires a value" >&2; exit 1; }
+      HAIKU_MODEL="$2"
+      shift 2
+      ;;
+    --sandbox-name)
+      [[ $# -gt 1 ]] || { echo "ERROR: --sandbox-name requires a value" >&2; exit 1; }
+      SANDBOX_NAME="$2"
+      shift 2
+      ;;
+    --telegram-token)
+      [[ $# -gt 1 ]] || { echo "ERROR: --telegram-token requires a value" >&2; exit 1; }
+      TELEGRAM_TOKEN="$2"
+      shift 2
+      ;;
+    --allowed-chat-ids)
+      [[ $# -gt 1 ]] || { echo "ERROR: --allowed-chat-ids requires a value" >&2; exit 1; }
+      ALLOWED_CHAT_IDS="$2"
       shift 2
       ;;
     --litellm-base-url|--litellm-url)
@@ -221,14 +251,22 @@ jq -n \
   --arg gw_port "$GW_PORT" \
   --arg model_mode "$MODEL_MODE" \
   --arg bedrockify_port "$BEDROCKIFY_PORT" \
+  --arg embed_model "$EMBED_MODEL" \
   --arg hermes_model "$HERMES_MODEL" \
+  --arg haiku_model "$HAIKU_MODEL" \
+  --arg sandbox_name "$SANDBOX_NAME" \
+  --arg telegram_token "$TELEGRAM_TOKEN" \
+  --arg allowed_chat_ids "$ALLOWED_CHAT_IDS" \
   --arg litellm_url "$LITELLM_URL" \
   --arg litellm_key "$LITELLM_KEY" \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_key "$PROVIDER_KEY" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
-    hermes_model:$hermes_model, litellm_url:$litellm_url,
+    embed_model:$embed_model, hermes_model:$hermes_model,
+    haiku_model:$haiku_model, sandbox_name:$sandbox_name,
+    telegram_token:$telegram_token, allowed_chat_ids:$allowed_chat_ids,
+    litellm_url:$litellm_url,
     litellm_key:$litellm_key, litellm_model:$litellm_model,
     provider_key:$provider_key}' > "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"

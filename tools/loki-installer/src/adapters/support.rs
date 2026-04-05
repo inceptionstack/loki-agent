@@ -68,7 +68,9 @@ pub(crate) fn resolve_repo_path(path: &str) -> Result<String, AdapterError> {
     }
 
     let cwd = std::env::current_dir().map_err(|source| {
-        AdapterError::Message(format!("Failed to read current working directory — {source}"))
+        AdapterError::Message(format!(
+            "Failed to read current working directory — {source}"
+        ))
     })?;
 
     let direct = cwd.join(&candidate);

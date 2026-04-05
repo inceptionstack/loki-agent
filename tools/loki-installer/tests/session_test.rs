@@ -48,7 +48,27 @@ async fn session_persistence_write_read_and_resume() {
         .await
         .expect("build plan");
     let session = create_session(plan.request.clone(), Some(plan));
-    persist_session(&session).expect("persist session");
+    let session_path = persist_session(&session).expect("persist session");
+
+    #[cfg(unix)]
+    {
+        assert_eq!(
+            fs::metadata(&session_path)
+                .expect("session metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(tmp.join(".local/state/loki-installer/sessions/latest.json"))
+                .expect("latest metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
 
     let loaded = load_session(&session.session_id).expect("load session by id");
     assert_eq!(loaded.session_id, session.session_id);

@@ -50,6 +50,13 @@ Metadata:
           default: "⚙️ Advanced"
         Parameters:
           - OpenClawGatewayPort
+          - BedrockifyPort
+          - EmbedModel
+          - HermesModel
+          - HaikuModel
+          - SandboxName
+          - TelegramToken
+          - AllowedChatIds
           - LokiWatermark
     ParameterLabels:
       EnvironmentName:
@@ -98,6 +105,20 @@ Metadata:
         default: "SSH Key Pair (optional)"
       OpenClawGatewayPort:
         default: "Gateway Port"
+      BedrockifyPort:
+        default: "bedrockify Port"
+      EmbedModel:
+        default: "Embedding Model"
+      HermesModel:
+        default: "Hermes Model"
+      HaikuModel:
+        default: "Claude Haiku Model"
+      SandboxName:
+        default: "NemoClaw Sandbox Name"
+      TelegramToken:
+        default: "Telegram Token"
+      AllowedChatIds:
+        default: "Allowed Chat IDs"
       PackName:
         default: "Agent Pack"
       LokiWatermark:
@@ -197,6 +218,44 @@ Parameters:
     MinValue: 1024
     MaxValue: 65535
     Description: "Internal port for the OpenClaw gateway service. Change only if port 3001 conflicts with other services."
+
+  BedrockifyPort:
+    Type: Number
+    Default: 8090
+    MinValue: 1024
+    MaxValue: 65535
+    Description: "Local port where bedrockify listens for dependent packs."
+
+  EmbedModel:
+    Type: String
+    Default: 'amazon.titan-embed-text-v2:0'
+    Description: "Default Bedrock embedding model served by bedrockify."
+
+  HermesModel:
+    Type: String
+    Default: 'anthropic/claude-opus-4.6'
+    Description: "OpenAI-style model identifier passed through bedrockify for Hermes."
+
+  HaikuModel:
+    Type: String
+    Default: 'us.anthropic.claude-haiku-4-5-20251001-v1:0'
+    Description: "Fast-path Haiku model for Claude Code."
+
+  SandboxName:
+    Type: String
+    Default: 'loki-assistant'
+    Description: "Sandbox name for NemoClaw."
+
+  TelegramToken:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: "Optional Telegram bot token for NemoClaw."
+
+  AllowedChatIds:
+    Type: String
+    Default: ''
+    Description: "Optional comma-separated Telegram chat IDs for NemoClaw."
 
   BedrockRegion:
     Type: String
@@ -1155,6 +1214,13 @@ Resources:
           export DEFAULT_MODEL="${DefaultModel}"
           export BEDROCK_REGION="${BedrockRegion}"
           export GW_PORT="${OpenClawGatewayPort}"
+          export BEDROCKIFY_PORT="${BedrockifyPort}"
+          export EMBED_MODEL="${EmbedModel}"
+          export HERMES_MODEL="${HermesModel}"
+          export HAIKU_MODEL="${HaikuModel}"
+          export SANDBOX_NAME="${SandboxName}"
+          export TELEGRAM_TOKEN="${TelegramToken}"
+          export ALLOWED_CHAT_IDS="${AllowedChatIds}"
           export MODEL_MODE="${ModelMode}"
           export LITELLM_BASE_URL="${LiteLLMBaseUrl}"
           export LITELLM_API_KEY="${LiteLLMApiKey}"
@@ -1196,6 +1262,13 @@ Resources:
             --region "$BEDROCK_REGION" \
             --model "$DEFAULT_MODEL" \
             --gw-port "$GW_PORT" \
+            --bedrockify-port "$BEDROCKIFY_PORT" \
+            --embed-model "$EMBED_MODEL" \
+            --hermes-model "$HERMES_MODEL" \
+            --haiku-model "$HAIKU_MODEL" \
+            --sandbox-name "$SANDBOX_NAME" \
+            --telegram-token "$TELEGRAM_TOKEN" \
+            --allowed-chat-ids "$ALLOWED_CHAT_IDS" \
             --model-mode "$MODEL_MODE" \
             --litellm-base-url "$LITELLM_BASE_URL" \
             --litellm-api-key "$LITELLM_API_KEY" \
@@ -1261,4 +1334,3 @@ Outputs:
   ProfileName:
     Description: "Deployed permission profile"
     Value: !Ref ProfileName
-

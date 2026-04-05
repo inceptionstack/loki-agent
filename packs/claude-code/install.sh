@@ -21,7 +21,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-sonnet-4-6")"
-PACK_ARG_HAIKU_MODEL="$(pack_config_get "haiku-model" "us.anthropic.claude-haiku-4-5-20251001-v1:0")"
+PACK_ARG_HAIKU_MODEL="$(pack_config_get haiku_model "us.anthropic.claude-haiku-4-5-20251001-v1:0")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {

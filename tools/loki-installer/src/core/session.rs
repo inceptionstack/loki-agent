@@ -3,8 +3,12 @@
 use crate::core::{InstallPhase, InstallPlan, InstallRequest, InstallSession, SessionFormat};
 use chrono::Utc;
 use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -58,6 +62,7 @@ pub fn persist_session(session: &InstallSession) -> Result<PathBuf, SessionError
         path: root.display().to_string(),
         source: err,
     })?;
+    set_directory_permissions(&root)?;
 
     let final_path = root.join(format!("{}.json", session.session_id));
     let tmp_path = root.join(format!("{}.tmp", session.session_id));
@@ -65,14 +70,12 @@ pub fn persist_session(session: &InstallSession) -> Result<PathBuf, SessionError
         path: final_path.display().to_string(),
         source: err,
     })?;
-    fs::write(&tmp_path, raw).map_err(|err| SessionError::Io {
-        path: tmp_path.display().to_string(),
-        source: err,
-    })?;
+    write_private_file(&tmp_path, &raw)?;
     fs::rename(&tmp_path, &final_path).map_err(|err| SessionError::Io {
         path: final_path.display().to_string(),
         source: err,
     })?;
+    set_file_permissions(&final_path)?;
 
     let latest = root.join("latest.json");
     let latest_payload = serde_json::json!({
@@ -84,10 +87,7 @@ pub fn persist_session(session: &InstallSession) -> Result<PathBuf, SessionError
             path: latest.display().to_string(),
             source: err,
         })?;
-    fs::write(&latest, latest_raw).map_err(|err| SessionError::Io {
-        path: latest.display().to_string(),
-        source: err,
-    })?;
+    write_private_file(&latest, &latest_raw)?;
 
     Ok(final_path)
 }
@@ -147,4 +147,54 @@ pub fn touch_session(session: &mut InstallSession) {
 
 pub fn session_path_hint(path: &Path) -> String {
     path.display().to_string()
+}
+
+fn write_private_file(path: &Path, contents: &[u8]) -> Result<(), SessionError> {
+    let mut file = open_private_file(path)?;
+    std::io::Write::write_all(&mut file, contents).map_err(|err| SessionError::Io {
+        path: path.display().to_string(),
+        source: err,
+    })?;
+    file.sync_all().map_err(|err| SessionError::Io {
+        path: path.display().to_string(),
+        source: err,
+    })?;
+    Ok(())
+}
+
+fn open_private_file(path: &Path) -> Result<std::fs::File, SessionError> {
+    let mut options = OpenOptions::new();
+    options.create(true).write(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    options.open(path).map_err(|err| SessionError::Io {
+        path: path.display().to_string(),
+        source: err,
+    })
+}
+
+fn set_directory_permissions(path: &Path) -> Result<(), SessionError> {
+    #[cfg(unix)]
+    {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|err| {
+            SessionError::Io {
+                path: path.display().to_string(),
+                source: err,
+            }
+        })?;
+    }
+    Ok(())
+}
+
+fn set_file_permissions(path: &Path) -> Result<(), SessionError> {
+    #[cfg(unix)]
+    {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|err| {
+            SessionError::Io {
+                path: path.display().to_string(),
+                source: err,
+            }
+        })?;
+    }
+    Ok(())
 }

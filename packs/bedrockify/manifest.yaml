@@ -8,10 +8,9 @@ allowed_profiles:
   - account_assistant
   - personal_assistant
 supported_methods:
-  - cfn
   - terraform
 default_profile: builder
-default_method: cfn
+default_method: terraform
 default_region: us-east-1
 post_install:
   - ssm_session

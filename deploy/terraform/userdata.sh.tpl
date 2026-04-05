@@ -5,6 +5,13 @@ export REGION="${region}"
 export DEFAULT_MODEL="${default_model}"
 export BEDROCK_REGION="${bedrock_region}"
 export GW_PORT="${gw_port}"
+export BEDROCKIFY_PORT="${bedrockify_port}"
+export EMBED_MODEL="${embed_model}"
+export HERMES_MODEL="${hermes_model}"
+export HAIKU_MODEL="${haiku_model}"
+export SANDBOX_NAME="${sandbox_name}"
+export TELEGRAM_TOKEN="${telegram_token}"
+export ALLOWED_CHAT_IDS="${allowed_chat_ids}"
 export MODEL_MODE="${model_mode}"
 export LITELLM_BASE_URL="${litellm_base_url}"
 export LITELLM_API_KEY="${litellm_api_key}"
@@ -41,6 +48,13 @@ bash /tmp/loki-agent/deploy/bootstrap.sh \
   --region "$BEDROCK_REGION" \
   --model "$DEFAULT_MODEL" \
   --gw-port "$GW_PORT" \
+  --bedrockify-port "$BEDROCKIFY_PORT" \
+  --embed-model "$EMBED_MODEL" \
+  --hermes-model "$HERMES_MODEL" \
+  --haiku-model "$HAIKU_MODEL" \
+  --sandbox-name "$SANDBOX_NAME" \
+  --telegram-token "$TELEGRAM_TOKEN" \
+  --allowed-chat-ids "$ALLOWED_CHAT_IDS" \
   --model-mode "$MODEL_MODE" \
   --litellm-base-url "$LITELLM_BASE_URL" \
   --litellm-api-key "$LITELLM_API_KEY" \
