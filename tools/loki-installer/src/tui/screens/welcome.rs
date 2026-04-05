@@ -1,3 +1,5 @@
+//! Welcome screen content.
+
 use ratatui::text::{Line, Text};
 
 pub fn content() -> Text<'static> {

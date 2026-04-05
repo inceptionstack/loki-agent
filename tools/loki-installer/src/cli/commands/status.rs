@@ -1,3 +1,5 @@
+//! `status` subcommand.
+
 use crate::cli::args::StatusArgs;
 use crate::core::{Planner, load_latest_session, load_session};
 use color_eyre::Result;

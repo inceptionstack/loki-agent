@@ -1,3 +1,5 @@
+//! Core installer contracts, manifest loading, planning, and session persistence.
+
 pub mod contract;
 pub mod doctor;
 pub mod manifests;

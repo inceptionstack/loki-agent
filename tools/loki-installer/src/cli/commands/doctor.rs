@@ -1,3 +1,5 @@
+//! `doctor` subcommand.
+
 use crate::cli::args::DoctorArgs;
 use crate::core::Planner;
 use color_eyre::Result;

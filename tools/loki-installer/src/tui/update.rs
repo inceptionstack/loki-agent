@@ -1,3 +1,5 @@
+//! Pure TUI state transition logic.
+
 use crate::tui::app::{AppLifecycle, AppState, ScreenId, UserFacingError};
 use crate::tui::events::InstallerEvent;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -97,39 +99,11 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             }
             vec![AppAction::Render]
         }
-        InstallerEvent::InstallEventReceived(event) => {
-            match event {
-                crate::core::InstallEvent::PhaseStarted { phase, message } => {
-                    state.deployment.current_phase = Some(phase);
-                    state.deployment.logs.push(message);
-                }
-                crate::core::InstallEvent::StepStarted { message, .. }
-                | crate::core::InstallEvent::StepFinished { message, .. }
-                | crate::core::InstallEvent::LogLine { message } => {
-                    state.deployment.logs.push(message)
-                }
-                crate::core::InstallEvent::ArtifactRecorded { key, value } => {
-                    state.deployment.logs.push(format!("{key}={value}"));
-                }
-                crate::core::InstallEvent::Warning { code, message } => {
-                    state
-                        .deployment
-                        .logs
-                        .push(format!("warning {code}: {message}"));
-                }
-            }
-            vec![AppAction::Render]
-        }
         InstallerEvent::Resize { width, height } => {
             state.ui.width = width;
             state.ui.height = height;
             vec![AppAction::Render]
         }
-        InstallerEvent::ErrorAcknowledged => {
-            state.errors.pop();
-            vec![AppAction::Render]
-        }
-        _ => vec![AppAction::Render],
     }
 }
 

@@ -1,10 +1,12 @@
+//! Terraform deployment adapter.
+
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
     DeployMethodId, DeployStatus, DeployStep, InstallEvent, InstallEventSink, InstallPhase,
     InstallPlan, InstallRequest, InstallSession, MethodManifest, PackManifest, PlanWarning,
     PostInstallStep, PrerequisiteCheck, PrerequisiteKind, ProfileManifest, UninstallResult,
+    update_session_phase,
 };
-use chrono::Utc;
 use std::collections::BTreeMap;
 use tokio::time::{Duration, sleep};
 
@@ -135,13 +137,21 @@ impl DeployAdapter for TerraformAdapter {
     }
 
     async fn status(&self, session: &InstallSession) -> Result<DeployStatus, AdapterError> {
+        let plan = session.plan.as_ref();
         Ok(DeployStatus {
             deployed: session.phase == InstallPhase::PostInstall,
             pack: session.request.pack.clone(),
-            profile: session.request.profile.clone().unwrap_or_default(),
+            profile: plan
+                .map(|plan| plan.resolved_profile.id.clone())
+                .or_else(|| session.request.profile.clone())
+                .unwrap_or_default(),
             method: DeployMethodId::Terraform,
-            region: session.request.region.clone(),
-            stack_name: session.request.stack_name.clone(),
+            region: plan
+                .map(|plan| plan.resolved_region.clone())
+                .or_else(|| session.request.region.clone()),
+            stack_name: plan
+                .and_then(|plan| plan.resolved_stack_name.clone())
+                .or_else(|| session.request.stack_name.clone()),
             stack_status: Some("terraform_applied".into()),
             instance_health: session.artifacts.get("instance_health").cloned(),
             last_updated_at: session.updated_at,
@@ -156,8 +166,7 @@ async fn run_stubbed_apply(
 ) -> Result<ApplyResult, AdapterError> {
     let mut artifacts = BTreeMap::new();
     for step in &plan.deploy_steps {
-        session.phase = step.phase;
-        session.updated_at = Utc::now();
+        update_session_phase(session, step.phase);
         event_sink
             .emit(InstallEvent::PhaseStarted {
                 phase: step.phase,
@@ -179,6 +188,7 @@ async fn run_stubbed_apply(
             .await;
     }
 
+    update_session_phase(session, InstallPhase::PostInstall);
     artifacts.insert("terraform_state".into(), "applied".into());
     artifacts.insert("instance_health".into(), "healthy".into());
 

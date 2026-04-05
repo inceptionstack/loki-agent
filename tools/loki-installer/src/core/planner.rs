@@ -1,11 +1,14 @@
+//! Install plan generation, validation, and adapter dispatch.
+
 use crate::adapters::{NoopEventSink, adapter_for_method};
 use crate::core::doctor::{DoctorReport, run_doctor};
 use crate::core::manifests::{ManifestError, ManifestRepository};
 use crate::core::session::{create_session, persist_session, session_path_for, session_path_hint};
 use crate::core::{
-    AdapterError, DeployAdapter, DeployMethodId, InstallMode, InstallPhase, InstallPlan,
-    InstallRequest, InstallSession, MethodManifest, PackManifest, PlanWarning, PostInstallActionId,
-    PostInstallStep, ProfileManifest, SessionFormat, SessionPersistenceSpec,
+    AdapterError, AdapterValidationError, DeployMethodId, InstallMode, InstallPhase, InstallPlan,
+    InstallRequest, InstallSession, MethodManifest, MethodOptionSpec, OptionValueType,
+    PackManifest, PackOptionSpec, PlanWarning, PostInstallActionId, PostInstallStep,
+    ProfileManifest, SessionFormat, SessionPersistenceSpec,
 };
 use std::collections::BTreeMap;
 
@@ -35,13 +38,19 @@ impl Planner {
     }
 
     pub async fn build_plan(&self, request: InstallRequest) -> Result<InstallPlan, PlannerError> {
+        request.validate_contract().map_err(PlannerError::Message)?;
         let pack = self.repo.load_pack(&request.pack)?;
+        pack.validate_contract().map_err(PlannerError::Message)?;
         let profile = self.resolve_profile(&request, &pack)?;
+        profile.validate_contract().map_err(PlannerError::Message)?;
         let method = self.resolve_method(&request, &pack, &profile)?;
+        method.validate_contract().map_err(PlannerError::Message)?;
         let region = self.resolve_region(&request, &pack, &profile, &method)?;
         let stack_name = self.resolve_stack_name(&request, &pack, &method)?;
+        let adapter_options = self.resolve_adapter_options(&request, &pack, &method)?;
 
         let adapter = adapter_for_method(method.id);
+        debug_assert_eq!(adapter.method_id(), method.id);
         adapter
             .validate_request(&request, &pack, Some(&profile), &method)
             .map_err(|err| PlannerError::Message(err.to_string()))?;
@@ -57,7 +66,7 @@ impl Planner {
             session_path_hint(&path)
         };
 
-        Ok(InstallPlan {
+        let plan = InstallPlan {
             request,
             resolved_pack: pack.clone(),
             resolved_profile: profile.clone(),
@@ -83,8 +92,11 @@ impl Planner {
                     InstallPhase::PostInstall,
                 ],
             },
-            adapter_options: adapter_plan.adapter_options,
-        })
+            adapter_options: merge_adapter_options(adapter_options, adapter_plan.adapter_options),
+        };
+        plan.validate_contract().map_err(PlannerError::Message)?;
+
+        Ok(plan)
     }
 
     pub fn run_doctor(
@@ -233,14 +245,48 @@ impl Planner {
         pack: &PackManifest,
         method: &MethodManifest,
     ) -> Result<Option<String>, PlannerError> {
-        let stack_name = request
-            .stack_name
-            .clone()
-            .or_else(|| Some(format!("loki-{}", pack.id)));
+        let stack_name = request.stack_name.clone().or_else(|| {
+            method
+                .requires_stack_name
+                .then(|| format!("loki-{}", pack.id))
+        });
         if method.requires_stack_name && stack_name.is_none() {
             return Err(PlannerError::Message("stack name is required".into()));
         }
         Ok(stack_name)
+    }
+
+    fn resolve_adapter_options(
+        &self,
+        request: &InstallRequest,
+        pack: &PackManifest,
+        method: &MethodManifest,
+    ) -> Result<BTreeMap<String, String>, PlannerError> {
+        let mut resolved = BTreeMap::new();
+
+        for (key, spec) in &pack.extra_options_schema {
+            if let Some(value) = resolve_option_value(key, spec, request.extra_options.get(key))? {
+                resolved.insert(key.clone(), value);
+            }
+        }
+
+        for (key, spec) in &method.input_schema {
+            if let Some(value) = resolve_option_value(key, spec, request.extra_options.get(key))? {
+                resolved.insert(key.clone(), value);
+            }
+        }
+
+        for key in request.extra_options.keys() {
+            if !pack.extra_options_schema.contains_key(key)
+                && !method.input_schema.contains_key(key)
+            {
+                return Err(PlannerError::Message(
+                    AdapterValidationError::InvalidOption(key.clone()).to_string(),
+                ));
+            }
+        }
+
+        Ok(resolved)
     }
 
     fn collect_warnings(
@@ -279,6 +325,90 @@ impl Planner {
             });
         }
         warnings
+    }
+}
+
+fn merge_adapter_options(
+    mut resolved_options: BTreeMap<String, String>,
+    adapter_options: BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    resolved_options.extend(adapter_options);
+    resolved_options
+}
+
+fn resolve_option_value<T>(
+    key: &str,
+    spec: &T,
+    explicit: Option<&String>,
+) -> Result<Option<String>, PlannerError>
+where
+    T: OptionSpec,
+{
+    let value = explicit.cloned().or_else(|| spec.default_value().cloned());
+    let Some(value) = value else {
+        if spec.required() {
+            return Err(PlannerError::Message(
+                AdapterValidationError::InvalidOption(format!("missing required option {key}"))
+                    .to_string(),
+            ));
+        }
+        return Ok(None);
+    };
+    validate_option_value(key, spec.value_type(), &value)?;
+    Ok(Some(value))
+}
+
+fn validate_option_value(
+    key: &str,
+    value_type: OptionValueType,
+    value: &str,
+) -> Result<(), PlannerError> {
+    let valid = match value_type {
+        OptionValueType::String => true,
+        OptionValueType::Integer => value.parse::<i64>().is_ok(),
+        OptionValueType::Boolean => matches!(value, "true" | "false"),
+    };
+
+    if valid {
+        Ok(())
+    } else {
+        Err(PlannerError::Message(format!(
+            "invalid value for option {key}: expected {value_type:?}"
+        )))
+    }
+}
+
+trait OptionSpec {
+    fn required(&self) -> bool;
+    fn default_value(&self) -> Option<&String>;
+    fn value_type(&self) -> OptionValueType;
+}
+
+impl OptionSpec for PackOptionSpec {
+    fn required(&self) -> bool {
+        self.required
+    }
+
+    fn default_value(&self) -> Option<&String> {
+        self.default_value.as_ref()
+    }
+
+    fn value_type(&self) -> OptionValueType {
+        self.value_type
+    }
+}
+
+impl OptionSpec for MethodOptionSpec {
+    fn required(&self) -> bool {
+        self.required
+    }
+
+    fn default_value(&self) -> Option<&String> {
+        self.default_value.as_ref()
+    }
+
+    fn value_type(&self) -> OptionValueType {
+        self.value_type
     }
 }
 

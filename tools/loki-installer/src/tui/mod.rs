@@ -1,3 +1,5 @@
+//! Terminal UI flow for interactive install planning and execution.
+
 pub mod app;
 pub mod events;
 pub mod runtime;

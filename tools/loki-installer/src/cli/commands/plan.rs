@@ -1,3 +1,5 @@
+//! `plan` subcommand.
+
 use crate::cli::args::PlanArgs;
 use crate::core::Planner;
 use color_eyre::eyre::{Result, eyre};

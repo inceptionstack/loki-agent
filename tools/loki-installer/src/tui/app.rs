@@ -1,3 +1,5 @@
+//! TUI application state and screen definitions.
+
 use crate::core::{
     DoctorReport, InstallMode, InstallPlan, InstallRequest, InstallSession, InstallerEngine,
     MethodManifest, PackManifest, ProfileManifest,
@@ -55,14 +57,12 @@ impl InstallRequestDraft {
 #[derive(Debug, Clone, Default)]
 pub struct DoctorState {
     pub report: Option<DoctorReport>,
-    pub running: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct DeploymentState {
     pub current_phase: Option<crate::core::InstallPhase>,
     pub logs: Vec<String>,
-    pub completed_steps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -1,3 +1,5 @@
+//! CLI subcommand implementations.
+
 pub mod doctor;
 pub mod install;
 pub mod plan;

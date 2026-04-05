@@ -1,3 +1,5 @@
+//! Profile selection screen content.
+
 use crate::tui::app::AppState;
 use ratatui::text::{Line, Text};
 

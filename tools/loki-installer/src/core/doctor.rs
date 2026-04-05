@@ -1,3 +1,5 @@
+//! Lightweight environment checks surfaced by the doctor command and TUI.
+
 use crate::core::{InstallRequest, MethodManifest, PrerequisiteCheck, PrerequisiteKind};
 use chrono::{DateTime, Utc};
 

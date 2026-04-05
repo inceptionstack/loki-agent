@@ -1,3 +1,5 @@
+//! Deployment adapter selection and shared test sinks.
+
 mod cfn;
 mod terraform;
 

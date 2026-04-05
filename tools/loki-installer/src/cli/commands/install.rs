@@ -1,3 +1,5 @@
+//! `install` subcommand.
+
 use crate::cli::args::InstallArgs;
 use crate::core::{InstallMode, Planner};
 use crate::tui;

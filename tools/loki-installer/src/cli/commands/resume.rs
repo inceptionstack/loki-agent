@@ -1,6 +1,8 @@
+//! `resume` subcommand.
+
 use crate::cli::args::ResumeArgs;
 use crate::core::{Planner, load_latest_session, load_session};
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::Result;
 
 pub async fn run(args: ResumeArgs) -> Result<()> {
     let planner = Planner::discover()?;

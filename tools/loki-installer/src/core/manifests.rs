@@ -1,5 +1,8 @@
+//! Manifest discovery and YAML loading for packs, profiles, and methods.
+
 use crate::core::{DeployMethodId, MethodManifest, PackManifest, ProfileManifest};
 use serde::de::DeserializeOwned;
+use serde_yaml::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -83,9 +86,10 @@ impl ManifestRepository {
             if !manifest_path.exists() {
                 continue;
             }
-            if let Ok(manifest) = self.read_yaml::<PackManifest>(manifest_path) {
-                manifests.push(manifest);
+            if !self.is_installer_manifest(&manifest_path)? {
+                continue;
             }
+            manifests.push(self.read_yaml::<PackManifest>(manifest_path)?);
         }
         manifests.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(manifests)
@@ -127,5 +131,17 @@ impl ManifestRepository {
             path: path.display().to_string(),
             source: err,
         })
+    }
+
+    fn is_installer_manifest(&self, path: &Path) -> Result<bool, ManifestError> {
+        let raw = fs::read_to_string(path).map_err(|err| ManifestError::Read {
+            path: path.display().to_string(),
+            source: err,
+        })?;
+        let value: Value = serde_yaml::from_str(&raw).map_err(|err| ManifestError::Parse {
+            path: path.display().to_string(),
+            source: err,
+        })?;
+        Ok(value.get("schema_version").is_some())
     }
 }

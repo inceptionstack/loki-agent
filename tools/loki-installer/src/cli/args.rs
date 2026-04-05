@@ -1,3 +1,5 @@
+//! CLI argument models and request normalization.
+
 use crate::core::{DeployMethodId, InstallMode, InstallRequest, InstallerEngine};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::BTreeMap;
@@ -87,16 +89,15 @@ pub struct StatusArgs {
     pub json: bool,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum EngineArg {
     V1,
     V2,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum MethodArg {
     Cfn,
-    Tf,
     Terraform,
 }
 
@@ -113,7 +114,7 @@ impl From<MethodArg> for DeployMethodId {
     fn from(value: MethodArg) -> Self {
         match value {
             MethodArg::Cfn => DeployMethodId::Cfn,
-            MethodArg::Tf | MethodArg::Terraform => DeployMethodId::Terraform,
+            MethodArg::Terraform => DeployMethodId::Terraform,
         }
     }
 }
@@ -178,4 +179,32 @@ where
         s[..pos].parse().map_err(|e| format!("{e}"))?,
         s[pos + 1..].parse().map_err(|e| format!("{e}"))?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command, MethodArg};
+    use clap::Parser;
+
+    #[test]
+    fn parses_install_options() {
+        let cli = Cli::parse_from([
+            "loki-installer",
+            "install",
+            "--pack",
+            "openclaw",
+            "--method",
+            "terraform",
+            "--option",
+            "workspace=dev",
+        ]);
+
+        let Command::Install(args) = cli.command else {
+            panic!("expected install command");
+        };
+
+        assert_eq!(args.pack.as_deref(), Some("openclaw"));
+        assert_eq!(args.method, Some(MethodArg::Terraform));
+        assert_eq!(args.extra_options.len(), 1);
+    }
 }

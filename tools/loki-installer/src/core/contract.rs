@@ -1,7 +1,9 @@
+//! Shared installer contract types used by CLI, TUI, planner, and adapters.
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstallRequest {
@@ -16,6 +18,20 @@ pub struct InstallRequest {
     pub json_output: bool,
     pub resume_session_id: Option<String>,
     pub extra_options: BTreeMap<String, String>,
+}
+
+impl InstallRequest {
+    pub fn validate_contract(&self) -> Result<(), String> {
+        if self.pack.trim().is_empty() {
+            return Err("pack is required".into());
+        }
+
+        if self.mode == InstallMode::NonInteractive && !self.auto_yes {
+            return Err("non-interactive requests must enable auto_yes".into());
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +78,54 @@ pub struct InstallPlan {
     pub post_install_steps: Vec<PostInstallStep>,
     pub session_persistence: SessionPersistenceSpec,
     pub adapter_options: BTreeMap<String, String>,
+}
+
+impl InstallPlan {
+    pub fn validate_contract(&self) -> Result<(), String> {
+        self.request.validate_contract()?;
+        self.resolved_pack.validate_contract()?;
+        self.resolved_profile.validate_contract()?;
+        self.resolved_method.validate_contract()?;
+
+        if !self
+            .resolved_pack
+            .allowed_profiles
+            .contains(&self.resolved_profile.id)
+        {
+            return Err(format!(
+                "resolved profile {} is not allowed by pack {}",
+                self.resolved_profile.id, self.resolved_pack.id
+            ));
+        }
+
+        if !self
+            .resolved_pack
+            .supported_methods
+            .contains(&self.resolved_method.id)
+        {
+            return Err(format!(
+                "resolved method {} is not supported by pack {}",
+                self.resolved_method.id, self.resolved_pack.id
+            ));
+        }
+
+        if self.session_persistence.format != SessionFormat::Json {
+            return Err("session persistence format must be json".into());
+        }
+
+        let mut step_ids = BTreeSet::new();
+        for step in &self.deploy_steps {
+            if !step_ids.insert(step.id.clone()) {
+                return Err(format!("duplicate deploy step id {}", step.id));
+            }
+        }
+
+        if self.deploy_steps.is_empty() {
+            return Err("deploy plan must contain at least one deploy step".into());
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,6 +244,41 @@ pub struct PackManifest {
     pub extra_options_schema: BTreeMap<String, PackOptionSpec>,
 }
 
+impl PackManifest {
+    pub fn validate_contract(&self) -> Result<(), String> {
+        if self.schema_version == 0 {
+            return Err("pack schema_version must be positive".into());
+        }
+        if self.id.trim().is_empty() {
+            return Err("pack id is required".into());
+        }
+        if self.allowed_profiles.is_empty() {
+            return Err(format!("pack {} must allow at least one profile", self.id));
+        }
+        if self.supported_methods.is_empty() {
+            return Err(format!("pack {} must support at least one method", self.id));
+        }
+        if let Some(default_profile) = &self.default_profile
+            && !self.allowed_profiles.contains(default_profile)
+        {
+            return Err(format!(
+                "pack {} default profile {} is not allowed",
+                self.id, default_profile
+            ));
+        }
+        if let Some(default_method) = self.default_method
+            && !self.supported_methods.contains(&default_method)
+        {
+            return Err(format!(
+                "pack {} default method {} is not supported",
+                self.id, default_method
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PostInstallActionId {
@@ -216,6 +315,25 @@ pub struct ProfileManifest {
     pub tags: BTreeMap<String, String>,
 }
 
+impl ProfileManifest {
+    pub fn validate_contract(&self) -> Result<(), String> {
+        if self.schema_version == 0 {
+            return Err("profile schema_version must be positive".into());
+        }
+        if self.id.trim().is_empty() {
+            return Err("profile id is required".into());
+        }
+        if self.supported_packs.is_empty() {
+            return Err(format!(
+                "profile {} must support at least one pack",
+                self.id
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MethodManifest {
     pub schema_version: u32,
@@ -228,6 +346,19 @@ pub struct MethodManifest {
     pub supports_resume: bool,
     pub supports_uninstall: bool,
     pub input_schema: BTreeMap<String, MethodOptionSpec>,
+}
+
+impl MethodManifest {
+    pub fn validate_contract(&self) -> Result<(), String> {
+        if self.schema_version == 0 {
+            return Err("method schema_version must be positive".into());
+        }
+        if self.display_name.trim().is_empty() {
+            return Err(format!("method {} display_name is required", self.id));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -292,24 +423,14 @@ pub struct DeployStatus {
 pub enum AdapterValidationError {
     #[error("missing required field: {0}")]
     MissingField(&'static str),
-    #[error("unsupported value for {field}: {value}")]
-    UnsupportedValue { field: &'static str, value: String },
     #[error("invalid option: {0}")]
     InvalidOption(String),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum AdapterError {
-    #[error("preflight failed: {0}")]
-    Preflight(String),
-    #[error("command failed: {program}")]
-    CommandFailed { program: String, stderr: String },
     #[error("session is not resumable")]
     NotResumable,
-    #[error("deployment state missing: {0}")]
-    MissingArtifact(&'static str),
-    #[error("{0}")]
-    Other(String),
 }
 
 #[async_trait]
@@ -385,4 +506,129 @@ pub trait DeployAdapter: Send + Sync {
     ) -> Result<UninstallResult, AdapterError>;
 
     async fn status(&self, session: &InstallSession) -> Result<DeployStatus, AdapterError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DeployAction, DeployMethodId, DeployStep, InstallMode, InstallPhase, InstallPlan,
+        InstallRequest, InstallerEngine, MethodManifest, OptionValueType, PackManifest,
+        PostInstallStep, PrerequisiteCheck, PrerequisiteKind, ProfileManifest, SessionFormat,
+        SessionPersistenceSpec,
+    };
+    use std::collections::BTreeMap;
+
+    fn sample_request() -> InstallRequest {
+        InstallRequest {
+            engine: InstallerEngine::V2,
+            mode: InstallMode::NonInteractive,
+            pack: "openclaw".into(),
+            profile: Some("builder".into()),
+            method: Some(DeployMethodId::Cfn),
+            region: Some("us-east-1".into()),
+            stack_name: Some("loki-openclaw".into()),
+            auto_yes: true,
+            json_output: false,
+            resume_session_id: None,
+            extra_options: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn request_validation_rejects_missing_pack() {
+        let mut request = sample_request();
+        request.pack.clear();
+        assert!(request.validate_contract().is_err());
+    }
+
+    #[test]
+    fn plan_validation_rejects_duplicate_step_ids() {
+        let request = sample_request();
+        let plan = InstallPlan {
+            request,
+            resolved_pack: PackManifest {
+                schema_version: 1,
+                id: "openclaw".into(),
+                display_name: "OpenClaw".into(),
+                description: None,
+                experimental: false,
+                allowed_profiles: vec!["builder".into()],
+                supported_methods: vec![DeployMethodId::Cfn],
+                default_profile: Some("builder".into()),
+                default_method: Some(DeployMethodId::Cfn),
+                default_region: Some("us-east-1".into()),
+                post_install: vec![],
+                required_env: vec![],
+                extra_options_schema: BTreeMap::new(),
+            },
+            resolved_profile: ProfileManifest {
+                schema_version: 1,
+                id: "builder".into(),
+                display_name: "Builder".into(),
+                description: None,
+                supported_packs: vec!["openclaw".into()],
+                default_method: Some(DeployMethodId::Cfn),
+                default_region: Some("us-east-1".into()),
+                config: BTreeMap::new(),
+                tags: BTreeMap::new(),
+            },
+            resolved_method: MethodManifest {
+                schema_version: 1,
+                id: DeployMethodId::Cfn,
+                display_name: "CloudFormation".into(),
+                description: None,
+                requires_stack_name: true,
+                requires_region: true,
+                required_tools: vec!["aws".into()],
+                supports_resume: true,
+                supports_uninstall: true,
+                input_schema: BTreeMap::from([(
+                    "capabilities".into(),
+                    super::MethodOptionSpec {
+                        value_type: OptionValueType::String,
+                        required: false,
+                        default_value: None,
+                        description: None,
+                    },
+                )]),
+            },
+            resolved_region: "us-east-1".into(),
+            resolved_stack_name: Some("loki-openclaw".into()),
+            prerequisites: vec![PrerequisiteCheck {
+                id: "aws".into(),
+                display_name: "AWS".into(),
+                kind: PrerequisiteKind::AwsCliPresent,
+                required: true,
+                remediation: None,
+            }],
+            deploy_steps: vec![
+                DeployStep {
+                    id: "duplicate".into(),
+                    phase: InstallPhase::ApplyDeployment,
+                    display_name: "one".into(),
+                    action: DeployAction::CreateStack,
+                },
+                DeployStep {
+                    id: "duplicate".into(),
+                    phase: InstallPhase::WaitForResources,
+                    display_name: "two".into(),
+                    action: DeployAction::WaitForStack,
+                },
+            ],
+            warnings: vec![],
+            post_install_steps: vec![PostInstallStep {
+                id: "post".into(),
+                display_name: "Post".into(),
+                instruction: "Inspect outputs".into(),
+            }],
+            session_persistence: SessionPersistenceSpec {
+                format: SessionFormat::Json,
+                path_hint: "/tmp/session.json".into(),
+                persist_phases: vec![InstallPhase::ApplyDeployment],
+            },
+            adapter_options: BTreeMap::new(),
+        };
+
+        assert!(plan.validate_contract().is_err());
+    }
 }

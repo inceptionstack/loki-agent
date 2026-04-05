@@ -1,6 +1,6 @@
-use crate::core::{
-    InstallPhase, InstallPlan, InstallRequest, InstallSession, InstallerEngine, SessionFormat,
-};
+//! JSON-backed install session persistence and resume helpers.
+
+use crate::core::{InstallPhase, InstallPlan, InstallRequest, InstallSession, SessionFormat};
 use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,7 +40,7 @@ pub fn create_session(request: InstallRequest, plan: Option<InstallPlan>) -> Ins
     InstallSession {
         session_id: Uuid::new_v4().to_string(),
         installer_version: env!("CARGO_PKG_VERSION").to_string(),
-        engine: InstallerEngine::V2,
+        engine: request.engine,
         mode: request.mode,
         request,
         plan,
@@ -79,11 +79,14 @@ pub fn persist_session(session: &InstallSession) -> Result<PathBuf, SessionError
         "session_id": session.session_id,
         "format": SessionFormat::Json,
     });
-    fs::write(&latest, serde_json::to_vec_pretty(&latest_payload).unwrap()).map_err(|err| {
-        SessionError::Io {
+    let latest_raw =
+        serde_json::to_vec_pretty(&latest_payload).map_err(|err| SessionError::Json {
             path: latest.display().to_string(),
             source: err,
-        }
+        })?;
+    fs::write(&latest, latest_raw).map_err(|err| SessionError::Io {
+        path: latest.display().to_string(),
+        source: err,
     })?;
 
     Ok(final_path)

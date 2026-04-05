@@ -1,3 +1,5 @@
+//! Individual content renderers for each TUI screen.
+
 pub mod deploy;
 pub mod method_select;
 pub mod pack_select;

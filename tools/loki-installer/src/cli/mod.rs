@@ -1,4 +1,6 @@
-mod args;
+//! Command-line entrypoints and argument parsing.
+
+pub mod args;
 mod commands;
 
 use crate::cli::args::{Cli, Command};

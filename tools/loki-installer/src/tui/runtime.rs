@@ -1,4 +1,6 @@
-use crate::core::{Planner, persist_session};
+//! TUI runtime loop and rendering.
+
+use crate::core::Planner;
 use crate::tui::app::{AppLifecycle, AppState, ScreenId, screen_title};
 use crate::tui::events::InstallerEvent;
 use crate::tui::screens;
@@ -16,6 +18,7 @@ use ratatui::{
     style::{Modifier, Style},
     widgets::{Block, Borders, Paragraph},
 };
+use std::collections::VecDeque;
 use std::io::{self, Stdout};
 
 pub async fn run(planner: Planner) -> Result<()> {
@@ -26,7 +29,7 @@ pub async fn run(planner: Planner) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let mut state = AppState::default();
 
-    let mut pending = update(&mut state, InstallerEvent::AppStarted);
+    let mut pending = VecDeque::from(update(&mut state, InstallerEvent::AppStarted));
     while state.lifecycle == AppLifecycle::Running {
         run_actions(&planner, &mut state, &mut pending, &mut terminal).await?;
         if event::poll(std::time::Duration::from_millis(250))? {
@@ -51,10 +54,10 @@ pub async fn run(planner: Planner) -> Result<()> {
 async fn run_actions(
     planner: &Planner,
     state: &mut AppState,
-    pending: &mut Vec<AppAction>,
+    pending: &mut VecDeque<AppAction>,
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> Result<()> {
-    while let Some(action) = pending.pop() {
+    while let Some(action) = pending.pop_front() {
         match action {
             AppAction::Render => render(terminal, state)?,
             AppAction::LoadPacks => {
@@ -91,7 +94,6 @@ async fn run_actions(
             AppAction::StartDeploy => {
                 if let Some(plan) = state.plan.clone() {
                     let session = planner.start_install(plan).await?;
-                    persist_session(&session)?;
                     state.session = Some(session);
                     pending.extend(update(
                         state,
@@ -168,10 +170,17 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
         );
 
         frame.render_widget(
-            Paragraph::new("Hints: Enter next | b back | q quit | arrows move")
-                .style(Style::default().add_modifier(Modifier::BOLD)),
+            Paragraph::new(footer_text(state)).style(Style::default().add_modifier(Modifier::BOLD)),
             areas[1],
         );
     })?;
     Ok(())
+}
+
+fn footer_text(state: &AppState) -> String {
+    state
+        .errors
+        .last()
+        .map(|error| format!("Error: {} | q quit | b back", error.message))
+        .unwrap_or_else(|| "Hints: Enter next | b back | q quit | arrows move".into())
 }
