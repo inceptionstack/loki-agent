@@ -608,14 +608,19 @@ async fn stage_cloudformation_template(
     let _ = run_command(&CommandSpec {
         program: "aws".into(),
         args: vec![
-            "s3api".into(), "put-bucket-encryption".into(),
-            "--bucket".into(), bucket.clone(),
+            "s3api".into(),
+            "put-bucket-encryption".into(),
+            "--bucket".into(),
+            bucket.clone(),
             "--server-side-encryption-configuration".into(),
-            r#"{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}"#.into(),
-            "--region".into(), context.region.clone(),
+            r#"{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}"#
+                .into(),
+            "--region".into(),
+            context.region.clone(),
         ],
         current_dir: None,
-    }).await;
+    })
+    .await;
 
     let upload = run_command(&build_upload_template_command(
         &context.template_path,
@@ -715,18 +720,21 @@ async fn emit_stack_events(
     }
 
     for event in new_events {
-        let mut message = format!(
-            "[{}] {} {}",
-            event.resource_status, event.resource_type, event.logical_resource_id
-        );
         if let Some(reason) = event.resource_status_reason
             && !reason.is_empty()
         {
-            message.push_str(": ");
-            message.push_str(&reason);
+            event_sink
+                .emit(InstallEvent::LogLine { message: reason })
+                .await;
         }
 
-        event_sink.emit(InstallEvent::LogLine { message }).await;
+        event_sink
+            .emit(InstallEvent::StackEvent {
+                resource: event.logical_resource_id,
+                status: event.resource_status,
+                resource_type: event.resource_type,
+            })
+            .await;
     }
 
     Ok(())
@@ -781,7 +789,7 @@ async fn emit_step_started(
     event_sink
         .emit(InstallEvent::StepStarted {
             step_id: step.id.clone(),
-            message: step.display_name.clone(),
+            display_name: step.display_name.clone(),
         })
         .await;
 }

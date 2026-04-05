@@ -503,7 +503,7 @@ async fn emit_step_started(
     event_sink
         .emit(InstallEvent::StepStarted {
             step_id: step.id.clone(),
-            message: step.display_name.clone(),
+            display_name: step.display_name.clone(),
         })
         .await;
 }

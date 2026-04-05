@@ -449,7 +449,7 @@ pub enum InstallEvent {
     },
     StepStarted {
         step_id: String,
-        message: String,
+        display_name: String,
     },
     StepFinished {
         step_id: String,
@@ -465,6 +465,11 @@ pub enum InstallEvent {
     },
     LogLine {
         message: String,
+    },
+    StackEvent {
+        resource: String,
+        status: String,
+        resource_type: String,
     },
 }
 

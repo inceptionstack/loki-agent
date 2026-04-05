@@ -5,6 +5,7 @@ use loki_installer::cli::args::{Cli, Command, MethodArg};
 fn parses_install_subcommand() {
     let cli = Cli::try_parse_from([
         "loki-installer",
+        "--for-agent",
         "install",
         "--pack",
         "openclaw",
@@ -21,6 +22,7 @@ fn parses_install_subcommand() {
         panic!("expected install");
     };
 
+    assert!(cli.for_agent);
     assert_eq!(args.pack.as_deref(), Some("openclaw"));
     assert_eq!(args.method, Some(MethodArg::Cfn));
 }
@@ -63,7 +65,14 @@ fn parses_uninstall_subcommand() {
 
 #[test]
 fn parses_status_subcommand() {
-    let cli = Cli::try_parse_from(["loki-installer", "status", "--session", "abc123"])
-        .expect("parse status");
+    let cli = Cli::try_parse_from([
+        "loki-installer",
+        "status",
+        "--for-agent",
+        "--session",
+        "abc123",
+    ])
+    .expect("parse status");
+    assert!(cli.for_agent);
     assert!(matches!(cli.command, Command::Status(_)));
 }

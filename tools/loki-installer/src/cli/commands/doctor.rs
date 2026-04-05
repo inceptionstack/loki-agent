@@ -1,13 +1,16 @@
 //! `doctor` subcommand.
 
 use crate::cli::args::DoctorArgs;
+use crate::cli::output::{doctor_result_json, print_human_line, print_json_line};
 use crate::core::Planner;
 use color_eyre::Result;
 
-pub async fn run(args: DoctorArgs) -> Result<()> {
+pub async fn run(args: DoctorArgs, for_agent: bool) -> Result<()> {
     let planner = Planner::discover()?;
     let report = planner.run_doctor(args.to_request().as_ref())?;
-    if args.json {
+    if for_agent {
+        print_json_line(&doctor_result_json(&report))?;
+    } else if args.json {
         let payload = report
             .checks
             .iter()
@@ -21,12 +24,18 @@ pub async fn run(args: DoctorArgs) -> Result<()> {
                 })
             })
             .collect::<Vec<_>>();
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        print_json_line(&serde_json::to_value(&payload)?)?;
     } else {
-        println!("Doctor report at {}", report.generated_at);
+        print_human_line(
+            for_agent,
+            format!("Doctor report at {}", report.generated_at),
+        )?;
         for check in report.checks {
             let icon = if check.passed { "OK" } else { "FAIL" };
-            println!("[{icon}] {}: {}", check.check.display_name, check.message);
+            print_human_line(
+                for_agent,
+                format!("[{icon}] {}: {}", check.check.display_name, check.message),
+            )?;
         }
     }
     Ok(())

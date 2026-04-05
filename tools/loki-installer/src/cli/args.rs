@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 #[derive(Debug, Parser)]
 #[command(name = "loki-installer", about = "Loki Agent Installer V2")]
 pub struct Cli {
+    #[arg(long, global = true)]
+    pub for_agent: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -190,6 +193,7 @@ mod tests {
     fn parses_install_options() {
         let cli = Cli::parse_from([
             "loki-installer",
+            "--for-agent",
             "install",
             "--pack",
             "openclaw",
@@ -198,6 +202,8 @@ mod tests {
             "--option",
             "workspace=dev",
         ]);
+
+        assert!(cli.for_agent);
 
         let Command::Install(args) = cli.command else {
             panic!("expected install command");

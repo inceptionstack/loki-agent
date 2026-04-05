@@ -111,19 +111,58 @@ impl Planner {
     }
 
     pub async fn start_install(&self, plan: InstallPlan) -> Result<InstallSession, PlannerError> {
-        let adapter = adapter_for_method(plan.resolved_method.id);
-        let mut session = create_session(plan.request.clone(), Some(plan.clone()));
-        persist_session(&session).map_err(|err| PlannerError::Message(err.to_string()))?;
         let mut sink = NoopEventSink::default();
-        let result = adapter.apply(&plan, &mut session, &mut sink).await?;
-        session.phase = result.final_phase;
-        session.artifacts.extend(result.artifacts);
-        session.status_summary = Some("deployment completed".into());
+        self.start_install_with_sink(plan, &mut sink).await
+    }
+
+    pub async fn start_install_with_sink(
+        &self,
+        plan: InstallPlan,
+        sink: &mut dyn crate::core::InstallEventSink,
+    ) -> Result<InstallSession, PlannerError> {
+        let mut session = self.create_install_session(plan)?;
+        self.execute_install_with_sink(&mut session, sink).await?;
+        Ok(session)
+    }
+
+    pub fn create_install_session(
+        &self,
+        plan: InstallPlan,
+    ) -> Result<InstallSession, PlannerError> {
+        let session = create_session(plan.request.clone(), Some(plan));
         persist_session(&session).map_err(|err| PlannerError::Message(err.to_string()))?;
         Ok(session)
     }
 
+    pub async fn execute_install_with_sink(
+        &self,
+        session: &mut InstallSession,
+        sink: &mut dyn crate::core::InstallEventSink,
+    ) -> Result<(), PlannerError> {
+        let plan = session
+            .plan
+            .clone()
+            .ok_or_else(|| PlannerError::Message("session missing install plan".into()))?;
+        let adapter = adapter_for_method(plan.resolved_method.id);
+        persist_session(session).map_err(|err| PlannerError::Message(err.to_string()))?;
+        let result = adapter.apply(&plan, session, sink).await?;
+        session.phase = result.final_phase;
+        session.artifacts.extend(result.artifacts);
+        session.status_summary = Some("deployment completed".into());
+        persist_session(session).map_err(|err| PlannerError::Message(err.to_string()))?;
+        Ok(())
+    }
+
     pub async fn resume_install(&self, session: &mut InstallSession) -> Result<(), PlannerError> {
+        let mut sink = NoopEventSink::default();
+        self.resume_install_with_sink(session, &mut sink).await
+    }
+
+    pub async fn resume_install_with_sink(
+        &self,
+        session: &mut InstallSession,
+        sink: &mut dyn crate::core::InstallEventSink,
+    ) -> Result<(), PlannerError> {
         let method = session
             .plan
             .as_ref()
@@ -131,8 +170,7 @@ impl Planner {
             .or(session.request.method)
             .ok_or_else(|| PlannerError::Message("session missing deployment method".into()))?;
         let adapter = adapter_for_method(method);
-        let mut sink = NoopEventSink::default();
-        let result = adapter.resume(session, &mut sink).await?;
+        let result = adapter.resume(session, sink).await?;
         session.phase = result.final_phase;
         session.artifacts.extend(result.artifacts);
         session.status_summary = Some("deployment resumed".into());
@@ -141,6 +179,15 @@ impl Planner {
     }
 
     pub async fn uninstall(&self, session: &InstallSession) -> Result<(), PlannerError> {
+        let mut sink = NoopEventSink::default();
+        self.uninstall_with_sink(session, &mut sink).await
+    }
+
+    pub async fn uninstall_with_sink(
+        &self,
+        session: &InstallSession,
+        sink: &mut dyn crate::core::InstallEventSink,
+    ) -> Result<(), PlannerError> {
         let method = session
             .plan
             .as_ref()
@@ -148,8 +195,7 @@ impl Planner {
             .or(session.request.method)
             .ok_or_else(|| PlannerError::Message("session missing deployment method".into()))?;
         let adapter = adapter_for_method(method);
-        let mut sink = NoopEventSink::default();
-        adapter.uninstall(session, &mut sink).await?;
+        adapter.uninstall(session, sink).await?;
         Ok(())
     }
 
