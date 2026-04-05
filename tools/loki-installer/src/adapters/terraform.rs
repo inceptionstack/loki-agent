@@ -196,7 +196,10 @@ impl TerraformContext {
         let environment_name = plan
             .resolved_stack_name
             .clone()
-            .unwrap_or_else(|| format!("loki-{}", plan.resolved_pack.id));
+            .unwrap_or_else(|| {
+                let suffix = &uuid::Uuid::new_v4().to_string()[..8];
+                format!("loki-{}-{suffix}", plan.resolved_pack.id)
+            });
 
         Ok(Self {
             terraform_bin,
@@ -595,7 +598,25 @@ fn terraform_install_path() -> Result<PathBuf, AdapterError> {
             "HOME is not set, so the installer cannot place terraform in ~/.local/bin".into(),
         )
     })?;
-    Ok(PathBuf::from(home).join(".local/bin/terraform"))
+    let primary = PathBuf::from(&home).join(".local/bin");
+    // Fall back to /tmp/.local/bin when ~/.local/bin is on a read-only or
+    // space-constrained filesystem (e.g. CloudShell).
+    let dir = if can_write_to(&primary) { primary } else { PathBuf::from("/tmp/.local/bin") };
+    fs::create_dir_all(&dir).map_err(|e| {
+        AdapterError::Message(format!("Failed to create directory {} — {e}", dir.display()))
+    })?;
+    Ok(dir.join("terraform"))
+}
+
+fn can_write_to(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".loki-probe");
+    match fs::write(&probe, b"ok") {
+        Ok(_) => { let _ = fs::remove_file(&probe); true }
+        Err(_) => false,
+    }
 }
 
 fn terraform_archive_path(version: &str) -> PathBuf {
