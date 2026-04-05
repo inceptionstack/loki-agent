@@ -3,6 +3,7 @@ id: personal_assistant
 display_name: Personal Assistant
 description: Least-privilege profile intended for personal assistant pack deployments.
 supported_packs:
+  - bedrockify
   - nemoclaw
 default_method: cfn
 default_region: us-east-1

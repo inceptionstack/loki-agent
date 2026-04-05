@@ -21,7 +21,21 @@ This document assumes the accepted review deltas are already in force:
 
 ## Workspace Layout
 
-Use a Cargo workspace with three crates:
+Target end-state: a Cargo workspace with three crates.
+
+Implementation note: the current repository intentionally remains a single `loki-installer`
+crate with `core`, `cli`, `tui`, and `adapters` modules. That is an acceptable staging point
+while the installer is still evolving quickly because it keeps refactors, tests, and release
+plumbing simpler. The split becomes worth doing when one of these is true:
+
+- the CLI and TUI need independent binaries or release cadences
+- compile time or dependency isolation becomes a real problem
+- the current module boundaries start leaking TUI or CLI concerns into `core`
+
+Until then, preserve the dependency discipline described below inside the single crate and treat
+the workspace layout as the extraction plan rather than an immediate requirement.
+
+Use a Cargo workspace with three crates once that extraction pressure exists:
 
 ```text
 installer/

@@ -69,6 +69,7 @@ pub struct DeploymentState {
 pub struct UiState {
     pub width: u16,
     pub height: u16,
+    pub help_visible: bool,
 }
 
 #[derive(Debug, Clone)]

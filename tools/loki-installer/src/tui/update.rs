@@ -19,27 +19,58 @@ pub enum AppAction {
 pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
     match event {
         InstallerEvent::AppStarted => vec![AppAction::Render],
-        InstallerEvent::KeyPressed(key) => match key.code {
-            KeyCode::Char('q') => {
-                state.lifecycle = AppLifecycle::Exiting;
-                vec![AppAction::Exit]
+        InstallerEvent::KeyPressed(key) => {
+            if state.ui.help_visible {
+                return match key.code {
+                    KeyCode::Esc | KeyCode::Char('?') => {
+                        state.ui.help_visible = false;
+                        vec![AppAction::Render]
+                    }
+                    KeyCode::Char('q') => {
+                        state.lifecycle = AppLifecycle::Exiting;
+                        vec![AppAction::Exit]
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        state.lifecycle = AppLifecycle::Exiting;
+                        vec![AppAction::Exit]
+                    }
+                    _ => vec![AppAction::Render],
+                };
             }
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.lifecycle = AppLifecycle::Exiting;
-                vec![AppAction::Exit]
+
+            match key.code {
+                KeyCode::Char('q') => {
+                    state.lifecycle = AppLifecycle::Exiting;
+                    vec![AppAction::Exit]
+                }
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    state.lifecycle = AppLifecycle::Exiting;
+                    vec![AppAction::Exit]
+                }
+                KeyCode::Char('?') => {
+                    state.ui.help_visible = true;
+                    vec![AppAction::Render]
+                }
+                KeyCode::Esc => vec![AppAction::Render],
+                KeyCode::Enter | KeyCode::Tab | KeyCode::Right | KeyCode::Char('l') => {
+                    advance(state)
+                }
+                KeyCode::BackTab | KeyCode::Char('b') | KeyCode::Char('h') | KeyCode::Left => {
+                    go_back(state)
+                }
+                KeyCode::Char(' ') => select_current(state),
+                KeyCode::Char('r') => retry(state),
+                KeyCode::Down | KeyCode::Char('j') => {
+                    move_cursor(state, 1);
+                    vec![AppAction::Render]
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    move_cursor(state, -1);
+                    vec![AppAction::Render]
+                }
+                _ => vec![AppAction::Render],
             }
-            KeyCode::Enter => advance(state),
-            KeyCode::Char('b') | KeyCode::Left => go_back(state),
-            KeyCode::Down | KeyCode::Char('j') => {
-                move_cursor(state, 1);
-                vec![AppAction::Render]
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                move_cursor(state, -1);
-                vec![AppAction::Render]
-            }
-            _ => vec![AppAction::Render],
-        },
+        }
         InstallerEvent::PacksLoaded(result) => {
             if let Ok(packs) = result {
                 state.packs = packs;
@@ -196,5 +227,148 @@ fn move_cursor(state: &mut AppState, delta: isize) {
             );
         }
         _ => {}
+    }
+}
+
+fn select_current(state: &mut AppState) -> Vec<AppAction> {
+    match state.screen {
+        ScreenId::PackSelection | ScreenId::ProfileSelection | ScreenId::MethodSelection => {
+            advance(state)
+        }
+        _ => vec![AppAction::Render],
+    }
+}
+
+fn retry(state: &mut AppState) -> Vec<AppAction> {
+    match state.screen {
+        ScreenId::Welcome | ScreenId::DoctorPreflight => vec![AppAction::RunDoctor],
+        ScreenId::PackSelection => vec![AppAction::LoadPacks],
+        ScreenId::ProfileSelection => state
+            .request_draft
+            .pack_id
+            .clone()
+            .map(|pack_id| vec![AppAction::LoadProfiles { pack_id }])
+            .unwrap_or_else(|| vec![AppAction::Render]),
+        ScreenId::MethodSelection => state
+            .request_draft
+            .pack_id
+            .clone()
+            .map(|pack_id| vec![AppAction::LoadMethods { pack_id }])
+            .unwrap_or_else(|| vec![AppAction::Render]),
+        ScreenId::Review => vec![AppAction::BuildPlan],
+        ScreenId::DeployProgress => {
+            if state.plan.is_some() {
+                vec![AppAction::StartDeploy]
+            } else {
+                vec![AppAction::Render]
+            }
+        }
+        ScreenId::PostInstall => vec![AppAction::Render],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{DeployMethodId, MethodManifest, PackManifest, ProfileManifest};
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn question_mark_toggles_help_and_escape_closes_it() {
+        let mut state = AppState::default();
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::KeyPressed(key(KeyCode::Char('?'))),
+        );
+        assert!(state.ui.help_visible);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+
+        let actions = update(&mut state, InstallerEvent::KeyPressed(key(KeyCode::Esc)));
+        assert!(!state.ui.help_visible);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+    }
+
+    #[test]
+    fn vim_and_tab_aliases_follow_existing_navigation() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::PackSelection;
+        state.packs = vec![PackManifest {
+            schema_version: 1,
+            id: "openclaw".into(),
+            display_name: "OpenClaw".into(),
+            description: None,
+            experimental: false,
+            allowed_profiles: vec!["builder".into()],
+            supported_methods: vec![DeployMethodId::Cfn],
+            default_profile: Some("builder".into()),
+            default_method: Some(DeployMethodId::Cfn),
+            default_region: Some("us-east-1".into()),
+            post_install: vec![],
+            required_env: vec![],
+            extra_options_schema: Default::default(),
+        }];
+
+        let actions = update(&mut state, InstallerEvent::KeyPressed(key(KeyCode::Tab)));
+        assert!(matches!(
+            actions.as_slice(),
+            [AppAction::LoadProfiles { pack_id }] if pack_id == "openclaw"
+        ));
+
+        state.screen = ScreenId::ProfileSelection;
+        let actions = update(
+            &mut state,
+            InstallerEvent::KeyPressed(key(KeyCode::Char('h'))),
+        );
+        assert_eq!(state.screen, ScreenId::PackSelection);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+    }
+
+    #[test]
+    fn retry_replays_the_current_screen_action() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::MethodSelection;
+        state.request_draft.pack_id = Some("openclaw".into());
+        state.profiles = vec![ProfileManifest {
+            schema_version: 1,
+            id: "builder".into(),
+            display_name: "Builder".into(),
+            description: None,
+            supported_packs: vec!["openclaw".into()],
+            default_method: Some(DeployMethodId::Cfn),
+            default_region: Some("us-east-1".into()),
+            config: Default::default(),
+            tags: Default::default(),
+        }];
+        state.methods = vec![MethodManifest {
+            schema_version: 1,
+            id: DeployMethodId::Cfn,
+            display_name: "CloudFormation".into(),
+            description: None,
+            requires_stack_name: true,
+            requires_region: true,
+            required_tools: vec!["aws".into()],
+            supports_resume: true,
+            supports_uninstall: true,
+            input_schema: Default::default(),
+        }];
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::KeyPressed(key(KeyCode::Char('r'))),
+        );
+        assert!(matches!(
+            actions.as_slice(),
+            [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"
+        ));
     }
 }

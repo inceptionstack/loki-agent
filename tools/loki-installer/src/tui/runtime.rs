@@ -7,16 +7,17 @@ use crate::tui::screens;
 use crate::tui::update::{AppAction, update};
 use color_eyre::Result;
 use crossterm::{
-    event::{self, Event},
+    event::{Event, EventStream},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use futures::StreamExt;
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Modifier, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 use std::collections::VecDeque;
 use std::io::{self, Stdout};
@@ -28,12 +29,13 @@ pub async fn run(planner: Planner) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut state = AppState::default();
+    let mut events = EventStream::new();
 
     let mut pending = VecDeque::from(update(&mut state, InstallerEvent::AppStarted));
     while state.lifecycle == AppLifecycle::Running {
         run_actions(&planner, &mut state, &mut pending, &mut terminal).await?;
-        if event::poll(std::time::Duration::from_millis(250))? {
-            match event::read()? {
+        if let Some(event) = events.next().await {
+            match event? {
                 Event::Key(key) => {
                     pending.extend(update(&mut state, InstallerEvent::KeyPressed(key)))
                 }
@@ -173,14 +175,52 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
             Paragraph::new(footer_text(state)).style(Style::default().add_modifier(Modifier::BOLD)),
             areas[1],
         );
+
+        if state.ui.help_visible {
+            let help_area = centered_rect(66, 14, frame.area());
+            frame.render_widget(Clear, help_area);
+            frame.render_widget(
+                Paragraph::new(help_text())
+                    .block(Block::default().title("Help").borders(Borders::ALL)),
+                help_area,
+            );
+        }
     })?;
     Ok(())
 }
 
 fn footer_text(state: &AppState) -> String {
+    if state.ui.help_visible {
+        return "Help open | Esc close | q quit".into();
+    }
+
     state
         .errors
         .last()
-        .map(|error| format!("Error: {} | q quit | b back", error.message))
-        .unwrap_or_else(|| "Hints: Enter next | b back | q quit | arrows move".into())
+        .map(|error| format!("Error: {} | ? help | q quit | b/h back", error.message))
+        .unwrap_or_else(|| {
+            "Hints: Enter/Tab/l next | Space select | b/h back | arrows move | ? help | q quit"
+                .into()
+        })
+}
+
+fn help_text() -> &'static str {
+    "Enter, Tab, Right, l: next\n\
+Space: select current item\n\
+Left, BackTab, b, h: back\n\
+Up/Down, j/k: move\n\
+r: retry current load or action when available\n\
+?: toggle help\n\
+Esc: close help\n\
+q or Ctrl+C: quit"
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let [vertical] = Layout::vertical([Constraint::Length(height)])
+        .flex(Flex::Center)
+        .areas(area);
+    let [horizontal] = Layout::horizontal([Constraint::Length(width)])
+        .flex(Flex::Center)
+        .areas(vertical);
+    horizontal
 }

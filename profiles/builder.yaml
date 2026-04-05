@@ -3,6 +3,7 @@ id: builder
 display_name: Builder
 description: Full-access builder profile for development and operator workflows.
 supported_packs:
+  - bedrockify
   - openclaw
   - claude-code
   - hermes

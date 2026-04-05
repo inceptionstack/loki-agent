@@ -1,5 +1,6 @@
 use loki_installer::core::{DeployMethodId, ManifestRepository};
 use std::collections::BTreeSet;
+use std::fs;
 
 #[test]
 fn installer_manifests_load_and_validate_from_repo_yaml() {
@@ -64,4 +65,41 @@ fn method_manifests_load_from_actual_yaml_files() {
         .expect("load terraform method")
         .validate_contract()
         .expect("valid terraform method");
+}
+
+#[test]
+fn every_pack_directory_with_installer_content_has_a_contract_manifest() {
+    let repo = ManifestRepository::discover().expect("repo discovery");
+    let packs_dir = repo.root().join("packs");
+
+    let mut discovered_pack_ids = BTreeSet::new();
+    for entry in fs::read_dir(&packs_dir).expect("read packs dir") {
+        let entry = entry.expect("pack dir entry");
+        if !entry.path().is_dir() {
+            continue;
+        }
+
+        let install_script = entry.path().join("install.sh");
+        let manifest = entry.path().join("manifest.yaml");
+        if !install_script.exists() {
+            continue;
+        }
+
+        assert!(
+            manifest.exists(),
+            "expected {} to exist for pack directory {}",
+            manifest.display(),
+            entry.file_name().to_string_lossy()
+        );
+
+        let pack = repo
+            .load_pack(&entry.file_name().to_string_lossy())
+            .expect("load pack manifest");
+        pack.validate_contract().expect("valid pack manifest");
+        discovered_pack_ids.insert(pack.id);
+    }
+
+    assert!(discovered_pack_ids.contains("bedrockify"));
+    assert!(discovered_pack_ids.contains("openclaw"));
+    assert!(discovered_pack_ids.contains("nemoclaw"));
 }

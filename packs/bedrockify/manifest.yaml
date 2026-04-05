@@ -1,39 +1,34 @@
-name: bedrockify
-version: "1.0.0"
-type: base
-description: "OpenAI-compatible proxy for Amazon Bedrock"
-
-deps: []
-
-requirements:
-  arch:
-    - arm64
-    - amd64
-  os:
-    - al2023
-    - ubuntu2204
-
-params:
-  - name: region
-    description: "AWS region for Bedrock"
-    default: us-east-1
-  - name: port
-    description: "Proxy listen port"
-    default: "8090"
-  - name: model
-    description: "Default Bedrock chat model"
-    default: "us.anthropic.claude-opus-4-6-v1"
-  - name: embed-model
-    description: "Default Bedrock embedding model"
-    default: "amazon.titan-embed-text-v2:0"
-
-health_check:
-  url: "http://127.0.0.1:${port}/"
-  expect: '"status":"ok"'
-  timeout: 15
-
-provides:
-  commands:
-    - bedrockify
-  services:
-    - bedrockify
+schema_version: 1
+id: bedrockify
+display_name: Bedrockify
+description: OpenAI-compatible proxy for Amazon Bedrock.
+experimental: false
+allowed_profiles:
+  - builder
+  - account_assistant
+  - personal_assistant
+supported_methods:
+  - cfn
+  - terraform
+default_profile: builder
+default_method: cfn
+default_region: us-east-1
+post_install:
+  - ssm_session
+required_env: []
+extra_options_schema:
+  model:
+    value_type: string
+    required: false
+    default_value: us.anthropic.claude-opus-4-6-v1
+    description: Default Bedrock chat model served by the proxy.
+  embed_model:
+    value_type: string
+    required: false
+    default_value: amazon.titan-embed-text-v2:0
+    description: Default Bedrock embedding model served by the proxy.
+  bedrockify_port:
+    value_type: integer
+    required: false
+    default_value: "8090"
+    description: Local port where the proxy listens.

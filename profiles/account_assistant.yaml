@@ -3,6 +3,7 @@ id: account_assistant
 display_name: Account Assistant
 description: Constrained account-scoped assistant profile with Bedrock access.
 supported_packs:
+  - bedrockify
   - openclaw
   - claude-code
   - hermes
