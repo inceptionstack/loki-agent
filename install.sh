@@ -7,7 +7,7 @@ fi
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 BOOTSTRAP_LOG="${TMPDIR:-/tmp}/loki-installer-bootstrap.log"
 V1_SCRIPT="${LOKI_INSTALLER_V1_SCRIPT:-$SCRIPT_DIR/scripts/install-v1.sh}"
 V2_REPO="${LOKI_INSTALLER_V2_REPO:-inceptionstack/loki-agent}"

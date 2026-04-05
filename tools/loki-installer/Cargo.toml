@@ -1,6 +1,6 @@
 [package]
 name = "loki-installer"
-version = "0.1.0"
+version = "0.2.0-rc4"
 edition = "2024"
 description = "Rust implementation of the Loki Installer V2 CLI, planner, TUI, and session runtime"
 license = "Apache-2.0"
