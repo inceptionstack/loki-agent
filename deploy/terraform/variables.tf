@@ -168,6 +168,17 @@ variable "request_quota_increases" {
   }
 }
 
+variable "enable_bedrock_form" {
+  type        = string
+  default     = "false"
+  description = "Submit the Bedrock model access use-case form. Only needed once per account — skip if Bedrock is already enabled."
+
+  validation {
+    condition     = contains(["true", "false"], var.enable_bedrock_form)
+    error_message = "Must be true or false."
+  }
+}
+
 variable "enable_security_hub" {
   type        = bool
   default     = true

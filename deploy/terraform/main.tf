@@ -208,7 +208,8 @@ resource "aws_iam_instance_profile" "main" {
 # Bedrock Model Access (Lambda + invocation)
 # ============================================================================
 resource "aws_iam_role" "bedrock_form_lambda" {
-  name = "${var.environment_name}-bedrock-form-role"
+  count = var.enable_bedrock_form == "true" ? 1 : 0
+  name  = "${var.environment_name}-bedrock-form-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -221,13 +222,15 @@ resource "aws_iam_role" "bedrock_form_lambda" {
 }
 
 resource "aws_iam_role_policy_attachment" "bedrock_form_lambda_basic" {
-  role       = aws_iam_role.bedrock_form_lambda.name
+  count      = var.enable_bedrock_form == "true" ? 1 : 0
+  role       = aws_iam_role.bedrock_form_lambda[0].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 resource "aws_iam_role_policy" "bedrock_form" {
-  name = "bedrock-form"
-  role = aws_iam_role.bedrock_form_lambda.id
+  count = var.enable_bedrock_form == "true" ? 1 : 0
+  name  = "bedrock-form"
+  role  = aws_iam_role.bedrock_form_lambda[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -254,6 +257,7 @@ resource "aws_iam_role_policy" "bedrock_form" {
 }
 
 data "archive_file" "bedrock_form" {
+  count       = var.enable_bedrock_form == "true" ? 1 : 0
   type        = "zip"
   output_path = "${path.module}/.lambda_zips/bedrock_form.zip"
 
@@ -330,18 +334,20 @@ def handler(event, context):
 }
 
 resource "aws_lambda_function" "bedrock_form" {
+  count            = var.enable_bedrock_form == "true" ? 1 : 0
   function_name    = "${var.environment_name}-bedrock-form"
-  role             = aws_iam_role.bedrock_form_lambda.arn
+  role             = aws_iam_role.bedrock_form_lambda[0].arn
   handler          = "index.handler"
   runtime          = "python3.12"
   timeout          = 120
-  filename         = data.archive_file.bedrock_form.output_path
-  source_code_hash = data.archive_file.bedrock_form.output_base64sha256
+  filename         = data.archive_file.bedrock_form[0].output_path
+  source_code_hash = data.archive_file.bedrock_form[0].output_base64sha256
 
   depends_on = [aws_iam_role_policy.bedrock_form]
 }
 
 resource "null_resource" "bedrock_form_invoke" {
+  count      = var.enable_bedrock_form == "true" ? 1 : 0
   depends_on = [aws_lambda_function.bedrock_form]
 
   provisioner "local-exec" {
