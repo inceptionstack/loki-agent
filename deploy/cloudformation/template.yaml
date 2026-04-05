@@ -247,6 +247,12 @@ Parameters:
     NoEcho: true
     Description: "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
 
+  EnableBedrockForm:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: "Submit the Bedrock model access use-case form. Only needed once per account — skip if Bedrock is already enabled."
+
   RequestQuotaIncreases:
     Type: String
     Default: 'false'
@@ -331,6 +337,7 @@ Conditions:
   IsPersonalAssistant: !Equals [!Ref ProfileName, 'personal_assistant']
   NeedsAdminUser: !Condition IsBuilder
   RunSecurityServices: !Not [!Condition IsPersonalAssistant]
+  RunBedrockForm: !Equals [!Ref EnableBedrockForm, 'true']
 
 # ============================================================================
 # RESOURCES
@@ -618,6 +625,7 @@ Resources:
   # --------------------------------------------------------------------------
   BedrockFormLambdaRole:
     Type: AWS::IAM::Role
+    Condition: RunBedrockForm
     Properties:
       RoleName: !Sub '${EnvironmentName}-bedrock-form-role'
       AssumeRolePolicyDocument:
@@ -648,6 +656,7 @@ Resources:
 
   BedrockFormFunction:
     Type: AWS::Lambda::Function
+    Condition: RunBedrockForm
     Properties:
       FunctionName: !Sub '${EnvironmentName}-bedrock-form'
       Runtime: python3.12
@@ -756,6 +765,7 @@ Resources:
 
   BedrockFormCustomResource:
     Type: Custom::BedrockForm
+    Condition: RunBedrockForm
     DependsOn: BedrockFormLambdaRole
     Properties:
       ServiceToken: !GetAtt BedrockFormFunction.Arn
@@ -1093,8 +1103,6 @@ Resources:
   # --------------------------------------------------------------------------
   Instance:
     Type: AWS::EC2::Instance
-    DependsOn:
-      - BedrockFormCustomResource
     CreationPolicy:
       ResourceSignal:
         Timeout: PT30M
