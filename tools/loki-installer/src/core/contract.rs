@@ -431,6 +431,8 @@ pub enum AdapterValidationError {
 pub enum AdapterError {
     #[error("session is not resumable")]
     NotResumable,
+    #[error("{0}")]
+    Message(String),
 }
 
 #[async_trait]

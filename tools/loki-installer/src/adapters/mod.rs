@@ -1,6 +1,7 @@
 //! Deployment adapter selection and shared test sinks.
 
 mod cfn;
+mod support;
 mod terraform;
 
 use crate::core::{DeployAdapter, InstallEvent, InstallEventSink};

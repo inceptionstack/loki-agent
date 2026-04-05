@@ -1,5 +1,6 @@
 //! Terraform deployment adapter.
 
+use crate::adapters::support::{CommandOutput, CommandSpec, resolve_repo_path, run_command};
 use crate::core::{
     AdapterError, AdapterPlan, AdapterValidationError, ApplyResult, DeployAction, DeployAdapter,
     DeployMethodId, DeployStatus, DeployStep, InstallEvent, InstallEventSink, InstallPhase,
@@ -7,10 +8,28 @@ use crate::core::{
     PostInstallStep, PrerequisiteCheck, PrerequisiteKind, ProfileManifest, UninstallResult,
     update_session_phase,
 };
+use serde::Deserialize;
 use std::collections::BTreeMap;
-use tokio::time::{Duration, sleep};
+use std::path::Path;
 
 pub struct TerraformAdapter;
+
+#[derive(Debug, Clone)]
+struct TerraformContext {
+    working_dir: String,
+    plan_file: String,
+    region: String,
+    pack: String,
+    profile: String,
+    environment_name: String,
+    default_model: Option<String>,
+    gateway_port: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TerraformOutputValue {
+    value: serde_json::Value,
+}
 
 #[async_trait::async_trait]
 impl DeployAdapter for TerraformAdapter {
@@ -58,7 +77,7 @@ impl DeployAdapter for TerraformAdapter {
                     display_name: "Initialize Terraform".into(),
                     action: DeployAction::RunCommand {
                         program: "terraform".into(),
-                        args: vec!["init".into()],
+                        args: vec!["init".into(), "-input=false".into()],
                     },
                 },
                 DeployStep {
@@ -67,7 +86,7 @@ impl DeployAdapter for TerraformAdapter {
                     display_name: "Plan Terraform changes".into(),
                     action: DeployAction::RunCommand {
                         program: "terraform".into(),
-                        args: vec!["plan".into()],
+                        args: vec!["plan".into(), "-input=false".into()],
                     },
                 },
                 DeployStep {
@@ -76,13 +95,17 @@ impl DeployAdapter for TerraformAdapter {
                     display_name: "Apply Terraform changes".into(),
                     action: DeployAction::RunCommand {
                         program: "terraform".into(),
-                        args: vec!["apply".into(), "-auto-approve".into()],
+                        args: vec![
+                            "apply".into(),
+                            "-input=false".into(),
+                            "-auto-approve".into(),
+                        ],
                     },
                 },
                 DeployStep {
                     id: "terraform-health".into(),
                     phase: InstallPhase::PostInstall,
-                    display_name: "Check deployment health".into(),
+                    display_name: "Capture Terraform outputs".into(),
                     action: DeployAction::VerifyInstanceHealth,
                 },
             ],
@@ -105,7 +128,7 @@ impl DeployAdapter for TerraformAdapter {
         session: &mut InstallSession,
         event_sink: &mut dyn InstallEventSink,
     ) -> Result<ApplyResult, AdapterError> {
-        run_stubbed_apply(plan, session, event_sink).await
+        apply_terraform(plan, session, event_sink).await
     }
 
     async fn resume(
@@ -114,7 +137,7 @@ impl DeployAdapter for TerraformAdapter {
         event_sink: &mut dyn InstallEventSink,
     ) -> Result<ApplyResult, AdapterError> {
         let plan = session.plan.clone().ok_or(AdapterError::NotResumable)?;
-        run_stubbed_apply(&plan, session, event_sink).await
+        apply_terraform(&plan, session, event_sink).await
     }
 
     async fn uninstall(
@@ -152,49 +175,408 @@ impl DeployAdapter for TerraformAdapter {
             stack_name: plan
                 .and_then(|plan| plan.resolved_stack_name.clone())
                 .or_else(|| session.request.stack_name.clone()),
-            stack_status: Some("terraform_applied".into()),
+            stack_status: session
+                .artifacts
+                .get("stack_status")
+                .cloned()
+                .or(Some("terraform_applied".into())),
             instance_health: session.artifacts.get("instance_health").cloned(),
             last_updated_at: session.updated_at,
         })
     }
 }
 
-async fn run_stubbed_apply(
+impl TerraformContext {
+    fn from_plan(plan: &InstallPlan) -> Result<Self, AdapterError> {
+        let working_dir = resolve_repo_path(
+            plan.adapter_options
+                .get("working_dir")
+                .map(String::as_str)
+                .unwrap_or("deploy/terraform"),
+        )?;
+        let environment_name = plan
+            .resolved_stack_name
+            .clone()
+            .unwrap_or_else(|| format!("loki-{}", plan.resolved_pack.id));
+
+        Ok(Self {
+            plan_file: Path::new(&working_dir)
+                .join("tfplan")
+                .display()
+                .to_string(),
+            working_dir,
+            region: plan.resolved_region.clone(),
+            pack: plan.resolved_pack.id.clone(),
+            profile: plan.resolved_profile.id.clone(),
+            environment_name,
+            default_model: plan.adapter_options.get("model").cloned(),
+            gateway_port: plan.adapter_options.get("port").cloned(),
+        })
+    }
+}
+
+async fn apply_terraform(
     plan: &InstallPlan,
     session: &mut InstallSession,
     event_sink: &mut dyn InstallEventSink,
 ) -> Result<ApplyResult, AdapterError> {
+    let context = TerraformContext::from_plan(plan)?;
+    if !Path::new(&context.working_dir).exists() {
+        return Err(AdapterError::Message(format!(
+            "Terraform working directory not found at {} — verify the repo checkout includes deploy/terraform",
+            context.working_dir
+        )));
+    }
+
     let mut artifacts = BTreeMap::new();
+
     for step in &plan.deploy_steps {
-        update_session_phase(session, step.phase);
-        event_sink
-            .emit(InstallEvent::PhaseStarted {
-                phase: step.phase,
-                message: step.display_name.clone(),
-            })
-            .await;
-        event_sink
-            .emit(InstallEvent::StepStarted {
-                step_id: step.id.clone(),
-                message: step.display_name.clone(),
-            })
-            .await;
-        sleep(Duration::from_millis(50)).await;
-        event_sink
-            .emit(InstallEvent::StepFinished {
-                step_id: step.id.clone(),
-                message: "completed".into(),
-            })
-            .await;
+        emit_step_started(session, event_sink, step).await;
+
+        match step.id.as_str() {
+            "terraform-init" => {
+                let output = run_command(&build_terraform_init_command(&context.working_dir)).await?;
+                ensure_terraform_success(
+                    &output,
+                    "Terraform init failed — run terraform init manually in deploy/terraform for details",
+                )?;
+                record_command_artifact("terraform_init_output", output, &mut artifacts, event_sink)
+                    .await;
+            }
+            "terraform-plan" => {
+                let output = run_command(&build_terraform_plan_command(
+                    &context.working_dir,
+                    &context.plan_file,
+                    &context.region,
+                    &context.pack,
+                    &context.profile,
+                    &context.environment_name,
+                    context.default_model.as_deref(),
+                    context.gateway_port.as_deref(),
+                ))
+                .await?;
+                ensure_terraform_success(
+                    &output,
+                    "Terraform plan failed — fix the reported variable or provider issue and retry",
+                )?;
+                record_command_artifact("terraform_plan_output", output, &mut artifacts, event_sink)
+                    .await;
+            }
+            "terraform-apply" => {
+                let output = run_command(&build_terraform_apply_command(
+                    &context.working_dir,
+                    &context.plan_file,
+                ))
+                .await?;
+                ensure_terraform_success(
+                    &output,
+                    "Terraform apply failed — inspect the Terraform output for the rejected AWS resource or permission",
+                )?;
+                record_command_artifact(
+                    "terraform_apply_output",
+                    output,
+                    &mut artifacts,
+                    event_sink,
+                )
+                .await;
+            }
+            "terraform-health" => {
+                let output =
+                    run_command(&build_terraform_output_command(&context.working_dir)).await?;
+                ensure_terraform_success(
+                    &output,
+                    "Terraform output failed — run terraform output -json in deploy/terraform",
+                )?;
+                for (key, value) in parse_terraform_outputs(&output.stdout)? {
+                    artifacts.insert(key.clone(), value.clone());
+                    event_sink
+                        .emit(InstallEvent::ArtifactRecorded { key, value })
+                        .await;
+                }
+                artifacts.insert("stack_status".into(), "terraform_applied".into());
+                artifacts.insert("instance_health".into(), "unknown".into());
+            }
+            _ => {}
+        }
+
+        emit_step_finished(event_sink, step, "completed").await;
     }
 
     update_session_phase(session, InstallPhase::PostInstall);
-    artifacts.insert("terraform_state".into(), "applied".into());
-    artifacts.insert("instance_health".into(), "healthy".into());
+    session.artifacts.extend(artifacts.clone());
 
     Ok(ApplyResult {
         final_phase: InstallPhase::PostInstall,
         artifacts,
         post_install_steps: plan.post_install_steps.clone(),
     })
+}
+
+fn build_terraform_init_command(working_dir: &str) -> CommandSpec {
+    CommandSpec {
+        program: "terraform".into(),
+        args: vec![
+            format!("-chdir={working_dir}"),
+            "init".into(),
+            "-input=false".into(),
+        ],
+        current_dir: None,
+    }
+}
+
+fn build_terraform_plan_command(
+    working_dir: &str,
+    plan_file: &str,
+    region: &str,
+    pack: &str,
+    profile: &str,
+    environment_name: &str,
+    default_model: Option<&str>,
+    gateway_port: Option<&str>,
+) -> CommandSpec {
+    let mut args = vec![
+        format!("-chdir={working_dir}"),
+        "plan".into(),
+        "-input=false".into(),
+        format!("-out={plan_file}"),
+        format!("-var=aws_region={region}"),
+        format!("-var=pack_name={pack}"),
+        format!("-var=profile_name={profile}"),
+        format!("-var=environment_name={environment_name}"),
+    ];
+    if let Some(default_model) = default_model {
+        args.push(format!("-var=default_model={default_model}"));
+    }
+    if let Some(gateway_port) = gateway_port {
+        args.push(format!("-var=openclaw_gateway_port={gateway_port}"));
+    }
+
+    CommandSpec {
+        program: "terraform".into(),
+        args,
+        current_dir: None,
+    }
+}
+
+fn build_terraform_apply_command(working_dir: &str, plan_file: &str) -> CommandSpec {
+    CommandSpec {
+        program: "terraform".into(),
+        args: vec![
+            format!("-chdir={working_dir}"),
+            "apply".into(),
+            "-input=false".into(),
+            "-auto-approve".into(),
+            plan_file.into(),
+        ],
+        current_dir: None,
+    }
+}
+
+fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
+    CommandSpec {
+        program: "terraform".into(),
+        args: vec![
+            format!("-chdir={working_dir}"),
+            "output".into(),
+            "-json".into(),
+        ],
+        current_dir: None,
+    }
+}
+
+fn parse_terraform_outputs(raw: &str) -> Result<BTreeMap<String, String>, AdapterError> {
+    let parsed: BTreeMap<String, TerraformOutputValue> =
+        serde_json::from_str(raw).map_err(|source| {
+            AdapterError::Message(format!("Failed to parse terraform output JSON — {source}"))
+        })?;
+
+    let mut artifacts = BTreeMap::new();
+    artifacts.insert("terraform_output_json".into(), raw.to_string());
+
+    for (key, value) in parsed {
+        let text = match value.value {
+            serde_json::Value::String(text) => text,
+            other => other.to_string(),
+        };
+        match key.as_str() {
+            "instance_id" | "public_ip" | "private_ip" | "vpc_id" | "security_group_id"
+            | "role_arn" | "ssm_connect" | "pack_name" | "profile_name" => {
+                artifacts.insert(key, text);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(artifacts)
+}
+
+fn ensure_terraform_success(output: &CommandOutput, default_message: &str) -> Result<(), AdapterError> {
+    if output.success() {
+        return Ok(());
+    }
+
+    let stderr = output.stderr.trim();
+    if stderr.contains("No such file or directory") || stderr.contains("command not found") {
+        return Err(AdapterError::Message(
+            "Terraform CLI not found — install terraform and re-run the installer".into(),
+        ));
+    }
+
+    if stderr.contains("No valid credential sources found")
+        || stderr.contains("failed to refresh cached credentials")
+    {
+        return Err(AdapterError::Message(
+            "AWS credentials not found — run aws configure or export AWS_ACCESS_KEY_ID".into(),
+        ));
+    }
+
+    let mut message = default_message.to_string();
+    if !stderr.is_empty() {
+        message.push_str(": ");
+        message.push_str(stderr);
+    } else if !output.stdout.is_empty() {
+        message.push_str(": ");
+        message.push_str(output.stdout.trim());
+    }
+    Err(AdapterError::Message(message))
+}
+
+async fn record_command_artifact(
+    key: &str,
+    output: CommandOutput,
+    artifacts: &mut BTreeMap<String, String>,
+    event_sink: &mut dyn InstallEventSink,
+) {
+    let value = if output.stdout.is_empty() {
+        output.stderr
+    } else {
+        output.stdout
+    };
+    artifacts.insert(key.into(), value.clone());
+    event_sink
+        .emit(InstallEvent::ArtifactRecorded {
+            key: key.into(),
+            value,
+        })
+        .await;
+}
+
+async fn emit_step_started(
+    session: &mut InstallSession,
+    event_sink: &mut dyn InstallEventSink,
+    step: &DeployStep,
+) {
+    update_session_phase(session, step.phase);
+    event_sink
+        .emit(InstallEvent::PhaseStarted {
+            phase: step.phase,
+            message: step.display_name.clone(),
+        })
+        .await;
+    event_sink
+        .emit(InstallEvent::StepStarted {
+            step_id: step.id.clone(),
+            message: step.display_name.clone(),
+        })
+        .await;
+}
+
+async fn emit_step_finished(
+    event_sink: &mut dyn InstallEventSink,
+    step: &DeployStep,
+    message: &str,
+) {
+    event_sink
+        .emit(InstallEvent::StepFinished {
+            step_id: step.id.clone(),
+            message: message.into(),
+        })
+        .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_terraform_apply_command, build_terraform_init_command, build_terraform_plan_command,
+        parse_terraform_outputs,
+    };
+
+    #[test]
+    fn terraform_init_command_uses_working_dir_and_non_interactive_flags() {
+        let command = build_terraform_init_command("/tmp/repo/deploy/terraform");
+        assert_eq!(command.program, "terraform");
+        assert_eq!(
+            command.args,
+            vec![
+                "-chdir=/tmp/repo/deploy/terraform",
+                "init",
+                "-input=false",
+            ]
+        );
+    }
+
+    #[test]
+    fn terraform_plan_command_includes_outfile_and_tf_vars() {
+        let command = build_terraform_plan_command(
+            "/tmp/repo/deploy/terraform",
+            "/tmp/repo/deploy/terraform/tfplan",
+            "us-east-1",
+            "openclaw",
+            "builder",
+            "loki-openclaw",
+            Some("us.anthropic.claude-opus-4-6-v1"),
+            Some("3001"),
+        );
+        assert_eq!(command.program, "terraform");
+        assert!(command.args.contains(&"plan".into()));
+        assert!(command.args.contains(&"-input=false".into()));
+        assert!(command
+            .args
+            .contains(&"-out=/tmp/repo/deploy/terraform/tfplan".into()));
+        assert!(command.args.contains(&"-var=aws_region=us-east-1".into()));
+        assert!(command.args.contains(&"-var=pack_name=openclaw".into()));
+        assert!(command.args.contains(&"-var=profile_name=builder".into()));
+        assert!(command
+            .args
+            .contains(&"-var=environment_name=loki-openclaw".into()));
+        assert!(command
+            .args
+            .contains(&"-var=default_model=us.anthropic.claude-opus-4-6-v1".into()));
+        assert!(command
+            .args
+            .contains(&"-var=openclaw_gateway_port=3001".into()));
+    }
+
+    #[test]
+    fn terraform_apply_command_uses_saved_plan() {
+        let command =
+            build_terraform_apply_command("/tmp/repo/deploy/terraform", "/tmp/repo/tfplan");
+        assert_eq!(command.program, "terraform");
+        assert_eq!(
+            command.args,
+            vec![
+                "-chdir=/tmp/repo/deploy/terraform",
+                "apply",
+                "-input=false",
+                "-auto-approve",
+                "/tmp/repo/tfplan",
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_terraform_outputs_extracts_instance_id_and_public_ip() {
+        let artifacts = parse_terraform_outputs(
+            r#"{
+              "instance_id": {"value": "i-123"},
+              "public_ip": {"value": "1.2.3.4"},
+              "role_arn": {"value": "arn:aws:iam::123456789012:role/example"}
+            }"#,
+        )
+        .expect("parse terraform outputs");
+
+        assert_eq!(artifacts.get("instance_id"), Some(&"i-123".into()));
+        assert_eq!(artifacts.get("public_ip"), Some(&"1.2.3.4".into()));
+        assert!(artifacts.get("terraform_output_json").is_some());
+    }
 }
