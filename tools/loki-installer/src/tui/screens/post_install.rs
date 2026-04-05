@@ -35,7 +35,7 @@ pub fn content(state: &AppState) -> Text<'static> {
         .map(|plan| plan.resolved_region.clone())
         .or_else(|| session.request.region.clone())
         .unwrap_or_else(|| "<region>".into());
-    let public_ip = session
+    let _public_ip = session
         .artifacts
         .get("public_ip")
         .cloned()
@@ -62,8 +62,8 @@ pub fn content(state: &AppState) -> Text<'static> {
         label_value_line("Region: ", &region),
     ];
 
-    if let Some(instance_id) = instance_id {
-        lines.push(label_value_line("Instance: ", &instance_id));
+    if let Some(ref instance_id) = instance_id {
+        lines.push(label_value_line("Instance: ", instance_id));
     }
 
     lines.extend([
@@ -75,10 +75,13 @@ pub fn content(state: &AppState) -> Text<'static> {
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(vec![Span::styled(
-            "1. SSH into your instance:",
+            "1. Connect to your instance via SSM:",
             Style::default().fg(Color::Cyan),
         )]),
-        command_line(format!("   ssh -i ~/.ssh/<key>.pem ec2-user@{public_ip}")),
+        command_line(format!(
+            "   aws ssm start-session --target {} --region {region}",
+            instance_id.as_deref().unwrap_or("<instance-id>")
+        )),
         Line::from(vec![Span::styled(
             "2. Set your Telegram bot token:",
             Style::default().fg(Color::Cyan),
@@ -180,7 +183,7 @@ mod tests {
         assert!(rendered.contains("Stack: loki-openclaw"));
         assert!(rendered.contains("Region: us-east-1"));
         assert!(rendered.contains("Instance: i-123"));
-        assert!(rendered.contains("ssh -i ~/.ssh/<key>.pem ec2-user@1.2.3.4"));
+        assert!(rendered.contains("aws ssm start-session --target i-123 --region us-east-1"));
         assert!(rendered.contains("https://docs.openclaw.ai/getting-started"));
         assert!(rendered.contains("Press q to exit"));
     }

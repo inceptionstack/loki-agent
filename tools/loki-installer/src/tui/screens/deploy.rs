@@ -9,6 +9,10 @@ use ratatui::{
 pub const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 pub fn content(state: &AppState) -> Text<'static> {
+    content_with_width(state, 80)
+}
+
+pub fn content_with_width(state: &AppState, max_width: usize) -> Text<'static> {
     let mut lines = vec![Line::from("Deployment progress"), Line::from("")];
     if let Some(phase) = state.deployment.current_phase {
         lines.push(Line::from(vec![
@@ -70,8 +74,9 @@ pub fn content(state: &AppState) -> Text<'static> {
     let start = end.saturating_sub(visible_lines);
     for line in &state.deployment.logs[start..end] {
         // Truncate long lines to avoid horizontal overflow
-        let display = if line.len() > 120 {
-            format!(" - {}…", &line[..120])
+        let max_line = max_width.saturating_sub(6);
+        let display = if line.len() > max_line {
+            format!(" - {}…", &line[..max_line])
         } else {
             format!(" - {line}")
         };

@@ -329,7 +329,7 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -
             ScreenId::ProfileSelection => screens::profile_select::content(state),
             ScreenId::MethodSelection => screens::method_select::content(state),
             ScreenId::Review => screens::review::content(state),
-            ScreenId::DeployProgress => screens::deploy::content(state),
+            ScreenId::DeployProgress => screens::deploy::content_with_width(state, body[1].width as usize),
             ScreenId::PostInstall => screens::post_install::content(state),
         };
 
