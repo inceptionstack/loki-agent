@@ -4,6 +4,7 @@
 # Flags: --non-interactive / -y  Accept all defaults, minimal prompts
 #        --pack <name>           Pre-select agent pack (e.g. --pack claude-code, --pack openclaw)
 #        --method <m>            Pre-select deploy method: cfn, terraform (or tf)
+#        --debug-in-repo         Copy local repo to /tmp instead of cloning (for local testing)
 
 # Require bash — printf -v and other bashisms won't work in dash/sh
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -12,23 +13,51 @@ fi
 
 set -euo pipefail
 
+# Save original dir before changing (needed for --debug-in-repo)
+_ORIG_DIR="$(pwd)"
 # Ensure we run from a safe CWD — avoid interference from local .env, direnv, etc.
+# (--debug-in-repo will cd back after arg parsing)
 cd "$HOME" 2>/dev/null || cd /tmp
 
 export AWS_PAGER=""
 export PAGER=""
 aws() { command aws --no-cli-pager "$@"; }
 
-# Catch unexpected exits so they're not silent; clean up temp clone dir if set
-trap '
-  echo -e "\n\033[0;31m✗ Installer exited unexpectedly at line $LINENO\033[0m" >&2
+# Persistent log file for debugging (survives script exit)
+INSTALL_LOG="/tmp/loki-install.log"
+: > "$INSTALL_LOG"
+
+show_debug_locations() {
+  echo -e "\033[1;33m  Debug info:\033[0m" >&2
+  if [[ -s "${INSTALL_LOG:-}" ]]; then
+    echo -e "\033[1;33m    Installer log:  ${INSTALL_LOG}\033[0m" >&2
+  fi
+  if [[ -s "${_TF_LOG:-}" ]]; then
+    echo -e "\033[1;33m    Terraform log:  ${_TF_LOG}\033[0m" >&2
+  fi
   if [[ -n "${CLONE_DIR:-}" && "${CLONE_DIR}" == /tmp/* && -d "$CLONE_DIR" ]]; then
-    echo -e "\033[1;33m⚠ Temp clone directory left at: ${CLONE_DIR}\033[0m" >&2
+    echo -e "\033[1;33m    Clone dir:      ${CLONE_DIR}\033[0m" >&2
   fi
   if [[ -n "${TF_WORKDIR:-}" && -d "$TF_WORKDIR" ]]; then
-    echo -e "\033[1;33m⚠ Temp Terraform workdir left at: ${TF_WORKDIR}\033[0m" >&2
+    echo -e "\033[1;33m    Terraform dir:  ${TF_WORKDIR}\033[0m" >&2
   fi
-' ERR
+}
+
+# Ctrl-C: kill background jobs and exit immediately
+trap '
+  echo -e "\n\033[0;31m✗ Interrupted\033[0m" >&2
+  kill 0 2>/dev/null
+  exit 130
+' INT
+
+# Always show debug info on non-zero exit (EXIT trap is more reliable than ERR)
+trap '
+  exit_code=$?
+  if [[ $exit_code -ne 0 ]]; then
+    echo -e "\n\033[0;31m✗ Installer failed (exit code $exit_code)\033[0m" >&2
+    show_debug_locations
+  fi
+' EXIT
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
@@ -44,6 +73,7 @@ AUTO_YES=false
 PRESELECT_PACK=""
 PRESELECT_METHOD=""
 PRESELECT_PROFILE=""
+DEBUG_IN_REPO=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
@@ -65,17 +95,30 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       PRESELECT_PROFILE="$2"; shift 2 ;;
+    --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
     *) shift ;;
   esac
 done
+
+# If --debug-in-repo, go back to the original directory (before cd $HOME)
+if [[ "$DEBUG_IN_REPO" == "true" ]]; then
+  cd "$_ORIG_DIR"
+fi
+SCRIPT_DIR="$_ORIG_DIR"
+
+# Debug logging — writes to install log only, never to terminal
+dbg() {
+  [[ "$DEBUG_IN_REPO" == "true" ]] && echo "[DBG] $*" >> "$INSTALL_LOG"
+  return 0
+}
 
 # Deploy method constants
 DEPLOY_CFN_CONSOLE=1
 DEPLOY_CFN_CLI=2
 DEPLOY_TERRAFORM=3
 # Stamped at release; fall back to git info at runtime
-INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$(dirname "$0")" rev-parse --short HEAD 2>/dev/null || echo dev)}"
-INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$(dirname "$0")" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
+INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)}"
+INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
 IS_CLOUDSHELL=false
@@ -84,14 +127,105 @@ if [[ -n "${AWS_EXECUTION_ENV:-}" && "${AWS_EXECUTION_ENV}" == *"CloudShell"* ]]
 fi
 
 # ============================================================================
+# gum — UI toolkit (installed to /tmp, no root required)
+# ============================================================================
+GUM=""  # set by install_gum — required, script fails without it
+GUM_VERSION="0.14.5"  # fallback version
+
+# ── Shared platform detection ────────────────────────────────────────────────
+# Sets DETECTED_OS and DETECTED_ARCH. Accepts optional arch style:
+#   "go"  → amd64/arm64  (Terraform, Go binaries)
+#   default → x86_64/arm64 (gum, generic)
+DETECTED_OS=""
+DETECTED_ARCH=""
+
+# Get real hardware arch (uname -m and sysctl hw.machine lie under Rosetta)
+hw_arch() {
+  if [[ "$(sysctl -n hw.optional.arm64 2>/dev/null)" == "1" ]]; then
+    echo "arm64"
+  else
+    uname -m
+  fi
+}
+
+detect_platform() {
+  local arch_style="${1:-default}"
+  case "$(uname -s)" in
+    Darwin) DETECTED_OS="Darwin" ;;
+    Linux)  DETECTED_OS="Linux"  ;;
+    *)      DETECTED_OS=""; return 1 ;;
+  esac
+  case "$(hw_arch)" in
+    x86_64|amd64)
+      if [[ "$arch_style" == "go" ]]; then DETECTED_ARCH="amd64"; else DETECTED_ARCH="x86_64"; fi ;;
+    aarch64|arm64) DETECTED_ARCH="arm64" ;;
+    *)             DETECTED_ARCH=""; return 1 ;;
+  esac
+}
+
+install_gum() {
+  # Already installed?
+  if command -v gum &>/dev/null; then
+    GUM="gum"; return 0
+  fi
+  local gum_bin="/tmp/gum-bin/gum"
+  if [[ -x "$gum_bin" ]]; then
+    GUM="$gum_bin"; return 0
+  fi
+
+  detect_platform || fail "Unsupported OS/architecture for gum: $(uname -s)/$(uname -m)"
+  local os="$DETECTED_OS" arch="$DETECTED_ARCH"
+
+  # Try to get latest version from GitHub API, fall back to known good
+  local version
+  version=$(curl -sf https://api.github.com/repos/charmbracelet/gum/releases/latest 2>/dev/null \
+    | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/' || echo "")
+  [[ -z "$version" ]] && version="$GUM_VERSION"
+
+  local url="https://github.com/charmbracelet/gum/releases/download/v${version}/gum_${version}_${os}_${arch}.tar.gz"
+  mkdir -p /tmp/gum-bin
+  if curl -sfL "$url" | tar xz --strip-components=1 -C /tmp/gum-bin 2>/dev/null; then
+    chmod +x "$gum_bin"
+    GUM="$gum_bin"
+  else
+    fail "Could not install gum. Check network connectivity and try again."
+  fi
+}
+
+# ============================================================================
 # UI helpers
 # ============================================================================
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
+MAGENTA='\033[0;35m'
 
-info()  { echo -e "${BLUE}▸${NC} $1"; }
-ok()    { echo -e "${GREEN}✓${NC} $1"; }
-warn()  { echo -e "${YELLOW}⚠${NC} $1"; }
-fail()  { echo -e "${RED}✗${NC} $1"; exit 1; }
+info()  { echo -e "  ${BLUE}▸${NC} $1"; }
+ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
+warn()  { echo -e "  ${YELLOW}⚠${NC} $1"; }
+fail()  { echo -e "  ${RED}✗${NC} $1"; show_debug_locations; exit 1; }
+
+# ── Elapsed time formatting ──────────────────────────────────────────────────
+elapsed_fmt() {
+  local secs=$1
+  if [[ $secs -lt 60 ]]; then
+    printf '%ds' "$secs"
+  else
+    printf '%dm %ds' "$((secs / 60))" "$((secs % 60))"
+  fi
+}
+
+# ── Step progress tracker ────────────────────────────────────────────────────
+STEP_NUM=0
+TOTAL_STEPS=7
+STEP_NAMES=()
+
+step() {
+  STEP_NUM=$((STEP_NUM + 1))
+  STEP_NAMES+=("$1")
+  echo ""
+  $GUM style --foreground 117 --bold --border double --border-foreground 240 \
+    --padding "0 2" --margin "0 2" "[${STEP_NUM}/${TOTAL_STEPS}] $1"
+  echo ""
+}
 
 prompt() {
   local text="$1" var="$2" default="${3:-}"
@@ -99,20 +233,21 @@ prompt() {
     printf -v "$var" '%s' "$default"
     return
   fi
-  local display="$text"; [[ -n "$default" ]] && display="$text [$default]"
-  read -rp "$(echo -e "${BOLD}${display}:${NC} ")" value < /dev/tty
+  local value
+  value=$($GUM input --header "$text" --value "$default" --placeholder "$text" < /dev/tty) || value="$default"
   printf -v "$var" '%s' "${value:-$default}"
 }
 
 confirm() {
   local text="$1" default="${2:-default_no}"
   if [[ "$AUTO_YES" == true ]]; then return 0; fi
-  local hint="[y/N]"; [[ "$default" == "default_yes" ]] && hint="[Y/n]"
-  read -rp "$(echo -e "${BOLD}${text} ${hint}:${NC} ")" answer < /dev/tty
-  case "$default" in
-    default_yes) [[ ! "$answer" =~ ^[Nn]$ ]] ;;
-    *)           [[ "$answer" =~ ^[Yy]$ ]] ;;
-  esac
+  local rc=0
+  if [[ "$default" == "default_yes" ]]; then
+    $GUM confirm --default=yes "$text" < /dev/tty || rc=$?
+  else
+    $GUM confirm "$text" < /dev/tty || rc=$?
+  fi
+  return $rc
 }
 
 toggle() {
@@ -121,12 +256,13 @@ toggle() {
     printf -v "$var" '%s' "$default"
     return
   fi
-  local hint="[Y/n]"; [[ "$default" == "false" ]] && hint="[y/N]"
-  read -rp "$(echo -e "    ${text} ${hint}: ")" answer < /dev/tty
-  case "$default" in
-    true)  [[ "$answer" =~ ^[Nn]$ ]] && printf -v "$var" '%s' "false" || printf -v "$var" '%s' "true" ;;
-    false) [[ "$answer" =~ ^[Yy]$ ]] && printf -v "$var" '%s' "true"  || printf -v "$var" '%s' "false" ;;
-  esac
+  local rc=0
+  if [[ "$default" == "true" ]]; then
+    $GUM confirm --default=yes "  $text" < /dev/tty || rc=$?
+  else
+    $GUM confirm "  $text" < /dev/tty || rc=$?
+  fi
+  [[ $rc -eq 0 ]] && printf -v "$var" '%s' "true" || printf -v "$var" '%s' "false"
 }
 
 require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
@@ -139,6 +275,54 @@ json_field() { jq -r ".$1" 2>/dev/null; }
 
 # URL-encode a string
 url_encode() { jq -rn --arg s "$1" '$s | @uri'; }
+
+# ── Reusable helpers (DRY) ──────────────────────────────────────────────────
+
+# Animate a gum spinner with label for N seconds.
+# Usage: animate_spinner <seconds> <label>
+animate_spinner() {
+  local total_secs="$1" label="$2"
+  $GUM spin --spinner dot --title "  $label" -- sleep "$total_secs" || true
+}
+
+# Show SSM manual connection help
+show_ssm_help() {
+  local instance_id="$1"
+  echo "  Connect manually: $(ssm_connect_cmd "$instance_id")"
+  echo "  Then check: cat /var/log/loki-bootstrap.log"
+}
+
+# Copy text to clipboard (tries pbcopy, xclip, xsel)
+copy_to_clipboard() {
+  local text="$1"
+  if echo -n "$text" | pbcopy 2>/dev/null; then return 0
+  elif echo -n "$text" | xclip -selection clipboard 2>/dev/null; then return 0
+  elif echo -n "$text" | xsel --clipboard 2>/dev/null; then return 0
+  fi
+  return 1
+}
+
+# Safely remove a temp directory after confirmation
+# Usage: safe_cleanup_dir <path> <label> <allowed_pattern...>
+safe_cleanup_dir() {
+  local dir="$1" label="$2"; shift 2
+  [[ -z "${dir:-}" || ! -d "$dir" ]] && return 0
+  if confirm "Remove ${label} (${dir})?" ; then
+    local pattern ok_to_remove=false
+    for pattern in "$@"; do
+      # shellcheck disable=SC2053  # intentional glob matching
+      [[ "$dir" == $pattern ]] && ok_to_remove=true
+    done
+    if $ok_to_remove; then
+      rm -rf "$dir" 2>/dev/null
+      ok "Cleaned up ${dir}"
+    else
+      warn "Unexpected path — skipping automatic removal: ${dir}"
+    fi
+  else
+    info "${label} kept at ${dir}"
+  fi
+}
 
 # Verify AWS credentials with specific error messages.
 # On success, sets ACCOUNT_ID and CALLER_ARN from a single STS call.
@@ -204,10 +388,21 @@ open_url() {
 # Sets _RUN_LOG to the temp file path so caller can grep it.
 run_or_fail() {
   local label="$1"; shift
+  dbg "run_or_fail: $label -> $*"
   _RUN_LOG=$(mktemp)
-  set +e; "$@" > "$_RUN_LOG" 2>&1; local rc=$?; set -e
+
+  # gum spin runs external commands directly — simple and reliable.
+  # Do NOT pass bash functions here; call them directly instead.
+  local rc=0
+  $GUM spin --spinner dot --title "  $label" -- \
+    bash -c '"$@" > "'"$_RUN_LOG"'" 2>&1' _ "$@" \
+    || rc=$?
+
+  # Append to persistent install log for debugging
+  { echo "=== ${label} (rc=$rc) ==="; cat "$_RUN_LOG"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
+
   if [[ $rc -ne 0 ]]; then
-    echo ""; warn "${label} failed:"; cat "$_RUN_LOG"; rm -f "$_RUN_LOG"
+    warn "${label} failed:"; cat "$_RUN_LOG"; rm -f "$_RUN_LOG"
     fail "${label} exited with code $rc"
   fi
 }
@@ -230,35 +425,47 @@ show_banner() {
   # Resolve commit/date from git if running from a clone, otherwise use stamped values
   local commit="$INSTALLER_COMMIT" date="$INSTALLER_DATE"
   if [[ "$commit" == "dev" ]] && command -v git &>/dev/null; then
-    local script_dir; script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-    if [[ -d "$script_dir/.git" ]]; then
-      commit=$(git -C "$script_dir" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-      date=$(git -C "$script_dir" log -1 --format='%ci' 2>/dev/null | cut -d: -f1,2 || echo "unknown")
+    if [[ -d "$SCRIPT_DIR/.git" ]]; then
+      commit=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+      date=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d: -f1,2 || echo "unknown")
     fi
   fi
-  local version_line="v${INSTALLER_VERSION} · ${commit} · ${date}"
+  local version_line="v${INSTALLER_VERSION}  ${commit}  ${date}"
 
   echo ""
-  echo -e "${BOLD}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}║       🤖 Loki Agent — AWS Installer         ║${NC}"
-  printf "${BOLD}║${NC}  %-42s${BOLD}║${NC}\n" "$version_line"
-  echo -e "${BOLD}╚══════════════════════════════════════════════╝${NC}"
+  echo ""
+  echo -e "  ${CYAN}██╗      ██████╗ ██╗  ██╗██╗${NC}"
+  echo -e "  ${CYAN}██║     ██╔═══██╗██║ ██╔╝██║${NC}"
+  echo -e "  ${BLUE}██║     ██║   ██║█████╔╝ ██║${NC}"
+  echo -e "  ${BLUE}██║     ██║   ██║██╔═██╗ ██║${NC}"
+  echo -e "  ${MAGENTA}███████╗╚██████╔╝██║  ██╗██║${NC}"
+  echo -e "  ${MAGENTA}╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝${NC}"
+  echo ""
+  echo -e "  ${BOLD}AWS Installer${NC}  ${DIM}${version_line}${NC}"
+  echo ""
   if [[ "$AUTO_YES" == true ]]; then
-    echo ""
-    local auto_msg="Running in non-interactive mode — using defaults, minimal prompts"
+    local auto_msg="Running in non-interactive mode"
     [[ -n "${PRESELECT_PACK}" ]] && auto_msg+=", pack: ${PRESELECT_PACK}"
     [[ -n "${PRESELECT_METHOD}" ]] && auto_msg+=", method: ${PRESELECT_METHOD}"
     [[ -n "${PRESELECT_PROFILE}" ]] && auto_msg+=", profile: ${PRESELECT_PROFILE}"
     info "$auto_msg"
   fi
-  echo ""
 }
 
 # ============================================================================
 # Phase: Pre-flight checks
 # ============================================================================
 preflight_checks() {
-  info "Running pre-flight checks..."
+  step "Pre-flight checks"
+
+  if [[ "$DEBUG_IN_REPO" == "true" ]]; then
+    git rev-parse --show-toplevel &>/dev/null \
+      || fail "--debug-in-repo requires running from inside the loki-agent repo directory."
+    ok "Debug mode: repo root is $(pwd)"
+    info "Debug log: ${INSTALL_LOG}"
+  fi
+
+  ok "gum UI: $($GUM --version 2>/dev/null || echo installed)"
 
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
@@ -391,20 +598,7 @@ check_existing_deployments() {
         chosen_vpc="${vpc_ids[0]}"
         info "Using VPC: ${chosen_vpc}"
       else
-        echo ""
-        echo "  Select a VPC to reuse:"
-        local i
-        for i in "${!vpc_ids[@]}"; do
-          echo "    $((i+1))) ${vpc_ids[$i]}"
-        done
-        echo ""
-        local vpc_choice
-        prompt "VPC number" vpc_choice "1"
-        vpc_choice="${vpc_choice//[^0-9]/}"
-        [[ -z "$vpc_choice" ]] && vpc_choice=1
-        local vpc_idx=$(( vpc_choice - 1 ))
-        [[ $vpc_idx -lt 0 || $vpc_idx -ge ${#vpc_ids[@]} ]] && vpc_idx=0
-        chosen_vpc="${vpc_ids[$vpc_idx]}"
+        chosen_vpc=$(printf '%s\n' "${vpc_ids[@]}" | $GUM choose --header "Select a VPC to reuse")
         info "Selected VPC: ${chosen_vpc}"
       fi
 
@@ -476,7 +670,28 @@ terraform_version_string() {
     || terraform version | head -1
 }
 
+# Returns 0 if terraform is installed, >= 1.10, and native architecture
+terraform_ok() {
+  command -v terraform &>/dev/null || return 1
+  # Check version >= 1.10
+  local ver major minor
+  ver=$(terraform version -json 2>/dev/null | json_field terraform_version 2>/dev/null || echo "0.0.0")
+  major=$(echo "$ver" | cut -d. -f1)
+  minor=$(echo "$ver" | cut -d. -f2)
+  dbg "terraform_ok: ver=$ver major=$major minor=$minor path=$(command -v terraform)"
+  { [[ "$major" -gt 1 ]] || { [[ "$major" -eq 1 ]] && [[ "$minor" -ge 10 ]]; }; } || return 1
+  # Check architecture matches
+  local host_arch; host_arch=$(hw_arch)
+  local tf_arch; tf_arch=$(file "$(command -v terraform)" 2>/dev/null || echo "")
+  dbg "terraform_ok: host=$host_arch tf_arch=$tf_arch"
+  case "$host_arch" in
+    arm64|aarch64) [[ "$tf_arch" == *"arm64"* ]] || return 1 ;;
+    x86_64|amd64)  [[ "$tf_arch" == *"x86_64"* || "$tf_arch" == *"x86-64"* ]] || return 1 ;;
+  esac
+}
+
 choose_deploy_method() {
+  step "Deploy method"
   # If method was pre-selected via --method, validate and set it
   if [[ -n "${PRESELECT_METHOD}" ]]; then
     case "${PRESELECT_METHOD}" in
@@ -500,23 +715,36 @@ choose_deploy_method() {
     esac
     ok "Deploy method pre-selected: ${method_name}"
   else
-  echo ""
-  echo "  Deployment methods:"
-  echo ""
-  echo "    1) CloudFormation Console -- opens browser wizard to review & launch"
-  echo "    2) CloudFormation CLI     -- deploy from terminal"
-  echo -e "    ${GREEN}3) Terraform${NC}              -- for Terraform shops (auto-installs if needed)"
-  echo ""
-  prompt "Deployment method" DEPLOY_METHOD "$DEPLOY_TERRAFORM"
-  DEPLOY_METHOD=$(echo "$DEPLOY_METHOD" | tr -d '[:space:]')
+  local method_choice
+  method_choice=$($GUM choose --header "Deployment method" --selected "Terraform" \
+    "CloudFormation Console" \
+    "CloudFormation CLI" \
+    "Terraform" < /dev/tty)
+  case "$method_choice" in
+    "CloudFormation Console") DEPLOY_METHOD="$DEPLOY_CFN_CONSOLE" ;;
+    "CloudFormation CLI")     DEPLOY_METHOD="$DEPLOY_CFN_CLI" ;;
+    "Terraform")              DEPLOY_METHOD="$DEPLOY_TERRAFORM" ;;
+    *)                        DEPLOY_METHOD="$DEPLOY_TERRAFORM" ;;
+  esac
   fi
 
   # If Terraform selected and not installed, handle it now — before config questions.
   # This avoids the user filling out all config only to be blocked at deploy time.
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_TERRAFORM" ]]; then
-    if ! command -v terraform &>/dev/null; then
-      echo ""
-      warn "Terraform is not installed on this system."
+    if terraform_ok; then
+      ok "Terraform: $(terraform_version_string)"
+    else
+      if command -v terraform &>/dev/null; then
+        local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
+        local host; host=$(hw_arch)
+        if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
+          warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
+        else
+          warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
+        fi
+      else
+        warn "Terraform is not installed on this system."
+      fi
       echo ""
       echo "  Loki can install Terraform locally now (no root/sudo required)."
       echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
@@ -528,10 +756,8 @@ choose_deploy_method() {
         echo "  Install it manually, then re-run this installer:"
         echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
         echo ""
-        fail "Terraform is required for the Terraform deployment method."
+        fail "Terraform >= 1.10 is required."
       fi
-    else
-      ok "Terraform: $(terraform_version_string)"
     fi
   fi
 }
@@ -568,53 +794,26 @@ choose_profile() {
     return
   fi
 
-  # Non-interactive without --profile: fail — no silent default
+  # Non-interactive without --profile: default to builder
   if [[ "$AUTO_YES" == true ]]; then
-    fail "Profile is required in non-interactive mode. Use --profile <builder|account_assistant|personal_assistant>"
+    PROFILE_NAME="builder"
+    ok "Profile defaulted: ${PROFILE_NAME}"
+    return
   fi
 
-  # Interactive: show menu and prompt
-  echo ""
-  echo "  Permission profiles (REQUIRED — choose one):"
-  echo ""
-  echo -e "    1) ${RED}builder${NC}            — Full AWS admin access."
-  echo "                         Can create, modify, and delete any AWS resource."
-  echo "                         Best for: building apps, deploying infra, managing pipelines."
-  echo ""
-  echo -e "    2) ${YELLOW}account_assistant${NC}  — Read-only AWS access."
-  echo "                         Can see everything, change nothing."
-  echo "                         Best for: cost analysis, architecture review, debugging help."
-  echo ""
-  echo -e "    3) ${GREEN}personal_assistant${NC} — Bedrock only. No AWS access."
-  echo "                         Best for: writing, research, coding help, daily tasks."
-  echo ""
-
+  # Interactive: show menu
   local profile_choice
-  prompt "Select profile" profile_choice ""
-
-  case "$profile_choice" in
-    1|builder)            PROFILE_NAME="builder" ;;
-    2|account_assistant)  PROFILE_NAME="account_assistant" ;;
-    3|personal_assistant) PROFILE_NAME="personal_assistant" ;;
-    "")
-      fail "Profile is required. Enter 1, 2, or 3 (or a profile name)."
-      ;;
-    *)
-      if _is_valid_profile "$profile_choice"; then
-        PROFILE_NAME="$profile_choice"
-      else
-        fail "Invalid profile '${profile_choice}'. Choose: builder, account_assistant, or personal_assistant."
-      fi
-      ;;
-  esac
+  profile_choice=$($GUM choose --header "Permission profile" --selected "builder — Full AWS admin access" \
+    "builder — Full AWS admin access" \
+    "account_assistant — Read-only AWS access" \
+    "personal_assistant — Bedrock only, no AWS access" < /dev/tty)
+  PROFILE_NAME="${profile_choice%% —*}"
 
   ok "Profile selected: ${PROFILE_NAME}"
 }
 
 collect_config() {
-  echo ""
-  info "Configuration"
-  echo ""
+  step "Configuration"
 
   # ---- Pack selection (dynamically discovered from registry.json) -----------
   # CLONE_DIR may not be set yet (repo is cloned after config collection).
@@ -669,30 +868,25 @@ collect_config() {
   fi
 
   if [[ -z "${PRESELECT_PACK}" ]]; then
-  echo "  Agent to deploy:"
-  local i
+  # Build display items for gum choose
+  local -a gum_items=()
+  local default_item=""
   for i in "${!pack_names[@]}"; do
-    local num=$((i + 1))
-    local tag=""
-    [[ "${pack_experimental[$i]}" == "true" ]] && tag=" ${YELLOW}(experimental)${NC}"
-    local rec=""
-    [[ "${pack_names[$i]}" == "openclaw" ]] && rec=" ${GREEN}(recommended)${NC}"
-    echo -e "    ${num}) ${BOLD}${pack_names[$i]}${NC}  -- ${pack_descs[$i]}${rec}${tag}"
+    local item="${pack_names[$i]} — ${pack_descs[$i]}"
+    [[ "${pack_experimental[$i]}" == "true" ]] && item+=" (experimental)"
+    gum_items+=("$item")
+    [[ "${pack_names[$i]}" == "openclaw" ]] && default_item="$item"
   done
-  echo ""
   local pack_choice
-  prompt "Deploy which agent" pack_choice "1"
-  # Sanitize: strip non-digits, default to 1
-  pack_choice="${pack_choice//[^0-9]/}"
-  [[ -z "$pack_choice" ]] && pack_choice=1
-  local idx=$(( pack_choice - 1 ))
-  if [[ $idx -lt 0 || $idx -ge ${#pack_names[@]} ]]; then
-    idx=0  # default to first (openclaw)
-  fi
-  PACK_NAME="${pack_names[$idx]}"
-  if [[ "${pack_experimental[$idx]}" == "true" ]]; then
-    warn "${PACK_NAME} is experimental — expect rough edges"
-  fi
+  pack_choice=$($GUM choose --header "Agent to deploy" \
+    ${default_item:+--selected "$default_item"} \
+    "${gum_items[@]}" < /dev/tty)
+  PACK_NAME="${pack_choice%% —*}"
+  for i in "${!pack_names[@]}"; do
+    if [[ "${pack_names[$i]}" == "$PACK_NAME" && "${pack_experimental[$i]}" == "true" ]]; then
+      warn "${PACK_NAME} is experimental — expect rough edges"
+    fi
+  done
   ok "Selected pack: ${PACK_NAME}"
   fi  # end of interactive pack selection
 
@@ -726,10 +920,9 @@ collect_config() {
   local ts_suffix; ts_suffix=$(date +%s | tail -c 4)
   local default_env_name="${PACK_NAME}-$((existing_count + 1))-${ts_suffix}"
 
-  echo ""
-  prompt "Environment name (lowercase, resource prefix)" ENV_NAME "$default_env_name"
-  ENV_NAME=$(echo "$ENV_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-')
-  prompt "Loki watermark (tag to identify this deployment)" LOKI_WATERMARK "$ENV_NAME"
+  ENV_NAME="$default_env_name"
+  LOKI_WATERMARK="$ENV_NAME"
+  ok "Environment: ${ENV_NAME}"
 
   # Adjust instance size default: profile takes precedence, pack registry as fallback
   local default_size_choice="3"  # default → t4g.xlarge
@@ -769,19 +962,17 @@ collect_config() {
         ;;
     esac
   fi
-  echo ""
-  echo "  Instance sizes:"
-  echo "    1) t4g.medium  -- 2 vCPU, 4GB  (~\$25/mo)  light use"
-  echo "    2) t4g.large   -- 2 vCPU, 8GB  (~\$50/mo)  regular use"
-  echo "    3) t4g.xlarge  -- 4 vCPU, 16GB (~\$100/mo) recommended"
-  echo ""
-  local choice
-  prompt "Instance size" choice "$default_size_choice"
-  case "$choice" in
-    1) INSTANCE_TYPE="t4g.medium" ;;
-    2) INSTANCE_TYPE="t4g.large" ;;
-    *) INSTANCE_TYPE="t4g.xlarge" ;;
-  esac
+  local default_type="t4g.xlarge"
+  case "$default_size_choice" in 1) default_type="t4g.medium" ;; 2) default_type="t4g.large" ;; esac
+
+  local size_choice
+  size_choice=$($GUM choose --header "Instance size" \
+    --selected "${default_type}  — recommended" \
+    "t4g.medium  — 2 vCPU,  4GB  ~\$25/mo   light use" \
+    "t4g.large   — 2 vCPU,  8GB  ~\$50/mo   regular use" \
+    "t4g.xlarge  — 4 vCPU, 16GB  ~\$100/mo  recommended" < /dev/tty) || size_choice=""
+  INSTANCE_TYPE="${size_choice%%  *}"
+  [[ -z "$INSTANCE_TYPE" ]] && INSTANCE_TYPE="$default_type"
 
   collect_security_config
 }
@@ -821,8 +1012,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
@@ -835,6 +1026,7 @@ build_deploy_params() {
     "bedrock"
     "$DEPLOY_REGION"
     "$LOKI_WATERMARK"
+    "false"
     "$SECURITY_HUB"
     "$GUARDDUTY"
     "$INSPECTOR"
@@ -881,21 +1073,22 @@ format_tf_vars() {
 }
 
 show_summary() {
-  echo ""
-  echo -e "  ${BOLD}╭─────────────── Deploy Summary ───────────────╮${NC}"
-  echo -e "  ${BOLD}│${NC}  Environment:  ${ENV_NAME}"
-  echo -e "  ${BOLD}│${NC}  Pack:         ${PACK_NAME}"
-  echo -e "  ${BOLD}│${NC}  Profile:      ${PROFILE_NAME}"
-  echo -e "  ${BOLD}│${NC}  Instance:     ${INSTANCE_TYPE}"
-  echo -e "  ${BOLD}│${NC}  Region:       ${DEPLOY_REGION}"
-  echo -e "  ${BOLD}│${NC}  Watermark:    ${LOKI_WATERMARK}"
-  if [[ -n "${EXISTING_VPC_ID:-}" ]]; then
-    echo -e "  ${BOLD}│${NC}  VPC:          reuse ${EXISTING_VPC_ID} (existing)"
-  fi
-  echo -e "  ${BOLD}│${NC}  SecurityHub:  ${SECURITY_HUB}  GuardDuty: ${GUARDDUTY}"
-  echo -e "  ${BOLD}│${NC}  Inspector:    ${INSPECTOR}  Analyzer:  ${ACCESS_ANALYZER}"
-  echo -e "  ${BOLD}│${NC}  Config:       ${CONFIG_RECORDER}"
-  echo -e "  ${BOLD}╰───────────────────────────────────────────────╯${NC}"
+  step "Review & confirm"
+
+  local summary=""
+  summary+="Environment   ${ENV_NAME}\n"
+  summary+="Pack          ${PACK_NAME}\n"
+  summary+="Profile       ${PROFILE_NAME}\n"
+  summary+="Instance      ${INSTANCE_TYPE}\n"
+  summary+="Region        ${DEPLOY_REGION}\n"
+  summary+="Watermark     ${LOKI_WATERMARK}\n"
+  [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
+  summary+="\n"
+  summary+="Security      Hub:${SECURITY_HUB}  Guard:${GUARDDUTY}  Inspector:${INSPECTOR}\n"
+  summary+="              Analyzer:${ACCESS_ANALYZER}  Config:${CONFIG_RECORDER}"
+
+  echo -e "$summary" | $GUM style --border rounded --border-foreground 117 \
+    --foreground 255 --padding "1 2" --margin "0 2" --bold
   echo ""
   confirm_or_abort "Proceed with deployment?" "default_yes"
 }
@@ -905,56 +1098,39 @@ show_summary() {
 # ============================================================================
 prepare_repo() {
   echo ""
-  local current; current=$(pwd)
+  CLONE_DIR="/tmp/loki-agent-$$"
+  dbg "prepare_repo: CLONE_DIR=$CLONE_DIR DEBUG_IN_REPO=$DEBUG_IN_REPO"
 
-  if [[ "$AUTO_YES" == true ]]; then
-    # Auto mode: pick ~/.loki-agent (persistent, safe default)
-    CLONE_DIR="$HOME/.loki-agent"
-    mkdir -p "$(dirname "$CLONE_DIR")"
-    info "Clone destination: ${CLONE_DIR} (auto)"
-  else
-  echo "  Clone destination:"
-  echo "    1) Current directory -- ${current}/loki-agent"
-  echo "    2) ~/.loki-agent     -- persistent home directory"
-  echo "    3) Temp directory    -- auto-deleted when done (not for Terraform local state)"
-  echo ""
-  # CloudShell: default to /tmp (home is tiny)
-  local default_choice="1"
-  if [[ "$IS_CLOUDSHELL" == "true" ]]; then
-    warn "CloudShell detected — /home has limited space (~1GB)"
-    info "Defaulting to /tmp for the clone"
-    default_choice="3"
-  fi
-
-  local choice
-  prompt "Clone to" choice "$default_choice"
-  case "$choice" in
-    2) CLONE_DIR="$HOME/.loki-agent" ;;
-    3) CLONE_DIR="/tmp/loki-agent-$$" ;;
-    *) CLONE_DIR="${current}/loki-agent" ;;
-  esac
-  fi
-
-  echo ""
-  info "Cloning loki-agent into ${CLONE_DIR}..."
-
-  if [[ -d "$CLONE_DIR/.git" ]]; then
-    info "Directory exists, syncing to latest..."
-    git -C "$CLONE_DIR" fetch origin 2>&1 | tail -1
-    local branch
-    branch=$(git -C "$CLONE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo "main")
-    if ! git -C "$CLONE_DIR" merge --ff-only "origin/$branch" 2>/dev/null; then
-      warn "Local repo diverged from remote — resetting to origin/$branch"
-      git -C "$CLONE_DIR" reset --hard "origin/$branch" 2>&1 | tail -1
-    fi
-    clean_stale_terraform "$CLONE_DIR"
-  else
+  if [[ "$DEBUG_IN_REPO" == "true" ]]; then
+    local repo_root
+    repo_root="$(git rev-parse --show-toplevel)"
+    info "Debug mode: cloning local repo ${repo_root} → ${CLONE_DIR}"
     rm -rf "$CLONE_DIR" 2>/dev/null || true
-    git clone --depth 1 "$REPO_URL" "$CLONE_DIR" 2>&1 | tail -1
-  fi
+    git clone "$repo_root" "$CLONE_DIR" 2>/dev/null
+    cd "$CLONE_DIR"
+    ok "Local repo cloned: ${CLONE_DIR}"
+  else
+    echo ""
+    info "Cloning loki-agent into ${CLONE_DIR}..."
 
-  cd "$CLONE_DIR"
-  ok "Repository ready: ${CLONE_DIR}"
+    if [[ -d "$CLONE_DIR/.git" ]]; then
+      info "Directory exists, syncing to latest..."
+      run_or_fail "Git fetch" git -C "$CLONE_DIR" fetch origin
+      local branch
+      branch=$(git -C "$CLONE_DIR" symbolic-ref --short HEAD 2>/dev/null || echo "main")
+      if ! git -C "$CLONE_DIR" merge --ff-only "origin/$branch" 2>/dev/null; then
+        warn "Local repo diverged from remote — resetting to origin/$branch"
+        git -C "$CLONE_DIR" reset --hard "origin/$branch" 2>&1 | tail -1
+      fi
+      clean_stale_terraform "$CLONE_DIR"
+    else
+      rm -rf "$CLONE_DIR" 2>/dev/null || true
+      run_or_fail "Cloning repository" git clone --depth 1 "$REPO_URL" "$CLONE_DIR"
+    fi
+
+    cd "$CLONE_DIR"
+    ok "Repository ready: ${CLONE_DIR}"
+  fi
 }
 
 clean_stale_terraform() {
@@ -982,14 +1158,13 @@ deploy_console() {
   create_s3_bucket "$bucket" "$DEPLOY_REGION"
 
   local tmp; tmp=$(mktemp /tmp/loki-cfn-template.XXXXXX.yaml)
-  info "Downloading template..."
-  curl -sfL "$TEMPLATE_RAW_URL" -o "$tmp" || fail "Failed to download template from GitHub"
-  ok "Template downloaded"
+  run_or_fail "Downloading template" curl -sfL "$TEMPLATE_RAW_URL" -o "$tmp"
+  rm -f "$_RUN_LOG"
 
-  info "Uploading template to S3..."
-  aws s3 cp "$tmp" "s3://${bucket}/loki-agent/template.yaml" --region "$DEPLOY_REGION" >/dev/null
+  run_or_fail "Uploading template to S3" \
+    aws s3 cp "$tmp" "s3://${bucket}/loki-agent/template.yaml" --region "$DEPLOY_REGION"
+  rm -f "$_RUN_LOG"
   rm -f "$tmp"
-  ok "Template uploaded"
 
   # Generate a pre-signed URL (valid 1 hour) since the bucket blocks public access
   local s3_url
@@ -1004,11 +1179,10 @@ deploy_console() {
   url+="$(format_console_params)"
 
   echo ""
-  echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║  Open this link in your browser to launch the stack wizard  ║${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "  ${BOLD}${url}${NC}"
+  echo -e "  ${GREEN}${BOLD}Open this link in your browser to launch the stack wizard:${NC}"
+  echo ""
+  echo -e "  ${CYAN}${url}${NC}"
   echo ""
 
   if open_url "$url"; then ok "Opened in your browser"
@@ -1016,22 +1190,23 @@ deploy_console() {
 
   echo ""
   echo -e "  ${BOLD}What to do next:${NC}"
-  echo "    1. Log in to AWS if prompted"
-  echo "    2. Review the parameters — your choices are pre-filled"
-  echo "    3. Check \"I acknowledge that AWS CloudFormation might create IAM resources with custom names\""
-  echo "    4. Click ${BOLD}Create stack${NC}"
-  echo "    5. Wait ~10 minutes for the stack to finish"
-  echo "    6. Find the Instance ID in the stack ${BOLD}Outputs${NC} tab"
+  echo ""
+  echo -e "    ${DIM}1.${NC} Log in to AWS if prompted"
+  echo -e "    ${DIM}2.${NC} Review the parameters ${DIM}(your choices are pre-filled)${NC}"
+  echo -e "    ${DIM}3.${NC} Check ${BOLD}\"I acknowledge that AWS CloudFormation might create IAM resources\"${NC}"
+  echo -e "    ${DIM}4.${NC} Click ${GREEN}${BOLD}Create stack${NC}"
+  echo -e "    ${DIM}5.${NC} Wait ~10 minutes for the stack to finish"
+  echo -e "    ${DIM}6.${NC} Find the Instance ID in the stack ${BOLD}Outputs${NC} tab"
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
-  echo "    $(ssm_connect_cmd '<instance-id>')"
-  echo "    loki tui"
+  echo -e "    ${CYAN}$(ssm_connect_cmd '<instance-id>')${NC}"
+  echo -e "    ${CYAN}loki tui${NC}"
   echo ""
-  echo -e "  ${BOLD}Docs:${NC} ${DOCS_URL}"
+  echo -e "  ${DIM}Docs:${NC}  ${DOCS_URL}"
   echo ""
-  echo -e "  ${YELLOW}Note:${NC} Template bucket ${bucket} was created in your account."
-  echo "  You can delete it after the stack is created:"
-  echo "    aws s3 rb s3://${bucket} --force --region ${DEPLOY_REGION}"
+  echo -e "  ${YELLOW}Note:${NC} Template bucket ${DIM}${bucket}${NC} was created in your account."
+  echo -e "  ${DIM}Delete it after the stack is created:${NC}"
+  echo -e "    ${DIM}aws s3 rb s3://${bucket} --force --region ${DEPLOY_REGION}${NC}"
   echo ""
 }
 
@@ -1061,7 +1236,8 @@ deploy_cfn_stack() {
 }
 
 wait_for_cfn_stack() {
-  local iterations=0 max_iterations=120  # 120 × 15s = 30 minutes
+  local iterations=0 max_iterations=120  # 120 x 15s = 30 minutes
+  local start_time=$SECONDS
   while true; do
     local status rc=0
     status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
@@ -1069,18 +1245,19 @@ wait_for_cfn_stack() {
     if [[ $rc -ne 0 ]]; then
       echo ""; fail "Stack no longer exists or is inaccessible: $status"
     fi
-    echo -ne "\r  Status: ${status}          "
+    local elapsed=$(( SECONDS - start_time ))
+    local elapsed_str; elapsed_str=$(elapsed_fmt $elapsed)
     case "$status" in
-      CREATE_COMPLETE)     echo ""; ok "Stack created!"; break ;;
-      *FAILED*|*ROLLBACK*) echo ""; fail "Stack failed: $status" ;;
+      CREATE_COMPLETE)     printf "\r%-60s\r" ""; ok "Stack created! ${DIM}(${elapsed_str})${NC}"; break ;;
+      *FAILED*|*ROLLBACK*) printf "\r%-60s\r" ""; fail "Stack failed: $status" ;;
       *)
         iterations=$((iterations + 1))
         if [[ $iterations -ge $max_iterations ]]; then
-          echo ""
+          printf "\r%-60s\r" ""
           warn "Timed out after 30 minutes waiting for stack. Check the CloudFormation console for status."
           break
         fi
-        sleep 15
+        animate_spinner 15 "$status"
         ;;
     esac
   done
@@ -1089,7 +1266,6 @@ wait_for_cfn_stack() {
 # State tracking for Terraform backend (used by deploy_terraform to tag VPC)
 TF_STATE_BUCKET=""
 TF_STATE_KEY=""
-TF_LOCK_TABLE=""
 TF_WORKDIR=""  # Set if Terraform work is moved to /tmp (CloudShell low-disk)
 PACK_NAME="openclaw"  # Default pack; overridden by collect_config
 
@@ -1103,14 +1279,10 @@ EXISTING_SUBNET_ID=""
 install_terraform() {
   info "Installing Terraform..."
 
-  # Detect OS and architecture
+  detect_platform "go" || fail "Unsupported OS/architecture: $(uname -s)/$(uname -m)"
   local os arch
-  os=$(uname -s | tr '[:upper:]' '[:lower:]')
-  case "$(uname -m)" in
-    x86_64|amd64)  arch="amd64" ;;
-    aarch64|arm64) arch="arm64" ;;
-    *)             fail "Unsupported architecture: $(uname -m)" ;;
-  esac
+  os=$(echo "$DETECTED_OS" | tr '[:upper:]' '[:lower:]')
+  arch="$DETECTED_ARCH"
 
   # Get latest stable version from HashiCorp checkpoint
   local version
@@ -1120,6 +1292,7 @@ install_terraform() {
 
   local zip_url="https://releases.hashicorp.com/terraform/${version}/terraform_${version}_${os}_${arch}.zip"
   local install_dir="${HOME}/.local/bin"
+  [[ "$IS_CLOUDSHELL" == "true" ]] && install_dir="/tmp/terraform-bin"
   local tmp_zip="/tmp/terraform_${version}.zip"
 
   info "Downloading Terraform ${version} (${os}/${arch})..."
@@ -1152,23 +1325,27 @@ install_terraform() {
 }
 
 ensure_terraform() {
-  if command -v terraform &>/dev/null; then
+  if terraform_ok; then
     ok "Terraform: $(terraform_version_string)"
     return 0
   fi
-
-  # Should have been handled in choose_deploy_method, but install silently as a safety net
+  # Should have been handled in choose_deploy_method, but install as a safety net
   install_terraform
 }
 # ============================================================================
 deploy_terraform() {
+  dbg "deploy_terraform: pwd=$(pwd)"
   ensure_terraform
   cd deploy/terraform
+  dbg "deploy_terraform: cd done, pwd=$(pwd), .git exists=$(test -d ../../.git && echo yes || echo no)"
   setup_terraform_backend
   terraform_init
+  terraform_validate
   terraform_apply
-  INSTANCE_ID=$(terraform output -raw instance_id)
-  PUBLIC_IP=$(terraform output -raw public_ip)
+  INSTANCE_ID=$(terraform output -raw instance_id 2>&1) \
+    || fail "Could not read instance_id from Terraform output. Is the EC2 instance defined?"
+  PUBLIC_IP=$(terraform output -raw public_ip 2>&1) \
+    || fail "Could not read public_ip from Terraform output."
 
   # Tag VPC with state backend info so uninstall can find it
   local vpc_id
@@ -1176,8 +1353,7 @@ deploy_terraform() {
   if [[ -n "$vpc_id" && -n "$TF_STATE_BUCKET" ]]; then
     aws ec2 create-tags --resources "$vpc_id" --region "$DEPLOY_REGION" --tags \
       "Key=loki:tf-state-bucket,Value=${TF_STATE_BUCKET}" \
-      "Key=loki:tf-state-key,Value=${TF_STATE_KEY}" \
-      "Key=loki:tf-lock-table,Value=${TF_LOCK_TABLE}" 2>/dev/null || true
+      "Key=loki:tf-state-key,Value=${TF_STATE_KEY}" 2>/dev/null || true
     ok "Tagged VPC with Terraform state location"
   fi
 
@@ -1185,34 +1361,14 @@ deploy_terraform() {
 }
 
 setup_terraform_backend() {
-  echo ""
-  echo "  Terraform state storage:"
-  echo "    1) Local  -- simple, for testing"
-  echo "    2) S3     -- remote with locking (recommended)"
-  echo ""
-  local choice
-  prompt "State storage" choice "2"
-  [[ "$choice" == "2" ]] || return 0
-
   local bucket="${ENV_NAME}-tfstate-${ACCOUNT_ID}"
-  prompt "S3 bucket name" bucket "$bucket"
-  local lock_table="${ENV_NAME}-tflock"
   local state_key="loki-agent/terraform.tfstate"
 
   # Store for VPC tagging later
   TF_STATE_BUCKET="$bucket"
   TF_STATE_KEY="$state_key"
-  TF_LOCK_TABLE="$lock_table"
 
   create_s3_bucket "$bucket" "$DEPLOY_REGION"
-
-  if ! aws dynamodb describe-table --table-name "$lock_table" --region "$DEPLOY_REGION" &>/dev/null; then
-    aws dynamodb create-table --table-name "$lock_table" --region "$DEPLOY_REGION" \
-      --attribute-definitions AttributeName=LockID,AttributeType=S \
-      --key-schema AttributeName=LockID,KeyType=HASH \
-      --billing-mode PAY_PER_REQUEST >/dev/null
-  fi
-  ok "Lock table ready"
 
   cat > backend.tf <<EOF
 terraform {
@@ -1220,7 +1376,7 @@ terraform {
     bucket         = "${bucket}"
     key            = "${state_key}"
     region         = "${DEPLOY_REGION}"
-    dynamodb_table = "${lock_table}"
+    use_lockfile   = true
     encrypt        = true
   }
 }
@@ -1259,25 +1415,45 @@ terraform_init() {
   done
   rm -f "$_RUN_LOG"
   ok "Terraform initialized"
+
+}
+
+terraform_validate() {
+  info "Validating Terraform config..."
+  dbg "terraform_validate: running"
+  run_or_fail "Validating Terraform config" terraform validate
+  rm -f "$_RUN_LOG"
+  ok "Terraform config valid"
 }
 
 terraform_apply() {
+  dbg "terraform_apply: starting"
   info "Deploying (~2-3 minutes)..."
   # Build -var arguments from the single parameter source-of-truth
   local tf_vars=()
   while IFS= read -r v; do
     tf_vars+=("$v")
   done < <(format_tf_vars)
-  run_or_fail "Terraform apply" terraform apply -auto-approve "${tf_vars[@]}"
-
-  grep -E 'Creating\.\.\.|Creation complete|Apply complete|Outputs:|= ' "$_RUN_LOG" | while IFS= read -r line; do
+  # Stream terraform apply live — show progress as resources are created
+  _TF_LOG="/tmp/loki-terraform-apply.log"
+  local rc=0
+  terraform apply -auto-approve "${tf_vars[@]}" 2>&1 | tee "$_TF_LOG" | while IFS= read -r line; do
     if   [[ "$line" == *": Creating..."* ]];       then echo -e "  ${BLUE}+${NC} ${line##*] }"
     elif [[ "$line" == *": Creation complete"* ]];  then echo -e "  ${GREEN}✓${NC} ${line##*] }"
     elif [[ "$line" == *"Apply complete"* ]];       then echo -e "\n  ${GREEN}${line}${NC}"
     elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then echo "  $line"
+    elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
     fi
-  done
-  rm -f "$_RUN_LOG"
+  done || rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo ""
+    warn "Terraform apply failed (exit code $rc)"
+    # Show last 40 lines in a formatted code block via gum
+    local err_text
+    err_text=$(tail -40 "$_TF_LOG")
+    echo "$err_text" | $GUM format -t code
+    fail "See error output above"
+  fi
 }
 
 # ============================================================================
@@ -1304,20 +1480,25 @@ ensure_ssm_session_document() {
 # Post-deploy: wait for bootstrap + show results
 # ============================================================================
 wait_for_bootstrap() {
+  step "Bootstrap"
+  info "Waiting for Loki to bootstrap..."
+  echo -e "  ${DIM}Instance: ${INSTANCE_ID}  |  IP: ${PUBLIC_IP}${NC}"
   echo ""
-  info "Waiting for Loki to bootstrap (~10 minutes)..."
-  echo "  Instance: ${INSTANCE_ID} | IP: ${PUBLIC_IP}"
 
   # Clear stale SSM params from previous deploys to avoid false failure detection
   aws ssm delete-parameter --name "/loki/setup-status" --region "$DEPLOY_REGION" 2>/dev/null || true
   aws ssm delete-parameter --name "/loki/setup-step" --region "$DEPLOY_REGION" 2>/dev/null || true
   aws ssm delete-parameter --name "/loki/setup-log" --region "$DEPLOY_REGION" 2>/dev/null || true
 
+  local boot_start=$SECONDS
+  local current_step="" last_step=""
   for i in $(seq 1 60); do
-    # Check for failure status first (fast path — no SSM command needed)
+
+    # ── 1. Read step + status from SSM parameters (fast, no SSM command) ──
     local setup_status
     setup_status=$(aws ssm get-parameter --name "/loki/setup-status" \
       --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+
     if [[ "$setup_status" == "FAILED" ]]; then
       echo ""
       local fail_step
@@ -1335,7 +1516,7 @@ wait_for_bootstrap() {
         echo "$fail_log" | tail -20 | sed 's/^/    /'
       fi
 
-      # Auto-fetch full bootstrap log via SSM (saves the user from manual SSM + cat)
+      # Auto-fetch full bootstrap log via SSM
       echo ""
       info "Fetching full bootstrap log from instance..."
       local log_cmd_id
@@ -1344,7 +1525,7 @@ wait_for_bootstrap() {
         --parameters 'commands=["cat /var/log/loki-bootstrap.log 2>/dev/null || echo LOG_NOT_FOUND"]' \
         --region "$DEPLOY_REGION" --output text --query 'Command.CommandId' 2>/dev/null || echo "")
       if [[ -n "$log_cmd_id" ]]; then
-        sleep 8  # give SSM time to execute
+        sleep 8
         local full_log
         full_log=$(aws ssm get-command-invocation --command-id "$log_cmd_id" \
           --instance-id "$INSTANCE_ID" --region "$DEPLOY_REGION" \
@@ -1358,19 +1539,28 @@ wait_for_bootstrap() {
           echo "$full_log" | tail -30 | sed 's/^/    /'
         else
           warn "Could not retrieve bootstrap log via SSM"
-          echo "  Connect manually: $(ssm_connect_cmd "$INSTANCE_ID")"
-          echo "  Then check: cat /var/log/loki-bootstrap.log"
+          show_ssm_help "$INSTANCE_ID"
         fi
       else
         warn "SSM command failed — instance may not be reachable yet"
-        echo "  Connect manually: $(ssm_connect_cmd "$INSTANCE_ID")"
-        echo "  Then check: cat /var/log/loki-bootstrap.log"
+        show_ssm_help "$INSTANCE_ID"
       fi
 
       echo ""
       return 1
     fi
 
+    current_step=$(aws ssm get-parameter --name "/loki/setup-step" \
+      --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+
+    # Print new line when step changes so the user sees the progression
+    if [[ -n "$current_step" && "$current_step" != "$last_step" && -n "$last_step" ]]; then
+      local ts; ts=$(elapsed_fmt $(( SECONDS - boot_start )))
+      echo -e "  ${GREEN}✓${NC} ${last_step}  ${DIM}[${ts}]${NC}"
+    fi
+    [[ -n "$current_step" ]] && last_step="$current_step"
+
+    # ── 2. Check if bootstrap is done (SSM command round-trip) ──
     local cmd_id
     cmd_id=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
       --document-name AWS-RunShellScript \
@@ -1378,101 +1568,86 @@ wait_for_bootstrap() {
       --region "$DEPLOY_REGION" --output text --query 'Command.CommandId' 2>/dev/null || echo "")
 
     if [[ -n "$cmd_id" ]]; then
-      sleep 5
+      sleep 3
+
       local output
       output=$(aws ssm get-command-invocation --command-id "$cmd_id" \
         --instance-id "$INSTANCE_ID" --region "$DEPLOY_REGION" \
         --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
-      [[ "$output" == *"READY"* ]] && { echo ""; ok "Loki is ready!"; return; }
+      local boot_elapsed=$(( SECONDS - boot_start ))
+      local boot_elapsed_str; boot_elapsed_str=$(elapsed_fmt $boot_elapsed)
+      if [[ "$output" == *"READY"* ]]; then
+        # Print final step as completed
+        if [[ -n "$current_step" ]]; then
+          echo -e "  ${GREEN}✓${NC} ${current_step}  ${DIM}[${boot_elapsed_str}]${NC}"
+        fi
+        ok "Loki is ready! ${DIM}(${boot_elapsed_str})${NC}"
+        return
+      fi
     fi
-    # Read current step from SSM parameter
-    local current_step
-    current_step=$(aws ssm get-parameter --name "/loki/setup-step" \
-      --region "$DEPLOY_REGION" --query 'Parameter.Value' --output text 2>/dev/null || echo "")
-    if [[ -n "$current_step" ]]; then
-      printf "\r  ⏳ [%s] %-50s" "$current_step" ""
-    else
-      printf "\r  ⏳ Bootstrapping... (%d/60) %-30s" "$i" ""
-    fi
+
     sleep 10
   done
   warn "Bootstrap check timed out — Loki may still be starting up"
 }
 
 show_complete() {
+  step "Done!"
   local ssm_cmd
   ssm_cmd="$(ssm_connect_cmd "$INSTANCE_ID")"
 
   # Load pack-specific commands for the completion screen
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
   local pack_commands="loki tui"
-  local pack_emoji="🤖"
   local pack_name_display="Loki"
   if [[ -f "$pack_profile" ]]; then
     source "$pack_profile"
-    pack_emoji="${PACK_BANNER_EMOJI:-🤖}"
     pack_name_display="${PACK_BANNER_NAME:-Loki}"
-    # Use first non-empty line from PACK_BANNER_COMMANDS as the primary command
     pack_commands="${PACK_BANNER_COMMANDS}"
   fi
 
   echo ""
-  echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-  echo -e "${GREEN}║    ${pack_emoji} ${pack_name_display} — deployed and running!${NC}"
-  echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+  local info_block=""
+  info_block+="Instance   ${INSTANCE_ID}\n"
+  info_block+="IP         ${PUBLIC_IP}\n"
+  info_block+="Region     ${DEPLOY_REGION}\n"
+  info_block+="Account    ${ACCOUNT_ID}\n"
+  info_block+="Docs       ${DOCS_URL}"
+
+  local next_block=""
+  next_block+="Connect to your agent:\n\n"
+  next_block+="  ${ssm_cmd}\n\n"
+  next_block+="Then run:\n"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && next_block+="  ${line}\n"
+  done <<< "$pack_commands"
+
+  $GUM style --foreground 82 --bold --margin "0 2" \
+    "${pack_name_display} is deployed and running!"
   echo ""
-  echo -e "  ${BOLD}Instance:${NC}  ${INSTANCE_ID}"
-  echo -e "  ${BOLD}IP:${NC}        ${PUBLIC_IP}"
-  echo -e "  ${BOLD}Region:${NC}    ${DEPLOY_REGION}"
-  echo -e "  ${BOLD}Account:${NC}   ${ACCOUNT_ID}"
+  echo -e "$info_block" | $GUM style --foreground 255 --padding "1 2" --margin "0 2"
   echo ""
-  echo -e "  ${BOLD}Docs:${NC}      ${DOCS_URL}"
-  echo ""
-  echo -e "${CYAN}┌──────────────────────────────────────────────────────────────┐${NC}"
-  echo -e "${CYAN}│${NC}  ${BOLD}👉 NEXT STEP: Connect to your agent${NC}                         ${CYAN}│${NC}"
-  echo -e "${CYAN}│${NC}                                                              ${CYAN}│${NC}"
-  echo -e "${CYAN}│${NC}  ${GREEN}${ssm_cmd}${NC}"
-  echo -e "${CYAN}│${NC}                                                              ${CYAN}│${NC}"
-  echo -e "${CYAN}│${NC}  ${BOLD}Then run:${NC}                                                   ${CYAN}│${NC}"
-  echo -e "${pack_commands}" | while IFS= read -r line; do
-    [[ -n "$line" ]] && echo -e "${CYAN}│${NC}  ${GREEN}${line}${NC}"
-  done
-  echo -e "${CYAN}└──────────────────────────────────────────────────────────────┘${NC}"
+  echo -e "$next_block" | $GUM style --border rounded --border-foreground 82 \
+    --foreground 117 --bold --padding "1 2" --margin "0 2"
   echo ""
 
-  if [[ -n "${CLONE_DIR:-}" ]] && confirm "Remove cloned repo directory (${CLONE_DIR})?" ; then
-    # Sanity check: only delete paths that look like our clone dirs
-    if [[ "$CLONE_DIR" == /tmp/* || "$CLONE_DIR" == "$HOME"/.* || "$CLONE_DIR" == *"/loki-agent" ]]; then
-      rm -rf "$CLONE_DIR" 2>/dev/null
-      ok "Cleaned up ${CLONE_DIR}"
-    else
-      warn "Unexpected clone path — skipping automatic removal: ${CLONE_DIR}"
-    fi
-  else
-    info "Repo kept at ${CLONE_DIR}"
-  fi
-  if [[ -n "${TF_WORKDIR:-}" && -d "$TF_WORKDIR" ]]; then
-    if confirm "Remove temp Terraform workdir (${TF_WORKDIR})?" ; then
-      if [[ "$TF_WORKDIR" == /tmp/* ]]; then
-        rm -rf "$TF_WORKDIR" 2>/dev/null
-        ok "Cleaned up ${TF_WORKDIR}"
-      else
-        warn "Unexpected workdir path — skipping automatic removal: ${TF_WORKDIR}"
-      fi
-    else
-      info "Terraform workdir kept at ${TF_WORKDIR}"
-    fi
-  fi
+  # Try to copy connect command to clipboard
+  copy_to_clipboard "$ssm_cmd" && ok "Connect command copied to clipboard"
+  echo ""
+
+  safe_cleanup_dir "${CLONE_DIR:-}" "cloned repo directory" '/tmp/*' "$HOME/.*" '*/loki-agent'
+  safe_cleanup_dir "${TF_WORKDIR:-}" "temp Terraform workdir" '/tmp/*'
 }
 
 # ============================================================================
 # Main
 # ============================================================================
 main() {
+  install_gum            # must run before anything that uses $GUM
   show_banner
-  preflight_checks
-  choose_deploy_method
-  collect_config
+  preflight_checks       # step 1
+  choose_deploy_method   # step 2
+  collect_config         # step 3
   check_existing_deployments  # Must run AFTER collect_config so DEPLOY_REGION is set
   # Skip VPC quota check when reusing an existing VPC
   if [[ -z "${EXISTING_VPC_ID:-}" ]]; then
@@ -1481,15 +1656,18 @@ main() {
     ok "Skipping VPC quota check (reusing existing VPC ${EXISTING_VPC_ID})"
   fi
   build_deploy_params  # Populate parameter arrays from user config
-  show_summary
+  show_summary         # step 4
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
+    TOTAL_STEPS=5
+    step "Deploy (Console)"
     deploy_console
     exit 0
   fi
 
   # CLI deploys need the repo
+  step "Deploy"
   prepare_repo
   echo ""
 
@@ -1501,9 +1679,9 @@ main() {
     *) fail "Invalid choice: $DEPLOY_METHOD" ;;
   esac
 
-  wait_for_bootstrap
+  wait_for_bootstrap   # step 6
   ensure_ssm_session_document
-  show_complete
+  show_complete        # step 7
 }
 
 main "$@"
