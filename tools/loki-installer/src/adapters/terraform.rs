@@ -399,6 +399,7 @@ fn build_terraform_init_command(working_dir: &str) -> CommandSpec {
         args: vec![
             format!("-chdir={working_dir}"),
             "init".into(),
+            "-no-color".into(),
             "-input=false".into(),
         ],
         current_dir: None,
@@ -470,6 +471,7 @@ fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
             format!("-chdir={working_dir}"),
             "output".into(),
             "-json".into(),
+            "-no-color".into(),
         ],
         current_dir: None,
     }
@@ -485,6 +487,7 @@ fn build_terraform_import_command(
         args: vec![
             format!("-chdir={working_dir}"),
             "import".into(),
+            "-no-color".into(),
             resource_address.into(),
             import_id.into(),
         ],
@@ -746,7 +749,7 @@ mod tests {
         assert_eq!(command.program, "terraform");
         assert_eq!(
             command.args,
-            vec!["-chdir=/tmp/repo/deploy/terraform", "init", "-input=false",]
+            vec!["-chdir=/tmp/repo/deploy/terraform", "init", "-no-color", "-input=false",]
         );
     }
 
@@ -855,6 +858,7 @@ mod tests {
             vec![
                 "-chdir=/tmp/repo/deploy/terraform",
                 "import",
+                "-no-color",
                 "aws_iam_role.instance",
                 "loki-instance-role",
             ]
