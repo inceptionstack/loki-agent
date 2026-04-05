@@ -13,6 +13,8 @@
 >
 > Works in **bash**, **zsh**, and **AWS CloudShell**. The installer walks you through pack, profile, and deploy method interactively.
 >
+> ![Loki Installer](docs/installer-screenshot.jpg)
+>
 > **One-liner examples (non-interactive):**
 > ```sh
 > # Full builder agent (can create/modify/delete AWS resources)
