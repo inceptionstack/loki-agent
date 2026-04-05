@@ -23,6 +23,7 @@ pub enum PlannerError {
     Adapter(#[from] AdapterError),
 }
 
+#[derive(Clone)]
 pub struct Planner {
     repo: ManifestRepository,
 }

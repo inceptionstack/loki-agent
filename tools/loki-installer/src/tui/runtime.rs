@@ -1,10 +1,11 @@
 //! TUI runtime loop and rendering.
 
-use crate::core::Planner;
+use crate::core::{InstallEvent, InstallEventSink, Planner};
 use crate::tui::app::{AppLifecycle, AppState, ScreenId, screen_title};
 use crate::tui::events::InstallerEvent;
 use crate::tui::screens;
 use crate::tui::update::{AppAction, update};
+use async_trait::async_trait;
 use color_eyre::Result;
 use crossterm::{
     event::{Event, EventStream},
@@ -21,6 +22,7 @@ use ratatui::{
 };
 use std::collections::VecDeque;
 use std::io::{self, Stdout};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 pub async fn run(planner: Planner) -> Result<()> {
     enable_raw_mode()?;
@@ -30,19 +32,38 @@ pub async fn run(planner: Planner) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     let mut state = AppState::default();
     let mut events = EventStream::new();
+    let (deploy_tx, mut deploy_rx) = unbounded_channel();
 
     let mut pending = VecDeque::from(update(&mut state, InstallerEvent::AppStarted));
     while state.lifecycle == AppLifecycle::Running {
-        run_actions(&planner, &mut state, &mut pending, &mut terminal).await?;
-        if let Some(event) = events.next().await {
-            match event? {
-                Event::Key(key) => {
-                    pending.extend(update(&mut state, InstallerEvent::KeyPressed(key)))
+        run_actions(
+            &planner,
+            &deploy_tx,
+            &mut state,
+            &mut pending,
+            &mut terminal,
+        )
+        .await?;
+        tokio::select! {
+            event = events.next() => {
+                match event {
+                    Some(Ok(Event::Key(key))) => {
+                        pending.extend(update(&mut state, InstallerEvent::KeyPressed(key)));
+                    }
+                    Some(Ok(Event::Resize(width, height))) => {
+                        pending.extend(update(&mut state, InstallerEvent::Resize { width, height }));
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(err)) => return Err(err.into()),
+                    None => {
+                        state.lifecycle = AppLifecycle::Exiting;
+                    }
                 }
-                Event::Resize(width, height) => {
-                    pending.extend(update(&mut state, InstallerEvent::Resize { width, height }))
+            }
+            deploy_event = deploy_rx.recv() => {
+                if let Some(event) = deploy_event {
+                    pending.extend(update(&mut state, event));
                 }
-                _ => {}
             }
         }
     }
@@ -55,6 +76,7 @@ pub async fn run(planner: Planner) -> Result<()> {
 
 async fn run_actions(
     planner: &Planner,
+    deploy_tx: &UnboundedSender<InstallerEvent>,
     state: &mut AppState,
     pending: &mut VecDeque<AppAction>,
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
@@ -106,16 +128,47 @@ async fn run_actions(
             }
             AppAction::StartDeploy => {
                 if let Some(plan) = state.plan.clone() {
-                    let session = planner.start_install(plan).await?;
-                    state.session = Some(session);
-                    pending.extend(update(
-                        state,
-                        InstallerEvent::DeployFinished(Ok(crate::core::ApplyResult {
-                            final_phase: crate::core::InstallPhase::PostInstall,
-                            artifacts: Default::default(),
-                            post_install_steps: vec![],
-                        })),
-                    ));
+                    state.deployment.current_phase = None;
+                    state.deployment.logs.clear();
+                    render(terminal, state)?;
+
+                    let planner = planner.clone();
+                    let task_tx = deploy_tx.clone();
+                    match planner.create_install_session(plan) {
+                        Ok(session) => {
+                            state.session = Some(session.clone());
+                            tokio::spawn(async move {
+                                let mut session = session;
+                                let mut sink = TuiEventSink::new(task_tx.clone());
+                                if let Err(err) = sink
+                                    .emit_line(
+                                        format!("Created install session {}", session.session_id),
+                                        None,
+                                    )
+                                    .await
+                                {
+                                    let _ = task_tx.send(InstallerEvent::DeployFailed(err));
+                                    return;
+                                }
+                                match planner
+                                    .execute_install_with_sink(&mut session, &mut sink)
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        let _ = task_tx.send(InstallerEvent::DeployFinished(
+                                            Box::new(session),
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        let _ = task_tx
+                                            .send(InstallerEvent::DeployFailed(err.to_string()));
+                                    }
+                                }
+                            });
+                        }
+                        Err(err) => pending
+                            .extend(update(state, InstallerEvent::DeployFailed(err.to_string()))),
+                    }
                 }
             }
             AppAction::Exit => {
@@ -125,6 +178,73 @@ async fn run_actions(
         }
     }
     Ok(())
+}
+
+struct TuiEventSink {
+    tx: UnboundedSender<InstallerEvent>,
+}
+
+impl TuiEventSink {
+    fn new(tx: UnboundedSender<InstallerEvent>) -> Self {
+        Self { tx }
+    }
+
+    async fn emit_line(
+        &mut self,
+        message: String,
+        phase: Option<crate::core::InstallPhase>,
+    ) -> Result<(), String> {
+        self.tx
+            .send(InstallerEvent::DeployLogLine { message, phase })
+            .map_err(|err| err.to_string())
+    }
+}
+
+#[async_trait]
+impl InstallEventSink for TuiEventSink {
+    async fn emit(&mut self, event: InstallEvent) {
+        let result = match event {
+            InstallEvent::PhaseStarted { phase, message } => {
+                self.emit_line(message, Some(phase)).await
+            }
+            InstallEvent::StepStarted {
+                step_id,
+                display_name,
+            } => {
+                self.emit_line(format!("Starting {display_name} ({step_id})"), None)
+                    .await
+            }
+            InstallEvent::StepFinished { step_id, message } => {
+                let summary = if message.is_empty() {
+                    format!("Finished {step_id}")
+                } else {
+                    format!("Finished {step_id}: {message}")
+                };
+                self.emit_line(summary, None).await
+            }
+            InstallEvent::Warning { code, message } => {
+                self.emit_line(format!("Warning [{code}]: {message}"), None)
+                    .await
+            }
+            InstallEvent::ArtifactRecorded { key, value } => {
+                self.emit_line(format!("Recorded artifact {key}={value}"), None)
+                    .await
+            }
+            InstallEvent::LogLine { message } => self.emit_line(message, None).await,
+            InstallEvent::StackEvent {
+                resource,
+                status,
+                resource_type,
+            } => {
+                self.emit_line(format!("{resource_type} {resource}: {status}"), None)
+                    .await
+            }
+        };
+
+        if let Err(err) = result {
+            let _ = self.tx.send(InstallerEvent::DeployFailed(err));
+        }
+    }
 }
 
 fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, state: &AppState) -> Result<()> {

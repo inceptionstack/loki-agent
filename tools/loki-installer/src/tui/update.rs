@@ -123,11 +123,21 @@ pub fn update(state: &mut AppState, event: InstallerEvent) -> Vec<AppAction> {
             }
             vec![AppAction::Render]
         }
-        InstallerEvent::DeployFinished(result) => {
-            match result {
-                Ok(_) => state.screen = ScreenId::PostInstall,
-                Err(err) => state.errors.push(UserFacingError { message: err }),
+        InstallerEvent::DeployLogLine { message, phase } => {
+            if let Some(phase) = phase {
+                state.deployment.current_phase = Some(phase);
             }
+            state.deployment.logs.push(message);
+            vec![AppAction::Render]
+        }
+        InstallerEvent::DeployFinished(session) => {
+            state.session = Some(*session);
+            state.screen = ScreenId::PostInstall;
+            vec![AppAction::Render]
+        }
+        InstallerEvent::DeployFailed(err) => {
+            state.errors.push(UserFacingError { message: err });
+            state.screen = ScreenId::DeployProgress;
             vec![AppAction::Render]
         }
         InstallerEvent::Resize { width, height } => {
@@ -270,7 +280,11 @@ fn retry(state: &mut AppState) -> Vec<AppAction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DeployMethodId, MethodManifest, PackManifest, ProfileManifest};
+    use crate::core::{
+        DeployMethodId, InstallMode, InstallPhase, InstallRequest, InstallSession, InstallerEngine,
+        MethodManifest, PackManifest, ProfileManifest,
+    };
+    use chrono::Utc;
     use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState};
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -370,5 +384,67 @@ mod tests {
             actions.as_slice(),
             [AppAction::LoadMethods { pack_id }] if pack_id == "openclaw"
         ));
+    }
+
+    #[test]
+    fn deploy_events_update_progress_and_terminal_state() {
+        let mut state = AppState::default();
+        state.screen = ScreenId::DeployProgress;
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::DeployLogLine {
+                message: "Planning stack".into(),
+                phase: Some(InstallPhase::PlanDeployment),
+            },
+        );
+        assert_eq!(
+            state.deployment.current_phase,
+            Some(InstallPhase::PlanDeployment)
+        );
+        assert_eq!(state.deployment.logs, vec!["Planning stack"]);
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+
+        let session = InstallSession {
+            session_id: "session-123".into(),
+            installer_version: "test".into(),
+            engine: InstallerEngine::V2,
+            mode: InstallMode::Interactive,
+            request: InstallRequest {
+                engine: InstallerEngine::V2,
+                mode: InstallMode::Interactive,
+                pack: "openclaw".into(),
+                profile: Some("builder".into()),
+                method: Some(DeployMethodId::Cfn),
+                region: Some("us-east-1".into()),
+                stack_name: Some("loki-openclaw".into()),
+                auto_yes: true,
+                json_output: false,
+                resume_session_id: None,
+                extra_options: Default::default(),
+            },
+            plan: None,
+            phase: InstallPhase::PostInstall,
+            started_at: Utc::now(),
+            updated_at: Utc::now(),
+            artifacts: Default::default(),
+            status_summary: Some("deployment completed".into()),
+        };
+
+        let actions = update(
+            &mut state,
+            InstallerEvent::DeployFinished(Box::new(session.clone())),
+        );
+        assert_eq!(state.screen, ScreenId::PostInstall);
+        assert_eq!(state.session.as_ref(), Some(&session));
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
+
+        let actions = update(&mut state, InstallerEvent::DeployFailed("boom".into()));
+        assert_eq!(state.screen, ScreenId::DeployProgress);
+        assert_eq!(
+            state.errors.last().map(|err| err.message.as_str()),
+            Some("boom")
+        );
+        assert!(matches!(actions.as_slice(), [AppAction::Render]));
     }
 }
