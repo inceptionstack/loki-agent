@@ -658,7 +658,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "loki-installer"
-version = "0.2.0-rc4"
+version = "0.2.0-rc6"
 dependencies = [
  "async-trait",
  "chrono",

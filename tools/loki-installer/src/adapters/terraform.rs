@@ -288,13 +288,74 @@ async fn apply_terraform(
                     &context.plan_file,
                 ))
                 .await?;
-                ensure_terraform_success(
-                    &output,
-                    "Terraform apply failed — inspect the Terraform output for the rejected AWS resource or permission",
-                )?;
+                let apply_output = if output.success() {
+                    output
+                } else {
+                    let combined_output = format!("{}\n{}", output.stderr, output.stdout);
+                    let is_existing_resource_error = combined_output.contains("EntityAlreadyExists")
+                        || combined_output.to_ascii_lowercase().contains("already exists");
+                    let existing_resources = parse_existing_resources(&combined_output);
+
+                    if is_existing_resource_error && !existing_resources.is_empty() {
+                        for (resource_address, import_id) in existing_resources {
+                            event_sink
+                                .emit(InstallEvent::LogLine {
+                                    message: format!(
+                                        "Auto-importing pre-existing resource: {resource_address} ({import_id})"
+                                    ),
+                                })
+                                .await;
+                            run_terraform_import(
+                                &context.working_dir,
+                                &resource_address,
+                                &import_id,
+                            )
+                            .await?;
+                        }
+
+                        let retry_plan = run_command(&build_terraform_plan_command(
+                            &context.working_dir,
+                            &context.plan_file,
+                            &context.region,
+                            &context.pack,
+                            &context.profile,
+                            &context.environment_name,
+                            &context.tf_vars,
+                        ))
+                        .await?;
+                        ensure_terraform_success(
+                            &retry_plan,
+                            "Terraform plan failed — fix the reported variable or provider issue and retry",
+                        )?;
+                        record_command_artifact(
+                            "terraform_plan_output",
+                            retry_plan,
+                            &mut artifacts,
+                            event_sink,
+                        )
+                        .await;
+
+                        let retry_apply = run_command(&build_terraform_apply_command(
+                            &context.working_dir,
+                            &context.plan_file,
+                        ))
+                        .await?;
+                        ensure_terraform_success(
+                            &retry_apply,
+                            "Terraform apply failed — inspect the Terraform output for the rejected AWS resource or permission",
+                        )?;
+                        retry_apply
+                    } else {
+                        ensure_terraform_success(
+                            &output,
+                            "Terraform apply failed — inspect the Terraform output for the rejected AWS resource or permission",
+                        )?;
+                        output
+                    }
+                };
                 record_command_artifact(
                     "terraform_apply_output",
-                    output,
+                    apply_output,
                     &mut artifacts,
                     event_sink,
                 )
@@ -412,6 +473,123 @@ fn build_terraform_output_command(working_dir: &str) -> CommandSpec {
         ],
         current_dir: None,
     }
+}
+
+fn build_terraform_import_command(
+    working_dir: &str,
+    resource_address: &str,
+    import_id: &str,
+) -> CommandSpec {
+    CommandSpec {
+        program: "terraform".into(),
+        args: vec![
+            format!("-chdir={working_dir}"),
+            "import".into(),
+            resource_address.into(),
+            import_id.into(),
+        ],
+        current_dir: None,
+    }
+}
+
+async fn run_terraform_import(
+    working_dir: &str,
+    resource_address: &str,
+    import_id: &str,
+) -> Result<CommandOutput, AdapterError> {
+    let output = run_command(&build_terraform_import_command(
+        working_dir,
+        resource_address,
+        import_id,
+    ))
+    .await?;
+    ensure_terraform_success(
+        &output,
+        "Terraform import failed — inspect the Terraform output for the rejected AWS resource or permission",
+    )?;
+    Ok(output)
+}
+
+fn parse_existing_resources(stderr: &str) -> Vec<(String, String)> {
+    let mut resources = Vec::new();
+    let mut current_error_line: Option<&str> = None;
+
+    for line in stderr.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("Error:") {
+            let is_existing_resource_error = trimmed.contains("EntityAlreadyExists")
+                || trimmed.to_ascii_lowercase().contains("already exists");
+            current_error_line = is_existing_resource_error.then_some(trimmed);
+            continue;
+        }
+
+        let Some(error_line) = current_error_line else {
+            continue;
+        };
+
+        let Some(resource_address) = parse_resource_address(trimmed) else {
+            continue;
+        };
+
+        let Some(import_id) = extract_import_id(error_line, &resource_address) else {
+            current_error_line = None;
+            continue;
+        };
+
+        if !resources.iter().any(|(address, id)| {
+            address == &resource_address && id == &import_id
+        }) {
+            resources.push((resource_address, import_id));
+        }
+        current_error_line = None;
+    }
+
+    resources
+}
+
+fn parse_resource_address(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("with ")?;
+    let address = rest.split(',').next()?.trim();
+    (!address.is_empty()).then(|| address.to_string())
+}
+
+fn extract_import_id(error_line: &str, resource_address: &str) -> Option<String> {
+    let resource_type = supported_resource_type(resource_address)?;
+    match resource_type {
+        "aws_iam_role" | "aws_iam_instance_profile" | "aws_s3_bucket" => {
+            extract_parenthesized_value(error_line)
+        }
+        "aws_security_group" => extract_id_with_prefix(error_line, "sg-")
+            .or_else(|| extract_parenthesized_value(error_line)),
+        "aws_vpc" => {
+            extract_id_with_prefix(error_line, "vpc-").or_else(|| extract_parenthesized_value(error_line))
+        }
+        _ => None,
+    }
+}
+
+fn supported_resource_type(resource_address: &str) -> Option<&str> {
+    resource_address.split('.').find_map(|segment| match segment {
+        "aws_iam_role" => Some("aws_iam_role"),
+        "aws_iam_instance_profile" => Some("aws_iam_instance_profile"),
+        "aws_s3_bucket" => Some("aws_s3_bucket"),
+        "aws_security_group" => Some("aws_security_group"),
+        "aws_vpc" => Some("aws_vpc"),
+        _ => None,
+    })
+}
+
+fn extract_parenthesized_value(line: &str) -> Option<String> {
+    let start = line.find('(')?;
+    let end = line[start + 1..].find(')')?;
+    let value = line[start + 1..start + 1 + end].trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn extract_id_with_prefix(line: &str, prefix: &str) -> Option<String> {
+    line.split(|c: char| c.is_whitespace() || matches!(c, '(' | ')' | ':' | ',' | ';' | '.'))
+        .find(|token| token.starts_with(prefix))
+        .map(str::to_string)
 }
 
 fn parse_terraform_outputs(raw: &str) -> Result<BTreeMap<String, String>, AdapterError> {
@@ -556,8 +734,9 @@ fn completed_apply_result(plan: &InstallPlan, session: &InstallSession) -> Apply
 #[cfg(test)]
 mod tests {
     use super::{
-        adapter_option_to_tf_var, build_terraform_apply_command, build_terraform_init_command,
-        build_terraform_plan_command, parse_terraform_outputs, phase_is_past,
+        adapter_option_to_tf_var, build_terraform_apply_command, build_terraform_import_command,
+        build_terraform_init_command, build_terraform_plan_command, parse_existing_resources,
+        parse_terraform_outputs, phase_is_past,
     };
     use crate::core::InstallPhase;
 
@@ -664,6 +843,25 @@ mod tests {
     }
 
     #[test]
+    fn terraform_import_command_uses_working_dir_and_resource_details() {
+        let command = build_terraform_import_command(
+            "/tmp/repo/deploy/terraform",
+            "aws_iam_role.instance",
+            "loki-instance-role",
+        );
+        assert_eq!(command.program, "terraform");
+        assert_eq!(
+            command.args,
+            vec![
+                "-chdir=/tmp/repo/deploy/terraform",
+                "import",
+                "aws_iam_role.instance",
+                "loki-instance-role",
+            ]
+        );
+    }
+
+    #[test]
     fn resume_skips_only_completed_terraform_phases() {
         assert!(phase_is_past(
             InstallPhase::PlanDeployment,
@@ -697,5 +895,77 @@ mod tests {
         assert_eq!(artifacts.get("instance_id"), Some(&"i-123".into()));
         assert_eq!(artifacts.get("public_ip"), Some(&"1.2.3.4".into()));
         assert!(artifacts.get("terraform_output_json").is_some());
+    }
+
+    #[test]
+    fn parse_existing_resources_extracts_supported_resource_pairs() {
+        let parsed = parse_existing_resources(
+            r#"
+Error: creating IAM Role (loki-instance-role): operation error IAM: CreateRole, https response error StatusCode: 409, RequestID: abc, EntityAlreadyExists: Role with name loki-instance-role already exists.
+
+  with aws_iam_role.instance,
+  on iam.tf line 10, in resource "aws_iam_role" "instance":
+  10: resource "aws_iam_role" "instance" {
+
+Error: creating IAM Instance Profile (loki-instance-profile): operation error IAM: CreateInstanceProfile, https response error StatusCode: 409, RequestID: def, EntityAlreadyExists: Instance Profile loki-instance-profile already exists.
+
+  with module.compute.aws_iam_instance_profile.instance,
+  on iam.tf line 20, in resource "aws_iam_instance_profile" "instance":
+
+Error: creating S3 Bucket (loki-bucket): BucketAlreadyOwnedByYou: Bucket with name loki-bucket already exists.
+
+  with aws_s3_bucket.artifacts,
+  on s3.tf line 2, in resource "aws_s3_bucket" "artifacts":
+
+Error: creating Security Group (sg-0123456789abcdef0): InvalidGroup.Duplicate: security group already exists.
+
+  with aws_security_group.instance,
+  on network.tf line 5, in resource "aws_security_group" "instance":
+
+Error: creating VPC (vpc-0123456789abcdef0): operation error EC2: CreateVpc, https response error StatusCode: 400, RequestID: xyz, VpcLimitExceeded: The vpc vpc-0123456789abcdef0 already exists.
+
+  with module.network.aws_vpc.main,
+  on network.tf line 1, in resource "aws_vpc" "main":
+"#,
+        );
+
+        assert_eq!(
+            parsed,
+            vec![
+                ("aws_iam_role.instance".into(), "loki-instance-role".into()),
+                (
+                    "module.compute.aws_iam_instance_profile.instance".into(),
+                    "loki-instance-profile".into(),
+                ),
+                ("aws_s3_bucket.artifacts".into(), "loki-bucket".into()),
+                (
+                    "aws_security_group.instance".into(),
+                    "sg-0123456789abcdef0".into(),
+                ),
+                (
+                    "module.network.aws_vpc.main".into(),
+                    "vpc-0123456789abcdef0".into(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_existing_resources_ignores_unsupported_or_unmatched_errors() {
+        let parsed = parse_existing_resources(
+            r#"
+Error: creating Subnet (subnet-0123456789abcdef0): operation error EC2: CreateSubnet, https response error StatusCode: 400, RequestID: xyz, InvalidSubnet.Conflict: subnet already exists.
+
+  with aws_subnet.main,
+  on network.tf line 30, in resource "aws_subnet" "main":
+
+Error: reading IAM Role (loki-instance-role): some unrelated read error.
+
+  with aws_iam_role.instance,
+  on iam.tf line 10, in resource "aws_iam_role" "instance":
+"#,
+        );
+
+        assert!(parsed.is_empty());
     }
 }
