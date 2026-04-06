@@ -1609,15 +1609,27 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
+  local doc_content='{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"loki tui || exec bash --login\""}}}'
+
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
-    ok "SSM session document: ${SSM_DOC_NAME}"
+    # Update existing document to latest version
+    aws ssm update-document \
+      --name "$SSM_DOC_NAME" \
+      --content "$doc_content" \
+      --document-version '$LATEST' \
+      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    aws ssm update-document-default-version \
+      --name "$SSM_DOC_NAME" \
+      --document-version '$LATEST' \
+      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    ok "SSM session document: ${SSM_DOC_NAME} (updated)"
     return 0
   fi
-  info "Creating ${SSM_DOC_NAME} SSM document (starts sessions as ec2-user)..."
+  info "Creating ${SSM_DOC_NAME} SSM document..."
   aws ssm create-document \
     --name "$SSM_DOC_NAME" \
     --document-type "Session" \
-    --content '{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && exec bash --login"}}}' \
+    --content "$doc_content" \
     --region "$DEPLOY_REGION" >/dev/null 2>&1 || {
       warn "Could not create ${SSM_DOC_NAME} document (may need ssm:CreateDocument permission)"
       info "Connect with: aws ssm start-session --target \${INSTANCE_ID} --region \${DEPLOY_REGION}"
