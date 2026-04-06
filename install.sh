@@ -126,6 +126,7 @@ DEPLOY_TERRAFORM=3
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
 REPO_BRANCH="${REPO_BRANCH:-$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+[[ "$REPO_BRANCH" == "HEAD" ]] && REPO_BRANCH="main"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
 IS_CLOUDSHELL=false
@@ -1677,16 +1678,20 @@ ensure_ssm_session_document() {
   local doc_content='{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"loki tui || exec bash --login\""}}}'
 
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
-    # Update existing document to latest version
-    aws ssm update-document \
+    # Update existing document and set new version as default
+    local new_version
+    new_version=$(aws ssm update-document \
       --name "$SSM_DOC_NAME" \
       --content "$doc_content" \
       --document-version '$LATEST' \
-      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
-    aws ssm update-document-default-version \
-      --name "$SSM_DOC_NAME" \
-      --document-version '$LATEST' \
-      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+      --region "$DEPLOY_REGION" \
+      --query 'DocumentDescription.DocumentVersion' --output text 2>/dev/null) || true
+    if [[ -n "$new_version" && "$new_version" =~ ^[0-9]+$ ]]; then
+      aws ssm update-document-default-version \
+        --name "$SSM_DOC_NAME" \
+        --document-version "$new_version" \
+        --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    fi
     ok "SSM session document: ${SSM_DOC_NAME} (updated)"
     return 0
   fi
