@@ -636,6 +636,13 @@ if [[ -f "$PACK_PROFILE" ]]; then
   _SSM_BANNER_NAME="${PACK_BANNER_NAME}"
   _SSM_BANNER_COMMANDS="${PACK_BANNER_COMMANDS}"
 fi
+cat > /etc/profile.d/loki-aws.sh << AWSPROFILE
+# AWS credentials: ensure SDK default chain works (EC2 instance role via IMDS)
+export AWS_PROFILE="\${AWS_PROFILE:-default}"
+export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
+AWSPROFILE
+chmod 644 /etc/profile.d/loki-aws.sh
+
 cat > /etc/profile.d/loki.sh << LOKIPROFILE
 # SSM session: auto-switch to ec2-user with welcome banner
 if [ "\$(whoami)" = "ssm-user" ] && [ -z "\$LOKI_PROFILE_LOADED" ]; then
