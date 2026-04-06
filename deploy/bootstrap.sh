@@ -369,7 +369,7 @@ ok "System updated"
 
 # ---- Dependencies ----
 step "System Dependencies"
-dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext python3-pip
+dnf install -y git jq htop tmux gnupg2-minimal libatomic gettext python3-pip dbus-tools
 ok "Packages installed"
 
 # Install aws-cfn-bootstrap for cfn-signal (not pre-installed on AL2023)
@@ -403,6 +403,24 @@ if [[ "${DATA_VOL_GB}" -gt 0 ]]; then
 else
   info "Pack requests no data volume — skipping mount"
 fi
+
+# ---- Enable systemd user session for ec2-user (needed by openclaw gateway) ----
+loginctl enable-linger ec2-user 2>/dev/null || true
+# Wait for user runtime dir — linger starts the user manager asynchronously
+_EC2_UID=$(id -u ec2-user)
+_RUNTIME_DIR="/run/user/${_EC2_UID}"
+for _i in $(seq 1 30); do
+  [[ -d "${_RUNTIME_DIR}/systemd" ]] && break
+  sleep 1
+done
+if [[ -d "${_RUNTIME_DIR}/systemd" ]]; then
+  ok "Enabled loginctl linger for ec2-user (runtime dir ready)"
+else
+  warn "User runtime dir not ready after 30s — systemctl --user may fail"
+fi
+# Export for sudo --preserve-env in pack install steps
+export XDG_RUNTIME_DIR="${_RUNTIME_DIR}"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=${_RUNTIME_DIR}/bus"
 
 # ---- mise + Node.js (as ec2-user) ----
 step "mise + Node.js"
@@ -448,8 +466,12 @@ if [[ -f "$PACK_PROFILE" ]]; then
   PACK_BANNER_COMMANDS=""
   source "$PACK_PROFILE"
 
-  # Write aliases to ec2-user .bashrc
+  # Write AWS env vars + D-Bus session + aliases to ec2-user .bashrc
   sudo -u ec2-user tee -a /home/ec2-user/.bashrc > /dev/null << ALIASES_BLOCK
+export AWS_PROFILE="\${AWS_PROFILE:-default}"
+export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
+export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_RUNTIME_DIR}/bus}"
 ${PACK_ALIASES}
 ALIASES_BLOCK
 
@@ -535,7 +557,7 @@ for dep in "${DEPS[@]}"; do
   fi
   info "Installing dependency: ${dep}"
   # Run as ec2-user with mise/node on PATH; PACK_CONFIG is auto-detected by packs
-  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION bash -c '
+  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
     export PATH="/home/ec2-user/.local/bin:$PATH"
     eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
     NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -555,7 +577,7 @@ if [[ ! -f "$PACK_INSTALL" ]]; then
   exit 1
 fi
 info "Installing pack: ${PACK_NAME}"
-sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION bash -c '
+sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
   export PATH="/home/ec2-user/.local/bin:$PATH"
   eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
   NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -634,6 +656,16 @@ if [[ -f "$PACK_PROFILE" ]]; then
   _SSM_BANNER_NAME="${PACK_BANNER_NAME}"
   _SSM_BANNER_COMMANDS="${PACK_BANNER_COMMANDS}"
 fi
+cat > /etc/profile.d/loki-aws.sh << AWSPROFILE
+# AWS credentials: ensure SDK default chain works (EC2 instance role via IMDS)
+export AWS_PROFILE="\${AWS_PROFILE:-default}"
+export AWS_DEFAULT_REGION="\${AWS_DEFAULT_REGION:-${REGION}}"
+# D-Bus + systemd user session: needed for openclaw gateway restart / systemctl --user
+export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_RUNTIME_DIR}/bus}"
+AWSPROFILE
+chmod 644 /etc/profile.d/loki-aws.sh
+
 cat > /etc/profile.d/loki.sh << LOKIPROFILE
 # SSM session: auto-switch to ec2-user with welcome banner
 if [ "\$(whoami)" = "ssm-user" ] && [ -z "\$LOKI_PROFILE_LOADED" ]; then

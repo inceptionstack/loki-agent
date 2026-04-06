@@ -4,6 +4,12 @@ variable "aws_region" {
   description = "AWS region for infrastructure deployment. Defaults to us-east-1."
 }
 
+variable "repo_branch" {
+  type        = string
+  default     = "main"
+  description = "Git branch to clone on the EC2 instance. Use for testing feature branches."
+}
+
 variable "profile_name" {
   type        = string
   description = "Permission profile. 'builder' = full admin. 'account_assistant' = read-only. 'personal_assistant' = Bedrock only."

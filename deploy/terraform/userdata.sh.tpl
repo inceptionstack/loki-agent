@@ -28,7 +28,7 @@ command -v git &>/dev/null || dnf install -y git 2>/dev/null || yum install -y g
 # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
 _cloned=false
 for _attempt in 1 2 3; do
-  git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && _cloned=true && break
+  git clone --depth 1 -b "${repo_branch}" https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && _cloned=true && break
   echo "git clone failed (attempt $_attempt), retrying in 10s..." && sleep 10
 done
 if [[ "$_cloned" != "true" ]]; then

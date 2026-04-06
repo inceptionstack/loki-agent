@@ -44,11 +44,13 @@ show_debug_locations() {
 }
 
 # Ctrl-C: kill background jobs and exit immediately
-trap '
+cleanup_on_interrupt() {
   echo -e "\n\033[0;31m✗ Interrupted\033[0m" >&2
-  kill 0 2>/dev/null
+  # Kill all child processes (terraform, gum, tee, etc.)
+  kill -- -$$ 2>/dev/null || kill 0 2>/dev/null
   exit 130
-' INT
+}
+trap cleanup_on_interrupt INT TERM
 
 # Always show debug info on non-zero exit (EXIT trap is more reliable than ERR)
 trap '
@@ -69,14 +71,18 @@ INSTALLER_VERSION="0.5.62"
 # --pack <name>: pre-select agent pack
 # --method <m>: pre-select deploy method (cfn, terraform/tf)
 # --profile <p>: pre-select permission profile (builder, account_assistant, personal_assistant)
+# --simple / --advanced: pre-select install mode
 AUTO_YES=false
 PRESELECT_PACK=""
 PRESELECT_METHOD=""
 PRESELECT_PROFILE=""
+INSTALL_MODE=""  # "simple" or "advanced", empty = ask
 DEBUG_IN_REPO=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
+    --simple)   INSTALL_MODE="simple"; shift ;;
+    --advanced) INSTALL_MODE="advanced"; shift ;;
     --pack)
       if [[ $# -lt 2 || "$2" == --* ]]; then
         echo -e "\033[0;31m✗\033[0m --pack requires a pack name (e.g. --pack openclaw, --pack claude-code)" >&2
@@ -119,6 +125,7 @@ DEPLOY_TERRAFORM=3
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
+REPO_BRANCH="${REPO_BRANCH:-$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
 IS_CLOUDSHELL=false
@@ -196,7 +203,7 @@ install_gum() {
 # UI helpers
 # ============================================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
-MAGENTA='\033[0;35m'
+MAGENTA='\033[0;35m'; WHITE='\033[1;37m'
 
 info()  { echo -e "  ${BLUE}▸${NC} $1"; }
 ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
@@ -434,14 +441,13 @@ show_banner() {
 
   echo ""
   echo ""
-  echo -e "  ${CYAN}██╗      ██████╗ ██╗  ██╗██╗${NC}"
-  echo -e "  ${CYAN}██║     ██╔═══██╗██║ ██╔╝██║${NC}"
-  echo -e "  ${BLUE}██║     ██║   ██║█████╔╝ ██║${NC}"
-  echo -e "  ${BLUE}██║     ██║   ██║██╔═██╗ ██║${NC}"
-  echo -e "  ${MAGENTA}███████╗╚██████╔╝██║  ██╗██║${NC}"
-  echo -e "  ${MAGENTA}╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝${NC}"
+  echo -e "  ${CYAN}    __          __    _ ${NC}"
+  echo -e "  ${CYAN}   / /   ____  / /__ (_)${NC}"
+  echo -e "  ${BLUE}  / /   / __ \\/ //_// / ${NC}"
+  echo -e "  ${BLUE} / /___/ /_/ / ,< / /  ${NC}"
+  echo -e "  ${MAGENTA}/_____/\\____/_/|_/_/   ${NC}"
   echo ""
-  echo -e "  ${BOLD}AWS Installer${NC}  ${DIM}${version_line}${NC}"
+  echo -e "  ${DIM}AWS Agent Installer  ${version_line}${NC}"
   echo ""
   if [[ "$AUTO_YES" == true ]]; then
     local auto_msg="Running in non-interactive mode"
@@ -480,13 +486,18 @@ preflight_checks() {
   echo ""
   echo -e "  ${BOLD}Account:${NC}  ${ACCOUNT_ID}"
   echo -e "  ${BOLD}Region:${NC}   ${REGION}"
+  echo -e "  ${BOLD}Branch:${NC}   ${REPO_BRANCH}  ${DIM}(used by EC2 bootstrap)${NC}"
   echo ""
-  warn "Loki will get AdministratorAccess on this ENTIRE account."
-  warn "Use a dedicated sandbox account — never deploy in production."
-  echo ""
-  confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
 
-  check_permissions
+  if [[ "$INSTALL_MODE" != "simple" ]]; then
+    warn "Loki will get AdministratorAccess on this ENTIRE account."
+    warn "Use a dedicated sandbox account — never deploy in production."
+    echo ""
+    confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
+    check_permissions
+  else
+    ok "Using current account and region"
+  fi
 }
 
 check_vpc_quota() {
@@ -584,8 +595,8 @@ check_existing_deployments() {
 
     # Offer to reuse an existing VPC instead of creating a new one
     local reuse_vpc=true
-    if [[ "$AUTO_YES" == true ]]; then
-      info "Auto mode: reusing first existing VPC"
+    if [[ "$AUTO_YES" == true || "$INSTALL_MODE" == "simple" ]]; then
+      info "Reusing existing VPC"
     else
       if ! confirm "Reuse an existing VPC?" "default_yes"; then
         reuse_vpc=false
@@ -594,7 +605,7 @@ check_existing_deployments() {
 
     if [[ "$reuse_vpc" == true ]]; then
       local chosen_vpc
-      if [[ ${#vpc_ids[@]} -eq 1 || "$AUTO_YES" == true ]]; then
+      if [[ ${#vpc_ids[@]} -eq 1 || "$AUTO_YES" == true || "$INSTALL_MODE" == "simple" ]]; then
         chosen_vpc="${vpc_ids[0]}"
         info "Using VPC: ${chosen_vpc}"
       else
@@ -729,36 +740,8 @@ choose_deploy_method() {
   fi
 
   # If Terraform selected and not installed, handle it now — before config questions.
-  # This avoids the user filling out all config only to be blocked at deploy time.
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_TERRAFORM" ]]; then
-    if terraform_ok; then
-      ok "Terraform: $(terraform_version_string)"
-    else
-      if command -v terraform &>/dev/null; then
-        local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
-        local host; host=$(hw_arch)
-        if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
-          warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
-        else
-          warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
-        fi
-      else
-        warn "Terraform is not installed on this system."
-      fi
-      echo ""
-      echo "  Loki can install Terraform locally now (no root/sudo required)."
-      echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
-      echo ""
-      if confirm "Install Terraform locally before continuing?" "default_yes"; then
-        install_terraform
-      else
-        echo ""
-        echo "  Install it manually, then re-run this installer:"
-        echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
-        echo ""
-        fail "Terraform >= 1.10 is required."
-      fi
-    fi
+    ensure_terraform_available
   fi
 }
 
@@ -812,42 +795,70 @@ choose_profile() {
   ok "Profile selected: ${PROFILE_NAME}"
 }
 
-collect_config() {
-  step "Configuration"
+# ============================================================================
+# Pack registry loading (shared by simple + advanced modes)
+# ============================================================================
+_PACK_REGISTRY=""
+PACK_NAMES=()
+PACK_DESCS=()
+PACK_EXPERIMENTAL=()
 
-  # ---- Pack selection (dynamically discovered from registry.json) -----------
-  # CLONE_DIR may not be set yet (repo is cloned after config collection).
-  # If the local file isn't available, fetch from GitHub.
-  local registry="${CLONE_DIR:-}/packs/registry.json"
-  if [[ ! -f "$registry" ]]; then
+load_pack_registry() {
+  _PACK_REGISTRY="${CLONE_DIR:-}/packs/registry.json"
+  if [[ ! -f "$_PACK_REGISTRY" ]]; then
     local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.json"
-    registry="/tmp/loki-registry-$$.json"
-    curl -sfL "$registry_url" -o "$registry" 2>/dev/null || registry=""
+    _PACK_REGISTRY="/tmp/loki-registry-$$.json"
+    curl -sfL "$registry_url" -o "$_PACK_REGISTRY" 2>/dev/null || _PACK_REGISTRY=""
   fi
-  local -a pack_names=()
-  local -a pack_descs=()
-  local -a pack_experimental=()
-
-  # Parse agent packs from registry.json via jq
+  PACK_NAMES=()
+  PACK_DESCS=()
+  PACK_EXPERIMENTAL=()
   while IFS='|' read -r pname pdesc pexp; do
-    pack_names+=("$pname")
-    pack_descs+=("$pdesc")
-    pack_experimental+=("$pexp")
-  done < <([ -n "$registry" ] && jq -r '
+    PACK_NAMES+=("$pname")
+    PACK_DESCS+=("$pdesc")
+    PACK_EXPERIMENTAL+=("$pexp")
+  done < <([ -n "$_PACK_REGISTRY" ] && jq -r '
     .packs | to_entries[]
     | select(.value.type == "agent")
     | "\(.key)|\(.value.description // .key)|\(if .value.experimental then "true" else "false" end)"
-  ' "$registry" 2>/dev/null \
+  ' "$_PACK_REGISTRY" 2>/dev/null \
     || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
+}
 
-  # If pack was pre-selected via --pack, find and validate it
+# ============================================================================
+# Install mode selection: simple (default) or advanced
+# ============================================================================
+choose_install_mode() {
+  if [[ -n "$INSTALL_MODE" ]]; then
+    return  # pre-selected via --simple or --advanced
+  fi
+  if [[ "$AUTO_YES" == true ]]; then
+    INSTALL_MODE="simple"
+    return
+  fi
+  local mode_choice
+  mode_choice=$($GUM choose --header "Install mode" \
+    --selected "Simple — quick setup, smart defaults" \
+    "Simple — quick setup, smart defaults" \
+    "Advanced — full control over all settings" < /dev/tty) || mode_choice=""
+  case "$mode_choice" in
+    Simple*) INSTALL_MODE="simple" ;;
+    *)       INSTALL_MODE="advanced" ;;
+  esac
+}
+
+# ============================================================================
+# Shared: pack selection (used by both simple and advanced modes)
+# ============================================================================
+choose_pack() {
+  # If pack was pre-selected via --pack, validate it
   if [[ -n "${PRESELECT_PACK}" ]]; then
     local found=false
-    for i in "${!pack_names[@]}"; do
-      if [[ "${pack_names[$i]}" == "${PRESELECT_PACK}" ]]; then
-        PACK_NAME="${pack_names[$i]}"
+    for i in "${!PACK_NAMES[@]}"; do
+      if [[ "${PACK_NAMES[$i]}" == "${PRESELECT_PACK}" ]]; then
+        PACK_NAME="${PACK_NAMES[$i]}"
         found=true
-        if [[ "${pack_experimental[$i]}" == "true" ]]; then
+        if [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
           warn "${PACK_NAME} is experimental — expect rough edges"
         fi
         ok "Pack pre-selected: ${PACK_NAME}"
@@ -859,54 +870,118 @@ collect_config() {
       echo -e "  ${RED}✗ Unknown pack: '${PRESELECT_PACK}'${NC}"
       echo ""
       echo "  Available packs:"
-      for i in "${!pack_names[@]}"; do
-        echo "    - ${pack_names[$i]}"
+      for i in "${!PACK_NAMES[@]}"; do
+        echo "    - ${PACK_NAMES[$i]}"
       done
       echo ""
       fail "Pack '${PRESELECT_PACK}' not found. Use --pack <name> with one of the packs listed above."
     fi
+    return
   fi
 
-  if [[ -z "${PRESELECT_PACK}" ]]; then
-  # Build display items for gum choose
+  # Interactive: build display items for gum choose
   local -a gum_items=()
   local default_item=""
-  for i in "${!pack_names[@]}"; do
-    local item="${pack_names[$i]} — ${pack_descs[$i]}"
-    [[ "${pack_experimental[$i]}" == "true" ]] && item+=" (experimental)"
+  for i in "${!PACK_NAMES[@]}"; do
+    local item="${PACK_NAMES[$i]} — ${PACK_DESCS[$i]}"
+    [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]] && item+=" (experimental)"
     gum_items+=("$item")
-    [[ "${pack_names[$i]}" == "openclaw" ]] && default_item="$item"
+    [[ "${PACK_NAMES[$i]}" == "openclaw" ]] && default_item="$item"
   done
   local pack_choice
-  pack_choice=$($GUM choose --header "Agent to deploy" \
+  local header="${1:-Agent to deploy}"
+  pack_choice=$($GUM choose --header "$header" \
     ${default_item:+--selected "$default_item"} \
     "${gum_items[@]}" < /dev/tty)
   PACK_NAME="${pack_choice%% —*}"
-  for i in "${!pack_names[@]}"; do
-    if [[ "${pack_names[$i]}" == "$PACK_NAME" && "${pack_experimental[$i]}" == "true" ]]; then
+  for i in "${!PACK_NAMES[@]}"; do
+    if [[ "${PACK_NAMES[$i]}" == "$PACK_NAME" && "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
       warn "${PACK_NAME} is experimental — expect rough edges"
     fi
   done
-  ok "Selected pack: ${PACK_NAME}"
-  fi  # end of interactive pack selection
+  ok "Agent: ${PACK_NAME}"
+}
 
-  # ---- Profile selection (REQUIRED) ----------------------------------------
-  choose_profile
-
-  # ---- Profile + Pack compatibility check ----------------------------------
+# Check pack/profile compatibility
+check_pack_profile_compat() {
   if [[ "$PACK_NAME" == "nemoclaw" && "${PROFILE_NAME:-}" != "personal_assistant" ]]; then
-    echo ""
-    echo -e "  ${RED}✗ NemoClaw is only compatible with the personal_assistant profile.${NC}"
-    echo ""
-    echo "  NemoClaw runs the agent in an isolated sandbox that blocks all AWS API"
-    echo "  access. The ${PROFILE_NAME} profile requires AWS access to function."
-    echo ""
-    echo "  Options:"
-    echo "    • Use --pack openclaw with --profile ${PROFILE_NAME}"
-    echo "    • Use --pack nemoclaw with --profile personal_assistant"
-    echo ""
-    fail "Incompatible pack/profile combination: ${PACK_NAME} + ${PROFILE_NAME}"
+    if [[ "$INSTALL_MODE" == "simple" ]]; then
+      echo ""
+      echo -e "  ${RED}✗ NemoClaw requires the personal_assistant profile.${NC}"
+      echo "  Switching to personal_assistant automatically."
+      PROFILE_NAME="personal_assistant"
+      ok "Profile adjusted: ${PROFILE_NAME}"
+    else
+      echo ""
+      echo -e "  ${RED}✗ NemoClaw is only compatible with the personal_assistant profile.${NC}"
+      echo ""
+      echo "  NemoClaw runs the agent in an isolated sandbox that blocks all AWS API"
+      echo "  access. The ${PROFILE_NAME} profile requires AWS access to function."
+      echo ""
+      echo "  Options:"
+      echo "    • Use --pack openclaw with --profile ${PROFILE_NAME}"
+      echo "    • Use --pack nemoclaw with --profile personal_assistant"
+      echo ""
+      fail "Incompatible pack/profile combination: ${PACK_NAME} + ${PROFILE_NAME}"
+    fi
   fi
+}
+
+# ============================================================================
+# Simple mode: pack + profile → auto-configure everything else
+# ============================================================================
+collect_config_simple() {
+  step "Configuration (simple)"
+
+  load_pack_registry
+  local registry="$_PACK_REGISTRY"
+
+  choose_pack "Which agent do you want to deploy?"
+  choose_profile
+  check_pack_profile_compat
+
+  # ---- Auto-configure everything else ----
+  DEPLOY_REGION="${REGION:-us-east-1}"
+  DEPLOY_METHOD="$DEPLOY_TERRAFORM"
+
+  # Instance type: profile determines size in simple mode
+  case "$PROFILE_NAME" in
+    builder)            INSTANCE_TYPE="t4g.xlarge" ;;
+    account_assistant)  INSTANCE_TYPE="t4g.medium" ;;
+    personal_assistant) INSTANCE_TYPE="t4g.medium" ;;
+    *)                  INSTANCE_TYPE="t4g.xlarge" ;;
+  esac
+
+  # Environment name: auto-generate
+  local existing_count
+  existing_count=$(aws ec2 describe-vpcs \
+    --filters "Name=tag:loki:managed,Values=true" \
+    --region "$DEPLOY_REGION" \
+    --query 'length(Vpcs)' --output text 2>/dev/null || echo "0")
+  local ts_suffix; ts_suffix=$(date +%s | tail -c 4)
+  ENV_NAME="${PACK_NAME}-$((existing_count + 1))-${ts_suffix}"
+  LOKI_WATERMARK="$ENV_NAME"
+
+  # Security: all on for builder/account_assistant, all off for personal_assistant
+  case "$PROFILE_NAME" in
+    personal_assistant)
+      SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"
+      ACCESS_ANALYZER="false"; CONFIG_RECORDER="false" ;;
+    *)
+      SECURITY_HUB="true"; GUARDDUTY="true"; INSPECTOR="true"
+      ACCESS_ANALYZER="true"; CONFIG_RECORDER="true" ;;
+  esac
+}
+
+collect_config() {
+  step "Configuration"
+
+  load_pack_registry
+  local registry="$_PACK_REGISTRY"
+
+  choose_pack
+  choose_profile
+  check_pack_profile_compat
 
   prompt "AWS region" DEPLOY_REGION "$REGION"
 
@@ -979,7 +1054,7 @@ collect_config() {
 
 collect_security_config() {
   echo ""
-  echo -e "  ${BOLD}Security services${NC} (~\$5/mo total, individually toggleable):"
+  echo -e "  ${BOLD}Security services${NC} (~\$5/mo total):"
   echo ""
 
   if confirm "Enable all security services?" "default_yes"; then
@@ -989,16 +1064,30 @@ collect_security_config() {
     return
   fi
 
+  # Multi-select: user picks which to enable
   echo ""
-  echo -e "  Pick which to enable:"
-  echo ""
-  toggle "AWS Security Hub"    SECURITY_HUB    true
-  toggle "Amazon GuardDuty"    GUARDDUTY       true
-  toggle "Amazon Inspector"    INSPECTOR       true
-  toggle "IAM Access Analyzer" ACCESS_ANALYZER true
-  toggle "AWS Config Recorder" CONFIG_RECORDER true
+  local selected
+  selected=$($GUM choose --no-limit \
+    --header "Select services to enable (space to toggle, enter to confirm)" \
+    --selected "AWS Security Hub,Amazon GuardDuty,Amazon Inspector,IAM Access Analyzer,AWS Config Recorder" \
+    "AWS Security Hub" \
+    "Amazon GuardDuty" \
+    "Amazon Inspector" \
+    "IAM Access Analyzer" \
+    "AWS Config Recorder" < /dev/tty) || selected=""
 
-  echo ""
+  SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"
+  ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
+  while IFS= read -r svc; do
+    case "$svc" in
+      "AWS Security Hub")    SECURITY_HUB="true" ;;
+      "Amazon GuardDuty")    GUARDDUTY="true" ;;
+      "Amazon Inspector")    INSPECTOR="true" ;;
+      "IAM Access Analyzer") ACCESS_ANALYZER="true" ;;
+      "AWS Config Recorder") CONFIG_RECORDER="true" ;;
+    esac
+  done <<< "$selected"
+
   local enabled=""
   [[ "$SECURITY_HUB"    == "true" ]] && enabled+=" SecurityHub"
   [[ "$GUARDDUTY"        == "true" ]] && enabled+=" GuardDuty"
@@ -1012,8 +1101,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
@@ -1034,6 +1123,7 @@ build_deploy_params() {
     "$CONFIG_RECORDER"
     "${EXISTING_VPC_ID:-}"
     "${EXISTING_SUBNET_ID:-}"
+    "$REPO_BRANCH"
   )
   # Validate parallel arrays are in sync
   [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \
@@ -1075,22 +1165,58 @@ format_tf_vars() {
 show_summary() {
   step "Review & confirm"
 
+  local security_summary=""
+  if [[ "$SECURITY_HUB" == "true" && "$GUARDDUTY" == "true" && "$INSPECTOR" == "true" \
+     && "$ACCESS_ANALYZER" == "true" && "$CONFIG_RECORDER" == "true" ]]; then
+    security_summary="all enabled"
+  elif [[ "$SECURITY_HUB" == "false" && "$GUARDDUTY" == "false" && "$INSPECTOR" == "false" \
+       && "$ACCESS_ANALYZER" == "false" && "$CONFIG_RECORDER" == "false" ]]; then
+    security_summary="all disabled"
+  else
+    local enabled_list=""
+    [[ "$SECURITY_HUB"    == "true" ]] && enabled_list+="Hub "
+    [[ "$GUARDDUTY"        == "true" ]] && enabled_list+="Guard "
+    [[ "$INSPECTOR"        == "true" ]] && enabled_list+="Inspector "
+    [[ "$ACCESS_ANALYZER"  == "true" ]] && enabled_list+="Analyzer "
+    [[ "$CONFIG_RECORDER"  == "true" ]] && enabled_list+="Config "
+    security_summary="${enabled_list:-none}"
+  fi
+
+  local deploy_method_label="Terraform"
+  case "$DEPLOY_METHOD" in
+    "$DEPLOY_CFN_CLI")     deploy_method_label="CloudFormation CLI" ;;
+    "$DEPLOY_CFN_CONSOLE") deploy_method_label="CloudFormation Console" ;;
+  esac
+
   local summary=""
-  summary+="Environment   ${ENV_NAME}\n"
-  summary+="Pack          ${PACK_NAME}\n"
+  summary+="Branch        ${REPO_BRANCH}\n"
+  summary+="Deploy via    ${deploy_method_label}\n"
+  summary+="Account       ${ACCOUNT_ID}\n"
+  summary+="Agent         ${PACK_NAME}\n"
   summary+="Profile       ${PROFILE_NAME}\n"
   summary+="Instance      ${INSTANCE_TYPE}\n"
   summary+="Region        ${DEPLOY_REGION}\n"
-  summary+="Watermark     ${LOKI_WATERMARK}\n"
   [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
-  summary+="\n"
-  summary+="Security      Hub:${SECURITY_HUB}  Guard:${GUARDDUTY}  Inspector:${INSPECTOR}\n"
-  summary+="              Analyzer:${ACCESS_ANALYZER}  Config:${CONFIG_RECORDER}"
+  summary+="Security      ${security_summary}\n"
+  summary+="Environment   ${ENV_NAME}"
 
   echo -e "$summary" | $GUM style --border rounded --border-foreground 117 \
     --foreground 255 --padding "1 2" --margin "0 2" --bold
   echo ""
-  confirm_or_abort "Proceed with deployment?" "default_yes"
+
+  # In simple mode, offer "Change settings" to switch to advanced
+  if [[ "$INSTALL_MODE" == "simple" && "$AUTO_YES" != true ]]; then
+    local action
+    action=$($GUM choose --header "Ready to deploy?" \
+      "Deploy" \
+      "Change settings (advanced mode)" < /dev/tty) || action="Deploy"
+    if [[ "$action" == *"Change settings"* ]]; then
+      INSTALL_MODE="advanced"
+      return 1  # signal to re-run config in advanced mode
+    fi
+  else
+    confirm_or_abort "Proceed with deployment?" "default_yes"
+  fi
 }
 
 # ============================================================================
@@ -1236,30 +1362,66 @@ deploy_cfn_stack() {
 }
 
 wait_for_cfn_stack() {
-  local iterations=0 max_iterations=120  # 120 x 15s = 30 minutes
   local start_time=$SECONDS
+  local seen_events=""
+  local max_wait=1800  # 30 minutes
+
   while true; do
-    local status rc=0
-    status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
+    local elapsed=$(( SECONDS - start_time ))
+    if [[ $elapsed -ge $max_wait ]]; then
+      warn "Timed out after 30 minutes. Check the CloudFormation console for status."
+      break
+    fi
+
+    # Fetch recent stack events (newest first), show unseen ones
+    local events_json
+    events_json=$(aws cloudformation describe-stack-events \
+      --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
+      --query 'StackEvents[0:20].[EventId,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+      --output json 2>/dev/null) || true
+
+    if [[ -n "$events_json" ]]; then
+      # Process events in reverse (oldest first) so they appear chronologically
+      local count
+      count=$(echo "$events_json" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo 0)
+      for (( i=count-1; i>=0; i-- )); do
+        local event_id resource status reason
+        event_id=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[0])" 2>/dev/null)
+        [[ -z "$event_id" ]] && continue
+        # Skip already-seen events
+        if [[ "$seen_events" == *"$event_id"* ]]; then continue; fi
+        seen_events+=" $event_id"
+
+        resource=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[1])" 2>/dev/null)
+        status=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[2])" 2>/dev/null)
+        reason=$(echo "$events_json" | python3 -c "import sys,json; e=json.load(sys.stdin)[$i]; print(e[3] or '')" 2>/dev/null)
+
+        case "$status" in
+          *COMPLETE)      echo -e "  ${GREEN}✓${NC} ${resource} ${DIM}${status}${NC}" ;;
+          *IN_PROGRESS)   echo -e "  ${BLUE}+${NC} ${resource} ${DIM}${status}${NC}" ;;
+          *FAILED*|*ROLLBACK*)
+            echo -e "  ${RED}✗${NC} ${resource} ${status}"
+            [[ -n "$reason" ]] && echo -e "    ${RED}${reason}${NC}"
+            ;;
+        esac
+      done
+    fi
+
+    # Check overall stack status
+    local stack_status rc=0
+    stack_status=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$DEPLOY_REGION" \
       --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=$?
     if [[ $rc -ne 0 ]]; then
-      echo ""; fail "Stack no longer exists or is inaccessible: $status"
+      echo ""; fail "Stack no longer exists or is inaccessible: $stack_status"
     fi
-    local elapsed=$(( SECONDS - start_time ))
+
     local elapsed_str; elapsed_str=$(elapsed_fmt $elapsed)
-    case "$status" in
-      CREATE_COMPLETE)     printf "\r%-60s\r" ""; ok "Stack created! ${DIM}(${elapsed_str})${NC}"; break ;;
-      *FAILED*|*ROLLBACK*) printf "\r%-60s\r" ""; fail "Stack failed: $status" ;;
-      *)
-        iterations=$((iterations + 1))
-        if [[ $iterations -ge $max_iterations ]]; then
-          printf "\r%-60s\r" ""
-          warn "Timed out after 30 minutes waiting for stack. Check the CloudFormation console for status."
-          break
-        fi
-        animate_spinner 15 "$status"
-        ;;
+    case "$stack_status" in
+      CREATE_COMPLETE)     echo ""; ok "Stack created! ${DIM}(${elapsed_str})${NC}"; break ;;
+      *FAILED*|*ROLLBACK_COMPLETE) echo ""; fail "Stack failed: $stack_status" ;;
     esac
+
+    sleep 10
   done
 }
 
@@ -1324,18 +1486,37 @@ install_terraform() {
   fi
 }
 
-ensure_terraform() {
+# Check terraform is available, correct arch, correct version — offer to install if not
+ensure_terraform_available() {
   if terraform_ok; then
     ok "Terraform: $(terraform_version_string)"
     return 0
   fi
-  # Should have been handled in choose_deploy_method, but install as a safety net
-  install_terraform
+  if command -v terraform &>/dev/null; then
+    local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
+    local host; host=$(hw_arch)
+    if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
+      warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
+    else
+      warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
+    fi
+  else
+    warn "Terraform is not installed on this system."
+  fi
+  echo ""
+  echo "  Loki can install Terraform locally now (no root/sudo required)."
+  echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
+  echo ""
+  if confirm "Install Terraform locally?" "default_yes"; then
+    install_terraform
+  else
+    fail "Terraform >= 1.10 is required."
+  fi
 }
 # ============================================================================
 deploy_terraform() {
   dbg "deploy_terraform: pwd=$(pwd)"
-  ensure_terraform
+  ensure_terraform_available
   cd deploy/terraform
   dbg "deploy_terraform: cd done, pwd=$(pwd), .git exists=$(test -d ../../.git && echo yes || echo no)"
   setup_terraform_backend
@@ -1384,9 +1565,14 @@ EOF
 }
 
 terraform_init() {
-  # AWS provider is ~500MB — CloudShell /home is ~1GB. Use /tmp for plugin cache.
+  # Persistent plugin cache avoids re-downloading providers on every install.
+  # CloudShell: /home is ~1GB so use /tmp. Elsewhere: use ~/.terraform.d/plugin-cache.
   if [[ -z "${TF_PLUGIN_CACHE_DIR:-}" ]]; then
-    export TF_PLUGIN_CACHE_DIR="/tmp/terraform-plugin-cache"
+    if [[ "$IS_CLOUDSHELL" == "true" ]]; then
+      export TF_PLUGIN_CACHE_DIR="/tmp/terraform-plugin-cache"
+    else
+      export TF_PLUGIN_CACHE_DIR="${HOME}/.terraform.d/plugin-cache"
+    fi
   fi
   mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
@@ -1407,13 +1593,34 @@ terraform_init() {
     fi
   fi
 
-  info "Initializing Terraform (downloading providers, may take a minute)..."
-  info "Plugin cache: ${TF_PLUGIN_CACHE_DIR}"
-  run_or_fail "Terraform init" terraform init -input=false
-  grep -E 'Initializing|Installing|Installed' "$_RUN_LOG" | while IFS= read -r line; do
-    echo -e "  ${BLUE}…${NC} ${line}"
-  done
-  rm -f "$_RUN_LOG"
+  info "Initializing Terraform (downloading providers)..."
+  dbg "run_or_fail: Terraform init -> terraform init -input=false"
+  local _init_log="/tmp/loki-tf-init-$$.log"
+  : > "$_init_log"
+  terraform init -input=false > "$_init_log" 2>&1 &
+  local tf_pid=$!
+  # Stream log in foreground (interruptible by Ctrl-C)
+  tail -f "$_init_log" 2>/dev/null | while IFS= read -r line; do
+    if   [[ "$line" == *"Installing"* ]];  then echo -e "  ${BLUE}▸${NC} ${line#"- "}"
+    elif [[ "$line" == *"Installed"* ]];   then echo -e "  ${GREEN}✓${NC} ${line#"- "}"
+    elif [[ "$line" == *"Initializing"* ]]; then echo -e "  ${DIM}${line}${NC}"
+    elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
+    fi
+    # Stop tailing once terraform exits
+    kill -0 $tf_pid 2>/dev/null || break
+  done &
+  local tail_pid=$!
+  local rc=0
+  wait $tf_pid || rc=$?
+  kill $tail_pid 2>/dev/null; wait $tail_pid 2>/dev/null || true
+  { echo "=== Terraform init (rc=$rc) ==="; cat "$_init_log"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
+  if [[ $rc -ne 0 ]]; then
+    warn "Terraform init failed:"
+    tail -20 "$_init_log" | $GUM format -t code
+    rm -f "$_init_log"
+    fail "Terraform init exited with code $rc"
+  fi
+  rm -f "$_init_log"
   ok "Terraform initialized"
 
 }
@@ -1434,21 +1641,29 @@ terraform_apply() {
   while IFS= read -r v; do
     tf_vars+=("$v")
   done < <(format_tf_vars)
-  # Stream terraform apply live — show progress as resources are created
+  # Stream terraform apply live — run in background so Ctrl-C works
   _TF_LOG="/tmp/loki-terraform-apply.log"
-  local rc=0
-  terraform apply -auto-approve "${tf_vars[@]}" 2>&1 | tee "$_TF_LOG" | while IFS= read -r line; do
+  : > "$_TF_LOG"
+  terraform apply -auto-approve "${tf_vars[@]}" > "$_TF_LOG" 2>&1 &
+  local tf_pid=$!
+  # Stream log in background, filter for interesting lines
+  tail -f "$_TF_LOG" 2>/dev/null | while IFS= read -r line; do
     if   [[ "$line" == *": Creating..."* ]];       then echo -e "  ${BLUE}+${NC} ${line##*] }"
     elif [[ "$line" == *": Creation complete"* ]];  then echo -e "  ${GREEN}✓${NC} ${line##*] }"
     elif [[ "$line" == *"Apply complete"* ]];       then echo -e "\n  ${GREEN}${line}${NC}"
     elif [[ "$line" == *"Outputs:"* ]] || [[ "$line" == *" = "* ]]; then echo "  $line"
     elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
     fi
-  done || rc=$?
+    kill -0 $tf_pid 2>/dev/null || break
+  done &
+  local tail_pid=$!
+  local rc=0
+  wait $tf_pid || rc=$?
+  kill $tail_pid 2>/dev/null; wait $tail_pid 2>/dev/null || true
+  { echo "=== Terraform apply (rc=$rc) ==="; cat "$_TF_LOG"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
   if [[ $rc -ne 0 ]]; then
     echo ""
     warn "Terraform apply failed (exit code $rc)"
-    # Show last 40 lines in a formatted code block via gum
     local err_text
     err_text=$(tail -40 "$_TF_LOG")
     echo "$err_text" | $GUM format -t code
@@ -1459,15 +1674,27 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
+  local doc_content='{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"loki tui || exec bash --login\""}}}'
+
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
-    ok "SSM session document: ${SSM_DOC_NAME}"
+    # Update existing document to latest version
+    aws ssm update-document \
+      --name "$SSM_DOC_NAME" \
+      --content "$doc_content" \
+      --document-version '$LATEST' \
+      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    aws ssm update-document-default-version \
+      --name "$SSM_DOC_NAME" \
+      --document-version '$LATEST' \
+      --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    ok "SSM session document: ${SSM_DOC_NAME} (updated)"
     return 0
   fi
-  info "Creating ${SSM_DOC_NAME} SSM document (starts sessions as ec2-user)..."
+  info "Creating ${SSM_DOC_NAME} SSM document..."
   aws ssm create-document \
     --name "$SSM_DOC_NAME" \
     --document-type "Session" \
-    --content '{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && exec bash --login"}}}' \
+    --content "$doc_content" \
     --region "$DEPLOY_REGION" >/dev/null 2>&1 || {
       warn "Could not create ${SSM_DOC_NAME} document (may need ssm:CreateDocument permission)"
       info "Connect with: aws ssm start-session --target \${INSTANCE_ID} --region \${DEPLOY_REGION}"
@@ -1642,21 +1869,47 @@ show_complete() {
 # ============================================================================
 # Main
 # ============================================================================
-main() {
-  install_gum            # must run before anything that uses $GUM
-  show_banner
-  preflight_checks       # step 1
-  choose_deploy_method   # step 2
-  collect_config         # step 3
-  check_existing_deployments  # Must run AFTER collect_config so DEPLOY_REGION is set
-  # Skip VPC quota check when reusing an existing VPC
+run_config_and_review() {
+  if [[ "$INSTALL_MODE" == "simple" ]]; then
+    # Simple mode: pack + profile, then auto-configure, then terraform check
+    collect_config_simple
+    ensure_terraform_available
+    # Auto-detect VPC reuse
+    check_existing_deployments
+  else
+    # Advanced mode: full interactive flow
+    choose_deploy_method
+    collect_config
+    check_existing_deployments
+  fi
+
+  # VPC quota check (skip if reusing)
   if [[ -z "${EXISTING_VPC_ID:-}" ]]; then
-    check_vpc_quota  # Run after collect_config so we use DEPLOY_REGION
+    check_vpc_quota
   else
     ok "Skipping VPC quota check (reusing existing VPC ${EXISTING_VPC_ID})"
   fi
-  build_deploy_params  # Populate parameter arrays from user config
-  show_summary         # step 4
+
+  build_deploy_params
+  show_summary || {
+    # User chose "Change settings" → re-run in advanced mode with current values as preselects
+    PRESELECT_PACK="$PACK_NAME"
+    PRESELECT_PROFILE="$PROFILE_NAME"
+    PRESELECT_METHOD="terraform"
+    EXISTING_VPC_ID=""
+    EXISTING_SUBNET_ID=""
+    STEP_NUM=1
+    run_config_and_review
+    return
+  }
+}
+
+main() {
+  install_gum            # must run before anything that uses $GUM
+  show_banner
+  choose_install_mode    # simple (default) or advanced — needed before preflight
+  preflight_checks       # step 1
+  run_config_and_review  # steps 2-4 (config → review)
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then

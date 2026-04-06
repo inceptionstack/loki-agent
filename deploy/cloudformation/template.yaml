@@ -306,6 +306,11 @@ Parameters:
     Description: "Public subnet ID in the existing VPC. Required if ExistingVpcId is set."
     AllowedPattern: '^(subnet-[a-z0-9]+)?$'
 
+  RepoBranch:
+    Type: String
+    Default: 'main'
+    Description: "Git branch to clone on the EC2 instance. Use for testing feature branches."
+
 # ============================================================================
 # RULES
 # ============================================================================
@@ -1191,7 +1196,7 @@ Resources:
           # Clone repo with retry (GitHub blips shouldn't kill bootstrap)
           _cloned=false
           for _attempt in 1 2 3; do
-            git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && _cloned=true && break
+            git clone --depth 1 -b "${RepoBranch}" https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent && _cloned=true && break
             echo "git clone failed (attempt $_attempt), retrying in 10s..." && sleep 10
           done
           if [[ "$_cloned" != "true" ]]; then
