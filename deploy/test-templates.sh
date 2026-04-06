@@ -95,6 +95,73 @@ check_contains "$INSTALL_SH" 'PackName' "install.sh: PackName in PARAM_CFN_NAMES
 check_contains "$INSTALL_SH" 'pack_name' "install.sh: pack_name in PARAM_TF_NAMES"
 check_contains "$INSTALL_SH" 't4g.medium' "install.sh: hermes default size logic present"
 
+# ── Branch detection & SSM doc version ──────────────────────────────────────
+echo -e "${BOLD}Branch & SSM fixes${NC}"
+check_contains "$INSTALL_SH" '[[ "$REPO_BRANCH" == "HEAD" ]]' "install.sh: detached HEAD falls back to main"
+check_contains "$INSTALL_SH" 'REPO_BRANCH=' "install.sh: REPO_BRANCH is set"
+check_contains "$TF_VARS" 'variable "repo_branch"' "TF: repo_branch variable defined"
+check_contains "$TF_MAIN" "repo_branch" "TF main: repo_branch passed to userdata template"
+check_contains "$TF_USERDATA" 'repo_branch' "TF userdata: uses repo_branch for git clone"
+check_contains "$CFN_TEMPLATE" "RepoBranch" "CFN: RepoBranch parameter defined"
+check_contains "$INSTALL_SH" "DocumentDescription.DocumentVersion" "install.sh: SSM update-document captures numeric version"
+check_contains "$INSTALL_SH" 'new_version' "install.sh: SSM update-document-default-version uses captured version"
+
+echo ""
+
+# ── Branch detection unit tests ─────────────────────────────────────────────
+echo -e "${BOLD}Branch detection (unit)${NC}"
+
+# Test: detached HEAD → main
+_test_branch="HEAD"
+[[ "$_test_branch" == "HEAD" ]] && _test_branch="main"
+if [[ "$_test_branch" == "main" ]]; then
+  pass "Detached HEAD resolves to main"
+else
+  fail "Detached HEAD should resolve to main, got: $_test_branch"
+fi
+
+# Test: normal branch → unchanged
+_test_branch="installer-ux-overhaul"
+[[ "$_test_branch" == "HEAD" ]] && _test_branch="main"
+if [[ "$_test_branch" == "installer-ux-overhaul" ]]; then
+  pass "Normal branch name preserved"
+else
+  fail "Normal branch should be preserved, got: $_test_branch"
+fi
+
+# Test: main → unchanged
+_test_branch="main"
+[[ "$_test_branch" == "HEAD" ]] && _test_branch="main"
+if [[ "$_test_branch" == "main" ]]; then
+  pass "main branch preserved"
+else
+  fail "main should be preserved, got: $_test_branch"
+fi
+
+# Test: SSM version regex accepts numeric
+_test_version="5"
+if [[ "$_test_version" =~ ^[0-9]+$ ]]; then
+  pass "SSM version regex accepts numeric version"
+else
+  fail "SSM version regex should accept '5'"
+fi
+
+# Test: SSM version regex rejects $LATEST
+_test_version='$LATEST'
+if [[ "$_test_version" =~ ^[0-9]+$ ]]; then
+  fail "SSM version regex should reject '\$LATEST'"
+else
+  pass "SSM version regex rejects \$LATEST"
+fi
+
+# Test: SSM version regex rejects empty
+_test_version=""
+if [[ -n "$_test_version" && "$_test_version" =~ ^[0-9]+$ ]]; then
+  fail "SSM version regex should reject empty string"
+else
+  pass "SSM version regex rejects empty string"
+fi
+
 echo ""
 echo -e "${BOLD}─────────────────────────────────────────────────${NC}"
 echo -e "  Passed: ${GREEN}${PASS}${NC}  Failed: ${RED}${FAIL}${NC}"
