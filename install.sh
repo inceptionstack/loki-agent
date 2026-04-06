@@ -736,36 +736,8 @@ choose_deploy_method() {
   fi
 
   # If Terraform selected and not installed, handle it now — before config questions.
-  # This avoids the user filling out all config only to be blocked at deploy time.
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_TERRAFORM" ]]; then
-    if terraform_ok; then
-      ok "Terraform: $(terraform_version_string)"
-    else
-      if command -v terraform &>/dev/null; then
-        local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
-        local host; host=$(hw_arch)
-        if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
-          warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
-        else
-          warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
-        fi
-      else
-        warn "Terraform is not installed on this system."
-      fi
-      echo ""
-      echo "  Loki can install Terraform locally now (no root/sudo required)."
-      echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
-      echo ""
-      if confirm "Install Terraform locally before continuing?" "default_yes"; then
-        install_terraform
-      else
-        echo ""
-        echo "  Install it manually, then re-run this installer:"
-        echo "    https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli"
-        echo ""
-        fail "Terraform >= 1.10 is required."
-      fi
-    fi
+    ensure_terraform_available
   fi
 }
 
@@ -872,6 +844,86 @@ choose_install_mode() {
 }
 
 # ============================================================================
+# Shared: pack selection (used by both simple and advanced modes)
+# ============================================================================
+choose_pack() {
+  # If pack was pre-selected via --pack, validate it
+  if [[ -n "${PRESELECT_PACK}" ]]; then
+    local found=false
+    for i in "${!PACK_NAMES[@]}"; do
+      if [[ "${PACK_NAMES[$i]}" == "${PRESELECT_PACK}" ]]; then
+        PACK_NAME="${PACK_NAMES[$i]}"
+        found=true
+        if [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
+          warn "${PACK_NAME} is experimental — expect rough edges"
+        fi
+        ok "Pack pre-selected: ${PACK_NAME}"
+        break
+      fi
+    done
+    if [[ "$found" != true ]]; then
+      echo ""
+      echo -e "  ${RED}✗ Unknown pack: '${PRESELECT_PACK}'${NC}"
+      echo ""
+      echo "  Available packs:"
+      for i in "${!PACK_NAMES[@]}"; do
+        echo "    - ${PACK_NAMES[$i]}"
+      done
+      echo ""
+      fail "Pack '${PRESELECT_PACK}' not found. Use --pack <name> with one of the packs listed above."
+    fi
+    return
+  fi
+
+  # Interactive: build display items for gum choose
+  local -a gum_items=()
+  local default_item=""
+  for i in "${!PACK_NAMES[@]}"; do
+    local item="${PACK_NAMES[$i]} — ${PACK_DESCS[$i]}"
+    [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]] && item+=" (experimental)"
+    gum_items+=("$item")
+    [[ "${PACK_NAMES[$i]}" == "openclaw" ]] && default_item="$item"
+  done
+  local pack_choice
+  local header="${1:-Agent to deploy}"
+  pack_choice=$($GUM choose --header "$header" \
+    ${default_item:+--selected "$default_item"} \
+    "${gum_items[@]}" < /dev/tty)
+  PACK_NAME="${pack_choice%% —*}"
+  for i in "${!PACK_NAMES[@]}"; do
+    if [[ "${PACK_NAMES[$i]}" == "$PACK_NAME" && "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
+      warn "${PACK_NAME} is experimental — expect rough edges"
+    fi
+  done
+  ok "Agent: ${PACK_NAME}"
+}
+
+# Check pack/profile compatibility
+check_pack_profile_compat() {
+  if [[ "$PACK_NAME" == "nemoclaw" && "${PROFILE_NAME:-}" != "personal_assistant" ]]; then
+    if [[ "$INSTALL_MODE" == "simple" ]]; then
+      echo ""
+      echo -e "  ${RED}✗ NemoClaw requires the personal_assistant profile.${NC}"
+      echo "  Switching to personal_assistant automatically."
+      PROFILE_NAME="personal_assistant"
+      ok "Profile adjusted: ${PROFILE_NAME}"
+    else
+      echo ""
+      echo -e "  ${RED}✗ NemoClaw is only compatible with the personal_assistant profile.${NC}"
+      echo ""
+      echo "  NemoClaw runs the agent in an isolated sandbox that blocks all AWS API"
+      echo "  access. The ${PROFILE_NAME} profile requires AWS access to function."
+      echo ""
+      echo "  Options:"
+      echo "    • Use --pack openclaw with --profile ${PROFILE_NAME}"
+      echo "    • Use --pack nemoclaw with --profile personal_assistant"
+      echo ""
+      fail "Incompatible pack/profile combination: ${PACK_NAME} + ${PROFILE_NAME}"
+    fi
+  fi
+}
+
+# ============================================================================
 # Simple mode: pack + profile → auto-configure everything else
 # ============================================================================
 collect_config_simple() {
@@ -880,57 +932,9 @@ collect_config_simple() {
   load_pack_registry
   local registry="$_PACK_REGISTRY"
 
-  # ---- Pack selection ----
-  if [[ -z "${PRESELECT_PACK}" ]]; then
-    local -a gum_items=()
-    local default_item=""
-    for i in "${!PACK_NAMES[@]}"; do
-      local item="${PACK_NAMES[$i]} — ${PACK_DESCS[$i]}"
-      [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]] && item+=" (experimental)"
-      gum_items+=("$item")
-      [[ "${PACK_NAMES[$i]}" == "openclaw" ]] && default_item="$item"
-    done
-    echo ""
-    local pack_choice
-    pack_choice=$($GUM choose --header "Which agent do you want to deploy?" \
-      ${default_item:+--selected "$default_item"} \
-      "${gum_items[@]}" < /dev/tty)
-    PACK_NAME="${pack_choice%% —*}"
-    for i in "${!PACK_NAMES[@]}"; do
-      if [[ "${PACK_NAMES[$i]}" == "$PACK_NAME" && "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
-        warn "${PACK_NAME} is experimental — expect rough edges"
-      fi
-    done
-    ok "Agent: ${PACK_NAME}"
-  else
-    PACK_NAME="${PRESELECT_PACK}"
-    ok "Agent: ${PACK_NAME}"
-  fi
-
-  # ---- Profile selection ----
-  if [[ -z "${PRESELECT_PROFILE}" ]]; then
-    echo ""
-    local profile_choice
-    profile_choice=$($GUM choose --header "What level of AWS access should the agent have?" \
-      --selected "builder — Full AWS admin access (can create/modify resources)" \
-      "builder — Full AWS admin access (can create/modify resources)" \
-      "account_assistant — Read-only AWS access (can view but not change)" \
-      "personal_assistant — Bedrock only (no AWS access, AI chat only)" < /dev/tty)
-    PROFILE_NAME="${profile_choice%% —*}"
-    ok "Profile: ${PROFILE_NAME}"
-  else
-    PROFILE_NAME="${PRESELECT_PROFILE}"
-    ok "Profile: ${PROFILE_NAME}"
-  fi
-
-  # ---- Profile + Pack compatibility check ----
-  if [[ "$PACK_NAME" == "nemoclaw" && "$PROFILE_NAME" != "personal_assistant" ]]; then
-    echo ""
-    echo -e "  ${RED}✗ NemoClaw requires the personal_assistant profile.${NC}"
-    echo "  Switching to personal_assistant automatically."
-    PROFILE_NAME="personal_assistant"
-    ok "Profile adjusted: ${PROFILE_NAME}"
-  fi
+  choose_pack "Which agent do you want to deploy?"
+  choose_profile
+  check_pack_profile_compat
 
   # ---- Auto-configure everything else ----
   DEPLOY_REGION="${REGION:-us-east-1}"
@@ -970,77 +974,10 @@ collect_config() {
 
   load_pack_registry
   local registry="$_PACK_REGISTRY"
-  local -a pack_names=("${PACK_NAMES[@]}")
-  local -a pack_descs=("${PACK_DESCS[@]}")
-  local -a pack_experimental=("${PACK_EXPERIMENTAL[@]}")
 
-  # If pack was pre-selected via --pack, find and validate it
-  if [[ -n "${PRESELECT_PACK}" ]]; then
-    local found=false
-    for i in "${!pack_names[@]}"; do
-      if [[ "${pack_names[$i]}" == "${PRESELECT_PACK}" ]]; then
-        PACK_NAME="${pack_names[$i]}"
-        found=true
-        if [[ "${pack_experimental[$i]}" == "true" ]]; then
-          warn "${PACK_NAME} is experimental — expect rough edges"
-        fi
-        ok "Pack pre-selected: ${PACK_NAME}"
-        break
-      fi
-    done
-    if [[ "$found" != true ]]; then
-      echo ""
-      echo -e "  ${RED}✗ Unknown pack: '${PRESELECT_PACK}'${NC}"
-      echo ""
-      echo "  Available packs:"
-      for i in "${!pack_names[@]}"; do
-        echo "    - ${pack_names[$i]}"
-      done
-      echo ""
-      fail "Pack '${PRESELECT_PACK}' not found. Use --pack <name> with one of the packs listed above."
-    fi
-  fi
-
-  if [[ -z "${PRESELECT_PACK}" ]]; then
-  # Build display items for gum choose
-  local -a gum_items=()
-  local default_item=""
-  for i in "${!pack_names[@]}"; do
-    local item="${pack_names[$i]} — ${pack_descs[$i]}"
-    [[ "${pack_experimental[$i]}" == "true" ]] && item+=" (experimental)"
-    gum_items+=("$item")
-    [[ "${pack_names[$i]}" == "openclaw" ]] && default_item="$item"
-  done
-  local pack_choice
-  pack_choice=$($GUM choose --header "Agent to deploy" \
-    ${default_item:+--selected "$default_item"} \
-    "${gum_items[@]}" < /dev/tty)
-  PACK_NAME="${pack_choice%% —*}"
-  for i in "${!pack_names[@]}"; do
-    if [[ "${pack_names[$i]}" == "$PACK_NAME" && "${pack_experimental[$i]}" == "true" ]]; then
-      warn "${PACK_NAME} is experimental — expect rough edges"
-    fi
-  done
-  ok "Selected pack: ${PACK_NAME}"
-  fi  # end of interactive pack selection
-
-  # ---- Profile selection (REQUIRED) ----------------------------------------
+  choose_pack
   choose_profile
-
-  # ---- Profile + Pack compatibility check ----------------------------------
-  if [[ "$PACK_NAME" == "nemoclaw" && "${PROFILE_NAME:-}" != "personal_assistant" ]]; then
-    echo ""
-    echo -e "  ${RED}✗ NemoClaw is only compatible with the personal_assistant profile.${NC}"
-    echo ""
-    echo "  NemoClaw runs the agent in an isolated sandbox that blocks all AWS API"
-    echo "  access. The ${PROFILE_NAME} profile requires AWS access to function."
-    echo ""
-    echo "  Options:"
-    echo "    • Use --pack openclaw with --profile ${PROFILE_NAME}"
-    echo "    • Use --pack nemoclaw with --profile personal_assistant"
-    echo ""
-    fail "Incompatible pack/profile combination: ${PACK_NAME} + ${PROFILE_NAME}"
-  fi
+  check_pack_profile_compat
 
   prompt "AWS region" DEPLOY_REGION "$REGION"
 
@@ -1506,18 +1443,37 @@ install_terraform() {
   fi
 }
 
-ensure_terraform() {
+# Check terraform is available, correct arch, correct version — offer to install if not
+ensure_terraform_available() {
   if terraform_ok; then
     ok "Terraform: $(terraform_version_string)"
     return 0
   fi
-  # Should have been handled in choose_deploy_method, but install as a safety net
-  install_terraform
+  if command -v terraform &>/dev/null; then
+    local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
+    local host; host=$(hw_arch)
+    if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
+      warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
+    else
+      warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
+    fi
+  else
+    warn "Terraform is not installed on this system."
+  fi
+  echo ""
+  echo "  Loki can install Terraform locally now (no root/sudo required)."
+  echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
+  echo ""
+  if confirm "Install Terraform locally?" "default_yes"; then
+    install_terraform
+  else
+    fail "Terraform >= 1.10 is required."
+  fi
 }
 # ============================================================================
 deploy_terraform() {
   dbg "deploy_terraform: pwd=$(pwd)"
-  ensure_terraform
+  ensure_terraform_available
   cd deploy/terraform
   dbg "deploy_terraform: cd done, pwd=$(pwd), .git exists=$(test -d ../../.git && echo yes || echo no)"
   setup_terraform_backend
@@ -1589,13 +1545,25 @@ terraform_init() {
     fi
   fi
 
-  info "Initializing Terraform (downloading providers, may take a minute)..."
-  info "Plugin cache: ${TF_PLUGIN_CACHE_DIR}"
-  run_or_fail "Terraform init" terraform init -input=false
-  grep -E 'Initializing|Installing|Installed' "$_RUN_LOG" | while IFS= read -r line; do
-    echo -e "  ${BLUE}…${NC} ${line}"
-  done
-  rm -f "$_RUN_LOG"
+  info "Initializing Terraform (downloading providers)..."
+  dbg "run_or_fail: Terraform init -> terraform init -input=false"
+  local _init_log="/tmp/loki-tf-init-$$.log"
+  local rc=0
+  terraform init -input=false 2>&1 | tee "$_init_log" | while IFS= read -r line; do
+    if   [[ "$line" == *"Installing"* ]];  then echo -e "  ${BLUE}▸${NC} ${line#"- "}"
+    elif [[ "$line" == *"Installed"* ]];   then echo -e "  ${GREEN}✓${NC} ${line#"- "}"
+    elif [[ "$line" == *"Initializing"* ]]; then echo -e "  ${DIM}${line}${NC}"
+    elif [[ "$line" == *"Error"* || "$line" == *"error"* ]]; then echo -e "  ${RED}${line}${NC}"
+    fi
+  done || rc=$?
+  { echo "=== Terraform init (rc=$rc) ==="; cat "$_init_log"; echo ""; } >> "$INSTALL_LOG" 2>/dev/null
+  if [[ $rc -ne 0 ]]; then
+    warn "Terraform init failed:"
+    tail -20 "$_init_log" | $GUM format -t code
+    rm -f "$_init_log"
+    fail "Terraform init exited with code $rc"
+  fi
+  rm -f "$_init_log"
   ok "Terraform initialized"
 
 }
@@ -1828,29 +1796,7 @@ run_config_and_review() {
   if [[ "$INSTALL_MODE" == "simple" ]]; then
     # Simple mode: pack + profile, then auto-configure, then terraform check
     collect_config_simple
-    # Terraform is always the deploy method in simple mode — ensure it's available
-    if terraform_ok; then
-      ok "Terraform: $(terraform_version_string)"
-    else
-      if command -v terraform &>/dev/null; then
-        local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
-        local host; host=$(hw_arch)
-        if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
-          warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
-        else
-          warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
-        fi
-      else
-        warn "Terraform is not installed."
-      fi
-      echo ""
-      echo "  Loki can install Terraform locally now (no root/sudo required)."
-      if confirm "Install Terraform locally?" "default_yes"; then
-        install_terraform
-      else
-        fail "Terraform >= 1.10 is required."
-      fi
-    fi
+    ensure_terraform_available
     # Auto-detect VPC reuse
     check_existing_deployments
   else
