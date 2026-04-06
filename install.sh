@@ -69,14 +69,18 @@ INSTALLER_VERSION="0.5.62"
 # --pack <name>: pre-select agent pack
 # --method <m>: pre-select deploy method (cfn, terraform/tf)
 # --profile <p>: pre-select permission profile (builder, account_assistant, personal_assistant)
+# --simple / --advanced: pre-select install mode
 AUTO_YES=false
 PRESELECT_PACK=""
 PRESELECT_METHOD=""
 PRESELECT_PROFILE=""
+INSTALL_MODE=""  # "simple" or "advanced", empty = ask
 DEBUG_IN_REPO=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
+    --simple)   INSTALL_MODE="simple"; shift ;;
+    --advanced) INSTALL_MODE="advanced"; shift ;;
     --pack)
       if [[ $# -lt 2 || "$2" == --* ]]; then
         echo -e "\033[0;31m✗\033[0m --pack requires a pack name (e.g. --pack openclaw, --pack claude-code)" >&2
@@ -196,7 +200,7 @@ install_gum() {
 # UI helpers
 # ============================================================================
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; NC='\033[0m'
-MAGENTA='\033[0;35m'
+MAGENTA='\033[0;35m'; WHITE='\033[1;37m'
 
 info()  { echo -e "  ${BLUE}▸${NC} $1"; }
 ok()    { echo -e "  ${GREEN}✓${NC} $1"; }
@@ -434,14 +438,13 @@ show_banner() {
 
   echo ""
   echo ""
-  echo -e "  ${CYAN}██╗      ██████╗ ██╗  ██╗██╗${NC}"
-  echo -e "  ${CYAN}██║     ██╔═══██╗██║ ██╔╝██║${NC}"
-  echo -e "  ${BLUE}██║     ██║   ██║█████╔╝ ██║${NC}"
-  echo -e "  ${BLUE}██║     ██║   ██║██╔═██╗ ██║${NC}"
-  echo -e "  ${MAGENTA}███████╗╚██████╔╝██║  ██╗██║${NC}"
-  echo -e "  ${MAGENTA}╚══════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝${NC}"
+  echo -e "  ${CYAN}    __          __    _ ${NC}"
+  echo -e "  ${CYAN}   / /   ____  / /__ (_)${NC}"
+  echo -e "  ${BLUE}  / /   / __ \\/ //_// / ${NC}"
+  echo -e "  ${BLUE} / /___/ /_/ / ,< / /  ${NC}"
+  echo -e "  ${MAGENTA}/_____/\\____/_/|_/_/   ${NC}"
   echo ""
-  echo -e "  ${BOLD}AWS Installer${NC}  ${DIM}${version_line}${NC}"
+  echo -e "  ${DIM}AWS Agent Installer  ${version_line}${NC}"
   echo ""
   if [[ "$AUTO_YES" == true ]]; then
     local auto_msg="Running in non-interactive mode"
@@ -481,12 +484,16 @@ preflight_checks() {
   echo -e "  ${BOLD}Account:${NC}  ${ACCOUNT_ID}"
   echo -e "  ${BOLD}Region:${NC}   ${REGION}"
   echo ""
-  warn "Loki will get AdministratorAccess on this ENTIRE account."
-  warn "Use a dedicated sandbox account — never deploy in production."
-  echo ""
-  confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
 
-  check_permissions
+  if [[ "$INSTALL_MODE" != "simple" ]]; then
+    warn "Loki will get AdministratorAccess on this ENTIRE account."
+    warn "Use a dedicated sandbox account — never deploy in production."
+    echo ""
+    confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
+    check_permissions
+  else
+    ok "Using current account and region"
+  fi
 }
 
 check_vpc_quota() {
@@ -584,8 +591,8 @@ check_existing_deployments() {
 
     # Offer to reuse an existing VPC instead of creating a new one
     local reuse_vpc=true
-    if [[ "$AUTO_YES" == true ]]; then
-      info "Auto mode: reusing first existing VPC"
+    if [[ "$AUTO_YES" == true || "$INSTALL_MODE" == "simple" ]]; then
+      info "Reusing existing VPC"
     else
       if ! confirm "Reuse an existing VPC?" "default_yes"; then
         reuse_vpc=false
@@ -594,7 +601,7 @@ check_existing_deployments() {
 
     if [[ "$reuse_vpc" == true ]]; then
       local chosen_vpc
-      if [[ ${#vpc_ids[@]} -eq 1 || "$AUTO_YES" == true ]]; then
+      if [[ ${#vpc_ids[@]} -eq 1 || "$AUTO_YES" == true || "$INSTALL_MODE" == "simple" ]]; then
         chosen_vpc="${vpc_ids[0]}"
         info "Using VPC: ${chosen_vpc}"
       else
@@ -812,33 +819,160 @@ choose_profile() {
   ok "Profile selected: ${PROFILE_NAME}"
 }
 
-collect_config() {
-  step "Configuration"
+# ============================================================================
+# Pack registry loading (shared by simple + advanced modes)
+# ============================================================================
+_PACK_REGISTRY=""
+PACK_NAMES=()
+PACK_DESCS=()
+PACK_EXPERIMENTAL=()
 
-  # ---- Pack selection (dynamically discovered from registry.json) -----------
-  # CLONE_DIR may not be set yet (repo is cloned after config collection).
-  # If the local file isn't available, fetch from GitHub.
-  local registry="${CLONE_DIR:-}/packs/registry.json"
-  if [[ ! -f "$registry" ]]; then
+load_pack_registry() {
+  _PACK_REGISTRY="${CLONE_DIR:-}/packs/registry.json"
+  if [[ ! -f "$_PACK_REGISTRY" ]]; then
     local registry_url="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/packs/registry.json"
-    registry="/tmp/loki-registry-$$.json"
-    curl -sfL "$registry_url" -o "$registry" 2>/dev/null || registry=""
+    _PACK_REGISTRY="/tmp/loki-registry-$$.json"
+    curl -sfL "$registry_url" -o "$_PACK_REGISTRY" 2>/dev/null || _PACK_REGISTRY=""
   fi
-  local -a pack_names=()
-  local -a pack_descs=()
-  local -a pack_experimental=()
-
-  # Parse agent packs from registry.json via jq
+  PACK_NAMES=()
+  PACK_DESCS=()
+  PACK_EXPERIMENTAL=()
   while IFS='|' read -r pname pdesc pexp; do
-    pack_names+=("$pname")
-    pack_descs+=("$pdesc")
-    pack_experimental+=("$pexp")
-  done < <([ -n "$registry" ] && jq -r '
+    PACK_NAMES+=("$pname")
+    PACK_DESCS+=("$pdesc")
+    PACK_EXPERIMENTAL+=("$pexp")
+  done < <([ -n "$_PACK_REGISTRY" ] && jq -r '
     .packs | to_entries[]
     | select(.value.type == "agent")
     | "\(.key)|\(.value.description // .key)|\(if .value.experimental then "true" else "false" end)"
-  ' "$registry" 2>/dev/null \
+  ' "$_PACK_REGISTRY" 2>/dev/null \
     || echo "openclaw|OpenClaw -- stateful AI agent with persistent gateway|false")
+}
+
+# ============================================================================
+# Install mode selection: simple (default) or advanced
+# ============================================================================
+choose_install_mode() {
+  if [[ -n "$INSTALL_MODE" ]]; then
+    return  # pre-selected via --simple or --advanced
+  fi
+  if [[ "$AUTO_YES" == true ]]; then
+    INSTALL_MODE="simple"
+    return
+  fi
+  local mode_choice
+  mode_choice=$($GUM choose --header "Install mode" \
+    --selected "Simple — quick setup, smart defaults" \
+    "Simple — quick setup, smart defaults" \
+    "Advanced — full control over all settings" < /dev/tty) || mode_choice=""
+  case "$mode_choice" in
+    Simple*) INSTALL_MODE="simple" ;;
+    *)       INSTALL_MODE="advanced" ;;
+  esac
+}
+
+# ============================================================================
+# Simple mode: pack + profile → auto-configure everything else
+# ============================================================================
+collect_config_simple() {
+  step "Configuration (simple)"
+
+  load_pack_registry
+  local registry="$_PACK_REGISTRY"
+
+  # ---- Pack selection ----
+  if [[ -z "${PRESELECT_PACK}" ]]; then
+    local -a gum_items=()
+    local default_item=""
+    for i in "${!PACK_NAMES[@]}"; do
+      local item="${PACK_NAMES[$i]} — ${PACK_DESCS[$i]}"
+      [[ "${PACK_EXPERIMENTAL[$i]}" == "true" ]] && item+=" (experimental)"
+      gum_items+=("$item")
+      [[ "${PACK_NAMES[$i]}" == "openclaw" ]] && default_item="$item"
+    done
+    echo ""
+    local pack_choice
+    pack_choice=$($GUM choose --header "Which agent do you want to deploy?" \
+      ${default_item:+--selected "$default_item"} \
+      "${gum_items[@]}" < /dev/tty)
+    PACK_NAME="${pack_choice%% —*}"
+    for i in "${!PACK_NAMES[@]}"; do
+      if [[ "${PACK_NAMES[$i]}" == "$PACK_NAME" && "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
+        warn "${PACK_NAME} is experimental — expect rough edges"
+      fi
+    done
+    ok "Agent: ${PACK_NAME}"
+  else
+    PACK_NAME="${PRESELECT_PACK}"
+    ok "Agent: ${PACK_NAME}"
+  fi
+
+  # ---- Profile selection ----
+  if [[ -z "${PRESELECT_PROFILE}" ]]; then
+    echo ""
+    local profile_choice
+    profile_choice=$($GUM choose --header "What level of AWS access should the agent have?" \
+      --selected "builder — Full AWS admin access (can create/modify resources)" \
+      "builder — Full AWS admin access (can create/modify resources)" \
+      "account_assistant — Read-only AWS access (can view but not change)" \
+      "personal_assistant — Bedrock only (no AWS access, AI chat only)" < /dev/tty)
+    PROFILE_NAME="${profile_choice%% —*}"
+    ok "Profile: ${PROFILE_NAME}"
+  else
+    PROFILE_NAME="${PRESELECT_PROFILE}"
+    ok "Profile: ${PROFILE_NAME}"
+  fi
+
+  # ---- Profile + Pack compatibility check ----
+  if [[ "$PACK_NAME" == "nemoclaw" && "$PROFILE_NAME" != "personal_assistant" ]]; then
+    echo ""
+    echo -e "  ${RED}✗ NemoClaw requires the personal_assistant profile.${NC}"
+    echo "  Switching to personal_assistant automatically."
+    PROFILE_NAME="personal_assistant"
+    ok "Profile adjusted: ${PROFILE_NAME}"
+  fi
+
+  # ---- Auto-configure everything else ----
+  DEPLOY_REGION="${REGION:-us-east-1}"
+  DEPLOY_METHOD="$DEPLOY_TERRAFORM"
+
+  # Instance type: profile determines size in simple mode
+  case "$PROFILE_NAME" in
+    builder)            INSTANCE_TYPE="t4g.xlarge" ;;
+    account_assistant)  INSTANCE_TYPE="t4g.medium" ;;
+    personal_assistant) INSTANCE_TYPE="t4g.medium" ;;
+    *)                  INSTANCE_TYPE="t4g.xlarge" ;;
+  esac
+
+  # Environment name: auto-generate
+  local existing_count
+  existing_count=$(aws ec2 describe-vpcs \
+    --filters "Name=tag:loki:managed,Values=true" \
+    --region "$DEPLOY_REGION" \
+    --query 'length(Vpcs)' --output text 2>/dev/null || echo "0")
+  local ts_suffix; ts_suffix=$(date +%s | tail -c 4)
+  ENV_NAME="${PACK_NAME}-$((existing_count + 1))-${ts_suffix}"
+  LOKI_WATERMARK="$ENV_NAME"
+
+  # Security: all on for builder/account_assistant, all off for personal_assistant
+  case "$PROFILE_NAME" in
+    personal_assistant)
+      SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"
+      ACCESS_ANALYZER="false"; CONFIG_RECORDER="false" ;;
+    *)
+      SECURITY_HUB="true"; GUARDDUTY="true"; INSPECTOR="true"
+      ACCESS_ANALYZER="true"; CONFIG_RECORDER="true" ;;
+  esac
+}
+
+collect_config() {
+  step "Configuration"
+
+  load_pack_registry
+  local registry="$_PACK_REGISTRY"
+  local -a pack_names=("${PACK_NAMES[@]}")
+  local -a pack_descs=("${PACK_DESCS[@]}")
+  local -a pack_experimental=("${PACK_EXPERIMENTAL[@]}")
 
   # If pack was pre-selected via --pack, find and validate it
   if [[ -n "${PRESELECT_PACK}" ]]; then
@@ -979,7 +1113,7 @@ collect_config() {
 
 collect_security_config() {
   echo ""
-  echo -e "  ${BOLD}Security services${NC} (~\$5/mo total, individually toggleable):"
+  echo -e "  ${BOLD}Security services${NC} (~\$5/mo total):"
   echo ""
 
   if confirm "Enable all security services?" "default_yes"; then
@@ -989,16 +1123,30 @@ collect_security_config() {
     return
   fi
 
+  # Multi-select: user picks which to enable
   echo ""
-  echo -e "  Pick which to enable:"
-  echo ""
-  toggle "AWS Security Hub"    SECURITY_HUB    true
-  toggle "Amazon GuardDuty"    GUARDDUTY       true
-  toggle "Amazon Inspector"    INSPECTOR       true
-  toggle "IAM Access Analyzer" ACCESS_ANALYZER true
-  toggle "AWS Config Recorder" CONFIG_RECORDER true
+  local selected
+  selected=$($GUM choose --no-limit \
+    --header "Select services to enable (space to toggle, enter to confirm)" \
+    --selected "AWS Security Hub,Amazon GuardDuty,Amazon Inspector,IAM Access Analyzer,AWS Config Recorder" \
+    "AWS Security Hub" \
+    "Amazon GuardDuty" \
+    "Amazon Inspector" \
+    "IAM Access Analyzer" \
+    "AWS Config Recorder" < /dev/tty) || selected=""
 
-  echo ""
+  SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"
+  ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
+  while IFS= read -r svc; do
+    case "$svc" in
+      "AWS Security Hub")    SECURITY_HUB="true" ;;
+      "Amazon GuardDuty")    GUARDDUTY="true" ;;
+      "Amazon Inspector")    INSPECTOR="true" ;;
+      "IAM Access Analyzer") ACCESS_ANALYZER="true" ;;
+      "AWS Config Recorder") CONFIG_RECORDER="true" ;;
+    esac
+  done <<< "$selected"
+
   local enabled=""
   [[ "$SECURITY_HUB"    == "true" ]] && enabled+=" SecurityHub"
   [[ "$GUARDDUTY"        == "true" ]] && enabled+=" GuardDuty"
@@ -1075,22 +1223,56 @@ format_tf_vars() {
 show_summary() {
   step "Review & confirm"
 
+  local security_summary=""
+  if [[ "$SECURITY_HUB" == "true" && "$GUARDDUTY" == "true" && "$INSPECTOR" == "true" \
+     && "$ACCESS_ANALYZER" == "true" && "$CONFIG_RECORDER" == "true" ]]; then
+    security_summary="all enabled"
+  elif [[ "$SECURITY_HUB" == "false" && "$GUARDDUTY" == "false" && "$INSPECTOR" == "false" \
+       && "$ACCESS_ANALYZER" == "false" && "$CONFIG_RECORDER" == "false" ]]; then
+    security_summary="all disabled"
+  else
+    local enabled_list=""
+    [[ "$SECURITY_HUB"    == "true" ]] && enabled_list+="Hub "
+    [[ "$GUARDDUTY"        == "true" ]] && enabled_list+="Guard "
+    [[ "$INSPECTOR"        == "true" ]] && enabled_list+="Inspector "
+    [[ "$ACCESS_ANALYZER"  == "true" ]] && enabled_list+="Analyzer "
+    [[ "$CONFIG_RECORDER"  == "true" ]] && enabled_list+="Config "
+    security_summary="${enabled_list:-none}"
+  fi
+
+  local deploy_method_label="Terraform"
+  case "$DEPLOY_METHOD" in
+    "$DEPLOY_CFN_CLI")     deploy_method_label="CloudFormation CLI" ;;
+    "$DEPLOY_CFN_CONSOLE") deploy_method_label="CloudFormation Console" ;;
+  esac
+
   local summary=""
-  summary+="Environment   ${ENV_NAME}\n"
-  summary+="Pack          ${PACK_NAME}\n"
+  summary+="Agent         ${PACK_NAME}\n"
   summary+="Profile       ${PROFILE_NAME}\n"
   summary+="Instance      ${INSTANCE_TYPE}\n"
   summary+="Region        ${DEPLOY_REGION}\n"
-  summary+="Watermark     ${LOKI_WATERMARK}\n"
+  summary+="Deploy via    ${deploy_method_label}\n"
   [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
-  summary+="\n"
-  summary+="Security      Hub:${SECURITY_HUB}  Guard:${GUARDDUTY}  Inspector:${INSPECTOR}\n"
-  summary+="              Analyzer:${ACCESS_ANALYZER}  Config:${CONFIG_RECORDER}"
+  summary+="Security      ${security_summary}\n"
+  summary+="Environment   ${ENV_NAME}"
 
   echo -e "$summary" | $GUM style --border rounded --border-foreground 117 \
     --foreground 255 --padding "1 2" --margin "0 2" --bold
   echo ""
-  confirm_or_abort "Proceed with deployment?" "default_yes"
+
+  # In simple mode, offer "Change settings" to switch to advanced
+  if [[ "$INSTALL_MODE" == "simple" && "$AUTO_YES" != true ]]; then
+    local action
+    action=$($GUM choose --header "Ready to deploy?" \
+      "Deploy" \
+      "Change settings (advanced mode)" < /dev/tty) || action="Deploy"
+    if [[ "$action" == *"Change settings"* ]]; then
+      INSTALL_MODE="advanced"
+      return 1  # signal to re-run config in advanced mode
+    fi
+  else
+    confirm_or_abort "Proceed with deployment?" "default_yes"
+  fi
 }
 
 # ============================================================================
@@ -1642,21 +1824,69 @@ show_complete() {
 # ============================================================================
 # Main
 # ============================================================================
-main() {
-  install_gum            # must run before anything that uses $GUM
-  show_banner
-  preflight_checks       # step 1
-  choose_deploy_method   # step 2
-  collect_config         # step 3
-  check_existing_deployments  # Must run AFTER collect_config so DEPLOY_REGION is set
-  # Skip VPC quota check when reusing an existing VPC
+run_config_and_review() {
+  if [[ "$INSTALL_MODE" == "simple" ]]; then
+    # Simple mode: pack + profile, then auto-configure, then terraform check
+    collect_config_simple
+    # Terraform is always the deploy method in simple mode — ensure it's available
+    if terraform_ok; then
+      ok "Terraform: $(terraform_version_string)"
+    else
+      if command -v terraform &>/dev/null; then
+        local tf_bin; tf_bin=$(file "$(command -v terraform)" 2>/dev/null || echo "")
+        local host; host=$(hw_arch)
+        if [[ ("$host" == "arm64" && "$tf_bin" != *"arm64"*) || ("$host" == "x86_64" && "$tf_bin" != *"x86_64"* && "$tf_bin" != *"x86-64"*) ]]; then
+          warn "Terraform $(terraform_version_string) is wrong architecture (need native ${host})."
+        else
+          warn "Terraform $(terraform_version_string) is too old (need >= 1.10)."
+        fi
+      else
+        warn "Terraform is not installed."
+      fi
+      echo ""
+      echo "  Loki can install Terraform locally now (no root/sudo required)."
+      if confirm "Install Terraform locally?" "default_yes"; then
+        install_terraform
+      else
+        fail "Terraform >= 1.10 is required."
+      fi
+    fi
+    # Auto-detect VPC reuse
+    check_existing_deployments
+  else
+    # Advanced mode: full interactive flow
+    choose_deploy_method
+    collect_config
+    check_existing_deployments
+  fi
+
+  # VPC quota check (skip if reusing)
   if [[ -z "${EXISTING_VPC_ID:-}" ]]; then
-    check_vpc_quota  # Run after collect_config so we use DEPLOY_REGION
+    check_vpc_quota
   else
     ok "Skipping VPC quota check (reusing existing VPC ${EXISTING_VPC_ID})"
   fi
-  build_deploy_params  # Populate parameter arrays from user config
-  show_summary         # step 4
+
+  build_deploy_params
+  show_summary || {
+    # User chose "Change settings" → re-run in advanced mode with current values as preselects
+    PRESELECT_PACK="$PACK_NAME"
+    PRESELECT_PROFILE="$PROFILE_NAME"
+    PRESELECT_METHOD="terraform"
+    EXISTING_VPC_ID=""
+    EXISTING_SUBNET_ID=""
+    STEP_NUM=1
+    run_config_and_review
+    return
+  }
+}
+
+main() {
+  install_gum            # must run before anything that uses $GUM
+  show_banner
+  choose_install_mode    # simple (default) or advanced — needed before preflight
+  preflight_checks       # step 1
+  run_config_and_review  # steps 2-4 (config → review)
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
