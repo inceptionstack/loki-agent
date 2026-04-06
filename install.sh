@@ -125,6 +125,7 @@ DEPLOY_TERRAFORM=3
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
+REPO_BRANCH="${REPO_BRANCH:-$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
 IS_CLOUDSHELL=false
@@ -1099,8 +1100,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Populate PARAM_VALUES from user config (call after collect_config)
@@ -1121,6 +1122,7 @@ build_deploy_params() {
     "$CONFIG_RECORDER"
     "${EXISTING_VPC_ID:-}"
     "${EXISTING_SUBNET_ID:-}"
+    "$REPO_BRANCH"
   )
   # Validate parallel arrays are in sync
   [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \

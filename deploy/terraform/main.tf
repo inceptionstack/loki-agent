@@ -721,6 +721,7 @@ resource "aws_instance" "main" {
     litellm_api_key  = var.litellm_api_key
     litellm_model    = var.litellm_model
     provider_api_key = var.provider_api_key
+    repo_branch      = var.repo_branch
   }))
 
   tags = merge(local.loki_tags, {
