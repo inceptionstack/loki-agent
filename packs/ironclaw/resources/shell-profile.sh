@@ -2,6 +2,10 @@
 # This file defines aliases and the welcome banner for the IronClaw pack.
 
 PACK_ALIASES='
+# Source IronClaw env vars (DATABASE_URL, LLM config) for interactive use
+if [ -f "$HOME/.ironclaw/.env" ]; then
+  set -a; source "$HOME/.ironclaw/.env"; set +a
+fi
 alias ic="ironclaw"
 '
 
