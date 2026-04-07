@@ -1,0 +1,45 @@
+name: codex-cli
+version: "1.0.0"
+type: agent
+description: "Codex CLI — OpenAI's coding agent with Bedrock support via bedrockify"
+
+deps:
+  - bedrockify
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.medium
+
+params:
+  - name: region
+    description: "AWS region for Bedrock (via bedrockify proxy)"
+    default: us-east-1
+  - name: model
+    description: "Model name for Codex CLI (routed through bedrockify's OpenAI-compatible endpoint)"
+    default: "gpt-5.4"
+  - name: approval-policy
+    description: "Approval mode: on-request, untrusted, or never"
+    default: "never"
+  - name: sandbox-mode
+    description: "Sandbox level: workspace-write, workspace-read, or danger-full-access"
+    default: "danger-full-access"
+
+health_check:
+  command: "codex --version"
+  timeout: 10
+
+provides:
+  commands:
+    - codex
+  services: []
+
+instance_type: t4g.medium
+root_volume_gb: 40
+data_volume_gb: 0
+
+experimental: true
