@@ -2,7 +2,7 @@
 # packs/ironclaw/install.sh — Install IronClaw and configure it to use bedrockify
 #
 # Usage:
-#   ./install.sh [--region us-east-1] [--model us.anthropic.claude-sonnet-4-6-v1] [--bedrockify-port 8090]
+#   ./install.sh [--region us-east-1] [--model anthropic.claude-sonnet-4-6] [--bedrockify-port 8090]
 #
 # Assumes:
 #   - bedrockify is already installed and running (see packs/bedrockify/)
@@ -35,7 +35,7 @@ source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-sonnet-4-6-v1")"
+PACK_ARG_MODEL="$(pack_config_get model "anthropic.claude-sonnet-4-6")"
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ Install IronClaw and configure it to use bedrockify.
 
 Options:
   --region           AWS region for Bedrock          (default: us-east-1)
-  --model            Model ID for LLM_MODEL           (default: us.anthropic.claude-sonnet-4-6-v1)
+  --model            Model ID for LLM_MODEL           (default: anthropic.claude-sonnet-4-6)
   --bedrockify-port  Port where bedrockify listens   (default: 8090)
   --help             Show this help message
 
@@ -56,7 +56,7 @@ NEAR AI OAuth is bypassed; bedrockify handles all LLM access.
 
 Examples:
   ./install.sh --region us-east-1
-  ./install.sh --model us.anthropic.claude-sonnet-4-6-v1 --bedrockify-port 8090
+  ./install.sh --model anthropic.claude-sonnet-4-6 --bedrockify-port 8090
 EOF
 }
 

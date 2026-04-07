@@ -24,7 +24,7 @@ params:
     default: us-east-1
   - name: model
     description: "Model ID for LLM_MODEL env var (via bedrockify)"
-    default: "us.anthropic.claude-sonnet-4-6-v1"
+    default: "anthropic.claude-sonnet-4-6"
   - name: bedrockify-port
     description: "Port where bedrockify is running"
     default: "8090"
