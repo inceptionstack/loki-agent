@@ -25,7 +25,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "gpt-5.4")"
-PACK_ARG_OPENAI_API_KEY="$(pack_config_get "openai-api-key" "")"
+PACK_ARG_OPENAI_API_KEY="$(pack_config_get "openai-api-key" "${OPENAI_API_KEY:-}")"
 PACK_ARG_APPROVAL_POLICY="$(pack_config_get "approval-policy" "never")"
 PACK_ARG_SANDBOX_MODE="$(pack_config_get "sandbox-mode" "danger-full-access")"
 
@@ -83,29 +83,15 @@ log "region=${REGION} model=${MODEL} approval_policy=${APPROVAL_POLICY} sandbox_
 
 # ── Prompt for API key if not provided ────────────────────────────────────────
 if [[ -z "${OPENAI_API_KEY}" ]]; then
-  # Check if already set in environment
-  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
-    log "Using OPENAI_API_KEY from environment"
-  else
-    printf "\n"
-    printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
-    printf "${_CLR_YELLOW}  OpenAI API Key Required${_CLR_NC}\n"
-    printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
-    printf "\n"
-    printf "  Codex CLI connects directly to OpenAI's API (not AWS Bedrock).\n"
-    printf "  Get your API key at: ${_CLR_CYAN}https://platform.openai.com/api-keys${_CLR_NC}\n"
-    printf "\n"
-    printf "  You can also skip this and run 'codex login' after install\n"
-    printf "  to authenticate via ChatGPT account instead.\n"
-    printf "\n"
-    read -rp "  OpenAI API Key (sk-...) or press Enter to skip: " OPENAI_API_KEY
-    printf "\n"
-
-    if [[ -z "${OPENAI_API_KEY}" ]]; then
-      warn "No API key provided — you'll need to run 'codex login' after install"
-    fi
-  fi
-fi
+  printf "\n"
+  printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "${_CLR_YELLOW}  OpenAI API Key Required${_CLR_NC}\n"
+  printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+  printf "\n"
+  printf "  Codex CLI connects directly to OpenAI\x27s API (not AWS Bedrock).\n"
+  printf "  Get your API key at: ${_CLR_CYAN}https://platform.openai.com/api-keys${_CLR_NC}\n"
+  printf "\n"
+  printf "  You can also skip this and run dex
 
 # Validate key format if provided
 if [[ -n "${OPENAI_API_KEY}" ]] && [[ ! "${OPENAI_API_KEY}" =~ ^sk- ]]; then
@@ -178,21 +164,12 @@ EOF
     printf '\n[ -f "%s/.codex/env.sh" ] && source "%s/.codex/env.sh"\n' "${HOME}" "${HOME}" >> "${HOME}/.bashrc"
   fi
 
-  # Also write to /etc/profile.d if root (for all users including ec2-user)
-  if [[ $EUID -eq 0 ]]; then
-    cat > /etc/profile.d/codex-cli.sh << EOF
-# Codex CLI — authentication
-# Managed by loki-agent packs/codex-cli/install.sh
-export OPENAI_API_KEY="${OPENAI_API_KEY}"
-EOF
-    chmod 600 /etc/profile.d/codex-cli.sh
-  fi
 
   # Source for current session
   export OPENAI_API_KEY="${OPENAI_API_KEY}"
   ok "API key configured (stored in ${CODEX_ENV} with mode 600)"
 else
-  warn "No API key — authenticate later with: codex login --device-auth"
+  warn "No API key — authenticate later with: codex login"
 fi
 
 # ── Sanity check ──────────────────────────────────────────────────────────────
@@ -206,7 +183,7 @@ ok "Sandbox mode: ${SANDBOX_MODE}"
 if [[ -n "${OPENAI_API_KEY}" ]]; then
   ok "Auth: API key configured"
 else
-  warn "Auth: not configured — run 'codex login --device-auth' to authenticate"
+  warn "Auth: not configured — run 'codex login' to authenticate"
 fi
 
 # ── Post-install notice ──────────────────────────────────────────────────────
@@ -224,7 +201,7 @@ cat << 'NOTICE'
 
   Auth alternatives:
     codex login               # Browser-based ChatGPT login
-    codex login --device-auth # Device code (headless/SSH)
+    # Or set OPENAI_API_KEY env var for headless/CI
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
