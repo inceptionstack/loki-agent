@@ -1,10 +1,9 @@
 name: ironclaw
-version: "1.0.0"
+version: "1.1.0"
 type: agent
 description: "IronClaw — Rust-based AI agent by NEAR AI (experimental)"
 
-deps:
-  - bedrockify
+deps: []
 
 requirements:
   arch:
@@ -20,11 +19,8 @@ params:
     description: "AWS region for Bedrock"
     default: us-east-1
   - name: model
-    description: "Model ID for LLM_MODEL env var (passed through to bedrockify)"
+    description: "Model ID for LLM_MODEL env var (native Bedrock)"
     default: "us.anthropic.claude-sonnet-4-6-v1"
-  - name: bedrockify-port
-    description: "Port where bedrockify is running"
-    default: "8090"
 
 health_check:
   command: "ironclaw --version"
