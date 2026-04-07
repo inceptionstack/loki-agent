@@ -30,12 +30,9 @@
 > curl -sfL loki.run | bash -s -- -y --pack nemoclaw --profile personal_assistant
 >
 > # Kiro CLI agent (AWS agentic IDE — requires interactive login after deploy)
-
-> # Codex CLI agent (OpenAI's coding agent — uses Bedrock via bedrockify proxy)
-> curl -sfL loki.run | bash -s -- -y --pack codex-cli --profile builder
 > curl -sfL loki.run | bash -s -- -y --pack kiro-cli --profile builder
-
-> # Codex CLI agent (OpenAI's coding agent — uses Bedrock via bedrockify proxy)
+>
+> # Codex CLI agent (OpenAI's coding agent — requires OpenAI API key)
 > curl -sfL loki.run | bash -s -- -y --pack codex-cli --profile builder
 > ```
 >
@@ -80,7 +77,6 @@ Run `curl -sfL loki.run | bash` — the installer walks you through **pack**, **
 | **IronClaw** *(experimental)* | Rust-based AI agent by NEAR AI — static binary, fast startup | t4g.medium sufficient | None needed (set to 0) |
 | **NemoClaw** *(experimental)* | OpenClaw in NVIDIA OpenShell sandbox — Landlock + seccomp + netns isolation, Bedrock via bedrockify. `personal_assistant` profile only. | t4g.xlarge required | 80GB |
 | **Kiro CLI** *(experimental)* | AWS agentic IDE terminal client with MCP server support. Uses own cloud inference (not Bedrock). Requires interactive SSO login after deploy. | t4g.medium sufficient | None needed (set to 0) |
-| **Codex CLI** *(experimental)* | OpenAI's Codex coding agent — Rust-based CLI, uses Bedrock via bedrockify proxy. Supports exec mode, subagents, web search. | t4g.medium sufficient | None needed (set to 0) |
 
 The installer discovers packs dynamically and asks which to deploy. Experimental packs are clearly marked.
 
@@ -198,7 +194,7 @@ Loki uses a **pack-based architecture** for deploying different AI agent runtime
 | `ironclaw` | Agent *(experimental)* | IronClaw by NEAR AI. Rust-based agent with shell/file tools, MCP support. Single static binary. |
 | `nemoclaw` | Agent *(experimental)* | NemoClaw — OpenClaw inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with Landlock, seccomp, and network namespace isolation. Inference routed through bedrockify on the host (no NVIDIA API key needed). **Only compatible with `personal_assistant` profile** — the sandbox blocks all AWS API access. Requires Docker + t4g.xlarge. |
 | `kiro-cli` | Agent *(experimental)* | [Kiro CLI](https://kiro.dev/docs/cli) — AWS agentic IDE terminal client with MCP server support. Uses its own cloud inference (no Bedrock/bedrockify). Pre-installs AWS MCP servers (terraform, ecs, eks, core, docs). **Requires interactive SSO login after deploy:** `kiro-cli login --use-device-flow`. |
-| `codex-cli` | Agent *(experimental)* | OpenAI's Codex CLI coding agent. Rust-based, fast startup, subagent support. Uses bedrockify for Bedrock inference. |
+| `codex-cli` | Agent *(experimental)* | [Codex CLI](https://developers.openai.com/codex/cli) — OpenAI's coding agent. Uses OpenAI API directly (requires API key). Supports exec mode, subagents, web search, sandbox modes. **This is the only pack that requires an external API key.** |
 
 ### How It Works
 
@@ -235,10 +231,10 @@ bash packs/openclaw/install.sh --region us-east-1 --model us.anthropic.claude-op
 bash packs/nemoclaw/install.sh --region us-east-1 --model us.anthropic.claude-sonnet-4-6 --profile personal_assistant
 
 # Or for Kiro CLI (no bedrockify needed, requires interactive login after install)
-
-# Or for Codex CLI (needs bedrockify running)
-bash packs/codex-cli/install.sh --region us-east-1 --model gpt-5.4
 bash packs/kiro-cli/install.sh --region us-east-1
+
+# Or for Codex CLI (requires OpenAI API key)
+bash packs/codex-cli/install.sh --openai-api-key sk-proj-...
 ```
 
 ### Adding New Packs

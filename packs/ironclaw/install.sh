@@ -157,10 +157,15 @@ fi
 # Configure pg_hba.conf for local peer authentication (ec2-user can connect)
 PG_HBA="${PG_DATA}/pg_hba.conf"
 if ! sudo grep -q "^local.*${IC_DB_NAME}.*${IC_DB_USER}" "${PG_HBA}" 2>/dev/null; then
-  log "Configuring pg_hba.conf for local peer auth..."
+  log "Configuring pg_hba.conf for local peer + TCP trust auth..."
   # Add before the first 'local' line: allow ec2-user to connect to ironclaw db
   sudo sed -i "/^local/i local   ${IC_DB_NAME}   ${IC_DB_USER}                              peer" "${PG_HBA}" 2>/dev/null \
     || echo "local   ${IC_DB_NAME}   ${IC_DB_USER}                              peer" | sudo tee -a "${PG_HBA}" >/dev/null
+  # IronClaw connects via TCP (DATABASE_URL=postgresql://...@localhost) — need trust for 127.0.0.1
+  if ! sudo grep -q "^host.*${IC_DB_NAME}.*${IC_DB_USER}.*trust" "${PG_HBA}" 2>/dev/null; then
+    sudo sed -i "/^host.*all.*all.*127.0.0.1/i host    ${IC_DB_NAME}   ${IC_DB_USER}   127.0.0.1/32                    trust" "${PG_HBA}" 2>/dev/null \
+      || echo "host    ${IC_DB_NAME}   ${IC_DB_USER}   127.0.0.1/32                    trust" | sudo tee -a "${PG_HBA}" >/dev/null
+  fi
 fi
 
 # Start PostgreSQL
@@ -328,6 +333,36 @@ else
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
+# ── Fix systemd service unit ─────────────────────────────────────────────────
+step "Configuring systemd service"
+
+SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+mkdir -p "${SYSTEMD_USER_DIR}"
+
+cat > "${SYSTEMD_USER_DIR}/ironclaw.service" <<SVCEOF
+[Unit]
+Description=IronClaw daemon
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+EnvironmentFile=${HOME}/.ironclaw/.env
+Environment=CLI_ENABLED=false
+ExecStart=${HOME}/.local/bin/ironclaw run --no-onboard
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+# Enable lingering so user services start at boot without login
+sudo loginctl enable-linger "${IC_DB_USER}" 2>/dev/null || true
+
+# Reload and enable (but dont start — let bootstrap handle that)
+systemctl --user daemon-reload 2>/dev/null || true
+systemctl --user enable ironclaw 2>/dev/null || true
+ok "Systemd service installed with EnvironmentFile + --no-onboard"
 write_done_marker "ironclaw"
 printf "\n[PACK:ironclaw] INSTALLED — ironclaw CLI ready\n"
 printf "  model: %s via bedrockify:%s\n" "${MODEL}" "${BEDROCKIFY_PORT}"

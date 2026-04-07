@@ -116,9 +116,8 @@ packs:
 
   codex-cli:
     type: agent
-    description: "Codex CLI — OpenAI's coding agent, Bedrock inference via bedrockify (experimental)"
-    deps:
-      - bedrockify
+    description: "Codex CLI — OpenAI's coding agent (requires OpenAI API key, experimental)"
+    deps: []
     instance_type: t4g.medium
     root_volume_gb: 40
     data_volume_gb: 0
@@ -127,3 +126,4 @@ packs:
     brain: false
     claude_code: false
     experimental: true
+    requires_openai_key: true
