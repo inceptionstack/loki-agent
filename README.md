@@ -1,4 +1,4 @@
-# Loki: Turn OpenClaw and friends into FullStack Builder Agents in your AWS account.
+# Self-Hosted AI Coding Agents on AWS — OpenClaw, Claude Code, Kiro, NemoClaw, Hermes
 [![Loki Agent Demo](https://img.youtube.com/vi/dJSk8DYlHvI/maxresdefault.jpg)](https://www.youtube.com/watch?v=dJSk8DYlHvI)
 
 ▶️ [Watch the full walkthrough on YouTube](https://www.youtube.com/watch?v=dJSk8DYlHvI)
