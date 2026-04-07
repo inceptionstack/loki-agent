@@ -728,15 +728,15 @@ choose_deploy_method() {
     ok "Deploy method pre-selected: ${method_name}"
   else
   local method_choice
-  method_choice=$($GUM choose --header "Deployment method" --selected "Terraform" \
-    "CloudFormation Console" \
+  method_choice=$($GUM choose --header "Deployment method" --selected "CloudFormation CLI" \
     "CloudFormation CLI" \
+    "CloudFormation Console" \
     "Terraform" < /dev/tty)
   case "$method_choice" in
-    "CloudFormation Console") DEPLOY_METHOD="$DEPLOY_CFN_CONSOLE" ;;
     "CloudFormation CLI")     DEPLOY_METHOD="$DEPLOY_CFN_CLI" ;;
+    "CloudFormation Console") DEPLOY_METHOD="$DEPLOY_CFN_CONSOLE" ;;
     "Terraform")              DEPLOY_METHOD="$DEPLOY_TERRAFORM" ;;
-    *)                        DEPLOY_METHOD="$DEPLOY_TERRAFORM" ;;
+    *)                        DEPLOY_METHOD="$DEPLOY_CFN_CLI" ;;
   esac
   fi
 
@@ -943,7 +943,7 @@ collect_config_simple() {
 
   # ---- Auto-configure everything else ----
   DEPLOY_REGION="${REGION:-us-east-1}"
-  DEPLOY_METHOD="$DEPLOY_TERRAFORM"
+  DEPLOY_METHOD="$DEPLOY_CFN_CLI"
 
   # Instance type: profile determines size in simple mode
   case "$PROFILE_NAME" in
@@ -1876,9 +1876,8 @@ show_complete() {
 # ============================================================================
 run_config_and_review() {
   if [[ "$INSTALL_MODE" == "simple" ]]; then
-    # Simple mode: pack + profile, then auto-configure, then terraform check
+    # Simple mode: pack + profile, then auto-configure (defaults to CFN CLI)
     collect_config_simple
-    ensure_terraform_available
     # Auto-detect VPC reuse
     check_existing_deployments
   else
