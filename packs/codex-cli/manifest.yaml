@@ -1,10 +1,9 @@
 name: codex-cli
 version: "1.0.0"
 type: agent
-description: "Codex CLI — OpenAI's coding agent with Bedrock support via bedrockify"
+description: "Codex CLI — OpenAI's coding agent (requires OpenAI API key)"
 
-deps:
-  - bedrockify
+deps: []
 
 requirements:
   arch:
@@ -17,11 +16,14 @@ requirements:
 
 params:
   - name: region
-    description: "AWS region for Bedrock (via bedrockify proxy)"
+    description: "AWS region (informational — Codex CLI uses OpenAI's API)"
     default: us-east-1
   - name: model
-    description: "Model name for Codex CLI (routed through bedrockify's OpenAI-compatible endpoint)"
+    description: "Default model for Codex CLI"
     default: "gpt-5.4"
+  - name: openai-api-key
+    description: "OpenAI API key (required — get from platform.openai.com/api-keys)"
+    required: true
   - name: approval-policy
     description: "Approval mode: on-request, untrusted, or never"
     default: "never"

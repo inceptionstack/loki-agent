@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# packs/codex-cli/install.sh — Install OpenAI Codex CLI and configure it for Bedrock via bedrockify
+# packs/codex-cli/install.sh — Install OpenAI Codex CLI
 #
 # Usage:
 #   ./install.sh [--region us-east-1] [--model gpt-5.4] \
-#                [--approval-policy never] [--sandbox-mode danger-full-access]
+#                [--openai-api-key sk-...] [--approval-policy never] \
+#                [--sandbox-mode danger-full-access]
 #
 # Assumes:
 #   - Node.js / npm available
-#   - bedrockify running on port 8090 (dependency)
+#   - An OpenAI API key (from platform.openai.com/api-keys)
+#
+# Unlike other packs, Codex CLI uses OpenAI's API directly — no bedrockify needed.
+# This is the only pack that requires an external API key.
 #
 # Idempotent: safe to re-run.
 
@@ -21,6 +25,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
 PACK_ARG_MODEL="$(pack_config_get model "gpt-5.4")"
+PACK_ARG_OPENAI_API_KEY="$(pack_config_get "openai-api-key" "")"
 PACK_ARG_APPROVAL_POLICY="$(pack_config_get "approval-policy" "never")"
 PACK_ARG_SANDBOX_MODE="$(pack_config_get "sandbox-mode" "danger-full-access")"
 
@@ -29,26 +34,28 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Install OpenAI Codex CLI and configure it to use AWS Bedrock via bedrockify.
+Install OpenAI Codex CLI — OpenAI's coding agent for the terminal.
 
-Codex CLI connects to bedrockify's OpenAI-compatible endpoint on localhost:8090,
-which proxies requests to Amazon Bedrock. No OpenAI API key required.
+⚠️  Codex CLI requires an OpenAI API key. Unlike other packs that use AWS
+   Bedrock for inference, Codex CLI connects directly to OpenAI's API.
+   Get your key at: https://platform.openai.com/api-keys
 
 Options:
-  --region            AWS region for Bedrock                     (default: us-east-1)
-  --model             Model name for Codex CLI                   (default: gpt-5.4)
-  --approval-policy   Approval mode: on-request|untrusted|never  (default: never)
+  --region            AWS region (informational only)             (default: us-east-1)
+  --model             Default model for Codex CLI                 (default: gpt-5.4)
+  --openai-api-key    OpenAI API key (required — sk-...)
+  --approval-policy   Approval mode: on-request|untrusted|never   (default: never)
   --sandbox-mode      Sandbox: workspace-write|workspace-read|danger-full-access
-                                                                 (default: danger-full-access)
+                                                                  (default: danger-full-access)
   --help              Show this help message
 
 Note: Codex CLI is a CLI tool only — no systemd service is created.
-      Requires bedrockify running on port 8090 for model inference.
+      No bedrockify dependency — connects to OpenAI's API directly.
 
 Examples:
-  ./install.sh --region us-east-1
+  ./install.sh --openai-api-key sk-proj-abc123
   ./install.sh --model gpt-5.4 --approval-policy on-request
-  ./install.sh --sandbox-mode workspace-write
+  ./install.sh --openai-api-key sk-proj-abc123 --sandbox-mode workspace-write
 EOF
 }
 
@@ -58,6 +65,7 @@ while [[ $# -gt 0 ]]; do
     --help|-h)            usage; exit 0 ;;
     --region)             PACK_ARG_REGION="$2";           shift 2 ;;
     --model)              PACK_ARG_MODEL="$2";            shift 2 ;;
+    --openai-api-key)     PACK_ARG_OPENAI_API_KEY="$2";   shift 2 ;;
     --approval-policy)    PACK_ARG_APPROVAL_POLICY="$2";  shift 2 ;;
     --sandbox-mode)       PACK_ARG_SANDBOX_MODE="$2";     shift 2 ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
@@ -66,25 +74,54 @@ done
 
 REGION="${PACK_ARG_REGION}"
 MODEL="${PACK_ARG_MODEL}"
+OPENAI_API_KEY="${PACK_ARG_OPENAI_API_KEY}"
 APPROVAL_POLICY="${PACK_ARG_APPROVAL_POLICY}"
 SANDBOX_MODE="${PACK_ARG_SANDBOX_MODE}"
 
 pack_banner "codex-cli"
 log "region=${REGION} model=${MODEL} approval_policy=${APPROVAL_POLICY} sandbox_mode=${SANDBOX_MODE}"
 
+# ── Prompt for API key if not provided ────────────────────────────────────────
+if [[ -z "${OPENAI_API_KEY}" ]]; then
+  # Check if already set in environment
+  if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+    log "Using OPENAI_API_KEY from environment"
+  else
+    printf "\n"
+    printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+    printf "${_CLR_YELLOW}  OpenAI API Key Required${_CLR_NC}\n"
+    printf "${_CLR_YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n"
+    printf "\n"
+    printf "  Codex CLI connects directly to OpenAI's API (not AWS Bedrock).\n"
+    printf "  Get your API key at: ${_CLR_CYAN}https://platform.openai.com/api-keys${_CLR_NC}\n"
+    printf "\n"
+    printf "  You can also skip this and run 'codex login' after install\n"
+    printf "  to authenticate via ChatGPT account instead.\n"
+    printf "\n"
+    read -rp "  OpenAI API Key (sk-...) or press Enter to skip: " OPENAI_API_KEY
+    printf "\n"
+
+    if [[ -z "${OPENAI_API_KEY}" ]]; then
+      warn "No API key provided — you'll need to run 'codex login' after install"
+    fi
+  fi
+fi
+
+# Validate key format if provided
+if [[ -n "${OPENAI_API_KEY}" ]] && [[ ! "${OPENAI_API_KEY}" =~ ^sk- ]]; then
+  warn "API key doesn't start with 'sk-' — this may not be a valid OpenAI key"
+fi
+
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
 require_cmd npm node curl
-
-# Verify bedrockify is running
-check_bedrockify_health 8090
 
 # ── Install Codex CLI ─────────────────────────────────────────────────────────
 step "Installing Codex CLI"
 
 if command -v codex &>/dev/null; then
   CODEX_EXISTING="$(codex --version 2>/dev/null || echo unknown)"
-  log "codex already installed (${CODEX_EXISTING}) — reinstalling"
+  log "codex already installed (${CODEX_EXISTING}) — upgrading"
 fi
 
 npm install -g @openai/codex@latest
@@ -99,73 +136,100 @@ fi
 CODEX_VERSION="$(codex --version 2>/dev/null || echo unknown)"
 ok "Codex CLI installed: ${CODEX_VERSION}"
 
-# ── Configure bedrockify as provider ──────────────────────────────────────────
-step "Configuring Codex CLI for bedrockify (Bedrock proxy)"
+# ── Configure Codex CLI ───────────────────────────────────────────────────────
+step "Writing Codex CLI configuration"
 
 CODEX_HOME="${HOME}/.codex"
 mkdir -p "${CODEX_HOME}"
 
 cat > "${CODEX_HOME}/config.toml" << TOML
-# Codex CLI — bedrockify configuration
-# Managed by loki-agent packs/codex-cli/install.sh — do not edit manually.
+# Codex CLI configuration
+# Managed by loki-agent packs/codex-cli/install.sh
 
 model = "${MODEL}"
-model_provider = "bedrockify"
-
 approval_policy = "${APPROVAL_POLICY}"
 sandbox_mode = "${SANDBOX_MODE}"
 
-[model_providers.bedrockify]
-name = "Bedrockify (Bedrock proxy)"
-base_url = "http://127.0.0.1:8090/v1"
-
-[features]
-multi_agent = true
-shell_snapshot = true
+# Store credentials in file (no keyring on EC2)
+cli_auth_credentials_store = "file"
 TOML
 
 chmod 600 "${CODEX_HOME}/config.toml"
 ok "Config written: ${CODEX_HOME}/config.toml"
 
-# ── Set environment variables ─────────────────────────────────────────────────
-step "Configuring environment"
+# ── Store API key securely ────────────────────────────────────────────────────
+step "Configuring authentication"
 
-# Codex CLI needs OPENAI_API_KEY set (bedrockify accepts any value)
-if [[ $EUID -eq 0 ]]; then
-  PROFILE_TARGET="/etc/profile.d/codex-cli.sh"
-else
-  PROFILE_TARGET="${HOME}/.codex/env.sh"
-  if ! grep -q 'codex/env.sh' "${HOME}/.bashrc" 2>/dev/null; then
-    printf '\n[ -f "%s/.codex/env.sh" ] && source "%s/.codex/env.sh"\n' "${HOME}" "${HOME}" >> "${HOME}/.bashrc"
-  fi
-fi
+if [[ -n "${OPENAI_API_KEY}" ]]; then
+  # Write env file with restricted permissions
+  CODEX_ENV="${CODEX_HOME}/env.sh"
 
-mkdir -p "$(dirname "${PROFILE_TARGET}")"
-cat > "${PROFILE_TARGET}" << EOF
-# Codex CLI — environment
+  cat > "${CODEX_ENV}" << EOF
+# Codex CLI — authentication
 # Managed by loki-agent packs/codex-cli/install.sh
-export OPENAI_API_KEY="bedrock-proxy"
-export AWS_REGION="${REGION}"
+# ⚠️  Contains secret — do not share or commit
+export OPENAI_API_KEY="${OPENAI_API_KEY}"
 EOF
 
-chmod 644 "${PROFILE_TARGET}"
-ok "Environment written: ${PROFILE_TARGET}"
+  chmod 600 "${CODEX_ENV}"
 
-# Source for current session
-# shellcheck source=/dev/null
-source "${PROFILE_TARGET}"
+  # Source from .bashrc
+  if ! grep -q '.codex/env.sh' "${HOME}/.bashrc" 2>/dev/null; then
+    printf '\n[ -f "%s/.codex/env.sh" ] && source "%s/.codex/env.sh"\n' "${HOME}" "${HOME}" >> "${HOME}/.bashrc"
+  fi
+
+  # Also write to /etc/profile.d if root (for all users including ec2-user)
+  if [[ $EUID -eq 0 ]]; then
+    cat > /etc/profile.d/codex-cli.sh << EOF
+# Codex CLI — authentication
+# Managed by loki-agent packs/codex-cli/install.sh
+export OPENAI_API_KEY="${OPENAI_API_KEY}"
+EOF
+    chmod 600 /etc/profile.d/codex-cli.sh
+  fi
+
+  # Source for current session
+  export OPENAI_API_KEY="${OPENAI_API_KEY}"
+  ok "API key configured (stored in ${CODEX_ENV} with mode 600)"
+else
+  warn "No API key — authenticate later with: codex login --device-auth"
+fi
 
 # ── Sanity check ──────────────────────────────────────────────────────────────
 step "Sanity check"
 
-CODEX_VER="$(codex --version 2>/dev/null || echo unknown)"
-ok "codex --version: ${CODEX_VER}"
-ok "Provider: bedrockify @ http://127.0.0.1:8090/v1"
+ok "codex --version: $(codex --version 2>/dev/null || echo unknown)"
 ok "Model: ${MODEL}"
 ok "Approval policy: ${APPROVAL_POLICY}"
 ok "Sandbox mode: ${SANDBOX_MODE}"
 
+if [[ -n "${OPENAI_API_KEY}" ]]; then
+  ok "Auth: API key configured"
+else
+  warn "Auth: not configured — run 'codex login --device-auth' to authenticate"
+fi
+
+# ── Post-install notice ──────────────────────────────────────────────────────
+cat << 'NOTICE'
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  [CODEX CLI] INSTALLED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Usage:
+    codex                     # Start interactive TUI
+    codex exec "Your prompt"  # One-shot execution
+    codex exec --full-auto "Your prompt"  # Auto-approve in sandbox
+    /model                    # Switch models (inside TUI)
+
+  Auth alternatives:
+    codex login               # Browser-based ChatGPT login
+    codex login --device-auth # Device code (headless/SSH)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NOTICE
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "codex-cli"
-printf "\n[PACK:codex-cli] INSTALLED — codex CLI ready (model: %s via bedrockify, region: %s)\n" \
-  "${MODEL}" "${REGION}"
+printf "\n[PACK:codex-cli] INSTALLED — codex CLI ready (model: %s)\n" "${MODEL}"
