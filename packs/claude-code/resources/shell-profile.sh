@@ -1,4 +1,5 @@
 # Claude Code shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="claude"
 # This file defines aliases and the welcome banner for the Claude Code pack.
 
 PACK_ALIASES='

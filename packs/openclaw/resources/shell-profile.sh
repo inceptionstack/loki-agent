@@ -1,4 +1,5 @@
 # OpenClaw shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="openclaw tui"
 # This file defines aliases and the welcome banner for the OpenClaw pack.
 
 PACK_ALIASES='

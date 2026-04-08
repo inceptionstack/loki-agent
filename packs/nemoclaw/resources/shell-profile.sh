@@ -1,4 +1,5 @@
 # NemoClaw shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="nemoclaw loki-assistant shell"
 # This file defines aliases and the welcome banner for the NemoClaw pack.
 
 PACK_ALIASES='

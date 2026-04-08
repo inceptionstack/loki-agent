@@ -1,4 +1,5 @@
 # IronClaw shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="ironclaw run --no-onboard"
 # This file defines aliases and the welcome banner for the IronClaw pack.
 
 PACK_ALIASES='

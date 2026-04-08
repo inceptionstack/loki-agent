@@ -1,4 +1,5 @@
 # Pi shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="pi"
 # This file defines aliases and the welcome banner for the Pi pack.
 
 PACK_ALIASES='

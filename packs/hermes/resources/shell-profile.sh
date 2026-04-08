@@ -1,4 +1,5 @@
 # Hermes shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="hermes"
 # This file defines aliases and the welcome banner for the Hermes pack.
 
 PACK_ALIASES='

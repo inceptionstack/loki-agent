@@ -1327,7 +1327,7 @@ deploy_console() {
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
   echo -e "    ${CYAN}$(ssm_connect_cmd '<instance-id>')${NC}"
-  echo -e "    ${CYAN}openclaw tui${NC}"
+  echo -e "    ${CYAN}${PACK_TUI_COMMAND:-openclaw tui}${NC}"
   echo ""
   echo -e "  ${DIM}Docs:${NC}  ${DOCS_URL}"
   echo ""
@@ -1675,7 +1675,20 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
-  local doc_content='{"schemaVersion":"1.0","description":"SSM session for OpenClaw - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"openclaw tui || exec bash --login\""}}}'
+  # Source pack profile to get the correct TUI command for this agent
+  local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
+  local tui_cmd="bash --login"
+  if [[ -f "$pack_profile" ]]; then
+    source "$pack_profile"
+    tui_cmd="${PACK_TUI_COMMAND:-bash --login}"
+  fi
+  local escaped_cmd
+  escaped_cmd="${tui_cmd//\"/\\\"}"
+  local doc_content
+  doc_content="$(cat <<SSMDOC
+{"schemaVersion":"1.0","description":"SSM session for ${PACK_BANNER_NAME:-Agent} - starts as ec2-user and launches agent","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \\"${escaped_cmd} || exec bash --login\\""}}}
+SSMDOC
+)"
 
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
     # Update existing document and set new version as default
@@ -1830,8 +1843,8 @@ show_complete() {
 
   # Load pack-specific commands for the completion screen
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
-  local pack_commands="openclaw tui"
-  local pack_name_display="Loki"
+  local pack_commands="${PACK_TUI_COMMAND:-openclaw tui}"
+  local pack_name_display="${PACK_BANNER_NAME:-Agent}"
   if [[ -f "$pack_profile" ]]; then
     source "$pack_profile"
     pack_name_display="${PACK_BANNER_NAME:-Loki}"

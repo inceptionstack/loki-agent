@@ -1,4 +1,5 @@
 # Kiro CLI shell profile — sourced by bootstrap for .bashrc and /etc/profile.d
+PACK_TUI_COMMAND="kiro-cli"
 # Defines aliases and welcome banner for the kiro-cli pack.
 #
 # NOTE: Kiro CLI requires interactive login after install.
