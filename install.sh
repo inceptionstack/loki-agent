@@ -64,7 +64,7 @@ trap '
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
-SSM_DOC_NAME="Loki-Session"
+SSM_DOC_NAME=""
 INSTALLER_VERSION="0.5.74"
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
@@ -419,8 +419,9 @@ run_or_fail() {
 ssm_connect_cmd() {
   local target="${1:-\$INSTANCE_ID}"
   local cmd="aws ssm start-session --target ${target}"
-  if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null 2>&1; then
-    cmd+=" --document-name ${SSM_DOC_NAME}"
+  local doc_name="${SSM_DOC_NAME:-Loki-Session-${PACK_NAME:-openclaw}}"
+  if [[ -n "$doc_name" ]] && aws ssm describe-document --name "$doc_name" --region "$DEPLOY_REGION" &>/dev/null 2>&1; then
+    cmd+=" --document-name ${doc_name}"
   fi
   cmd+=" --region ${DEPLOY_REGION}"
   echo "$cmd"
@@ -1278,6 +1279,11 @@ clean_stale_terraform() {
 # Deploy: CloudFormation Console (option 1)
 # ============================================================================
 deploy_console() {
+  # Load pack profile for TUI command display
+  local _pack_profile="${CLONE_DIR:-}/packs/${PACK_NAME}/resources/shell-profile.sh"
+  if [[ -f "$_pack_profile" ]]; then
+    eval "$(grep -E '^PACK_(TUI_COMMAND|BANNER_NAME|BANNER_EMOJI)=' "$_pack_profile")"
+  fi
   echo ""
   info "Preparing CloudFormation Console launch..."
 
@@ -1327,7 +1333,7 @@ deploy_console() {
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
   echo -e "    ${CYAN}$(ssm_connect_cmd '<instance-id>')${NC}"
-  echo -e "    ${CYAN}${PACK_TUI_COMMAND:-openclaw tui}${NC}"
+  echo -e "    ${CYAN}${PACK_TUI_COMMAND:-bash --login}${NC}"
   echo ""
   echo -e "  ${DIM}Docs:${NC}  ${DOCS_URL}"
   echo ""
@@ -1675,20 +1681,23 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
+  # Build pack-specific document name to avoid collisions between different agents
+  SSM_DOC_NAME="Loki-Session-${PACK_NAME}"
+
   # Source pack profile to get the correct TUI command for this agent
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
   local tui_cmd="bash --login"
   if [[ -f "$pack_profile" ]]; then
-    source "$pack_profile"
+    # Extract only variable assignments — don't execute arbitrary profile code
+    eval "$(grep -E '^PACK_(TUI_COMMAND|BANNER_NAME|BANNER_EMOJI)=' "$pack_profile")"
     tui_cmd="${PACK_TUI_COMMAND:-bash --login}"
   fi
-  local escaped_cmd
-  escaped_cmd="${tui_cmd//\"/\\\"}"
+  local shell_cmd="cd ~ && bash --login -c \"${tui_cmd} || exec bash --login\""
   local doc_content
-  doc_content="$(cat <<SSMDOC
-{"schemaVersion":"1.0","description":"SSM session for ${PACK_BANNER_NAME:-Agent} - starts as ec2-user and launches agent","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \\"${escaped_cmd} || exec bash --login\\""}}}
-SSMDOC
-)"
+  doc_content=$(jq -nc \
+    --arg desc "SSM session for ${PACK_BANNER_NAME:-Agent} - starts as ec2-user and launches agent" \
+    --arg shell "$shell_cmd" \
+    '{schemaVersion:"1.0",description:$desc,sessionType:"Standard_Stream",inputs:{runAsEnabled:true,runAsDefaultUser:"ec2-user",shellProfile:{linux:$shell}}}')
 
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
     # Update existing document and set new version as default
@@ -1843,12 +1852,13 @@ show_complete() {
 
   # Load pack-specific commands for the completion screen
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
-  local pack_commands="${PACK_TUI_COMMAND:-openclaw tui}"
+  local pack_commands="${PACK_TUI_COMMAND:-bash --login}"
   local pack_name_display="${PACK_BANNER_NAME:-Agent}"
   if [[ -f "$pack_profile" ]]; then
-    source "$pack_profile"
-    pack_name_display="${PACK_BANNER_NAME:-Loki}"
-    pack_commands="${PACK_BANNER_COMMANDS}"
+    # Source in subshell to extract variables safely (PACK_* only)
+    eval "$(bash -c 'source "$1" 2>/dev/null; for v in PACK_TUI_COMMAND PACK_BANNER_NAME PACK_BANNER_EMOJI PACK_BANNER_COMMANDS; do [[ -n "${!v}" ]] && printf "%s=%q\n" "$v" "${!v}"; done' _ "$pack_profile")"
+    pack_name_display="${PACK_BANNER_NAME:-Agent}"
+    pack_commands="${PACK_BANNER_COMMANDS:-${PACK_TUI_COMMAND:-bash --login}}"
   fi
 
   echo ""

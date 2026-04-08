@@ -41,7 +41,7 @@ aws cloudformation create-stack \
 aws ssm start-session --target <instance-id> --region us-east-1
 
 # 4. Talk to it
-loki tui
+openclaw tui
 ```
 
 **Estimated monthly cost:** $50–150 depending on instance size and model usage. [Set budget alerts first.](#step-6-set-budget-alerts)
@@ -212,7 +212,7 @@ You should see the gateway as `running` and the model configured.
 ### Talk to It
 
 ```bash
-loki tui
+openclaw tui
 ```
 
 This opens the terminal UI where you can chat directly with your Loki instance.

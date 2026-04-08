@@ -111,7 +111,7 @@ aws cloudformation create-stack \
 aws ssm start-session --target <instance-id>
 
 # Talk to your Loki
-loki tui
+openclaw tui   # or use the alias: loki tui
 ```
 
 Full deployment guide: [Deploying Loki on AWS](https://github.com/inceptionstack/loki-agent/wiki/Deploying-Loki-on-AWS)
