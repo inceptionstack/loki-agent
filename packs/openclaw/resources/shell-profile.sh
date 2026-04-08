@@ -3,8 +3,8 @@
 
 PACK_ALIASES='
 alias loki="openclaw"
-alias lt="loki tui"
-alias gr="loki gateway restart"
+alias lt="openclaw tui"
+alias gr="openclaw gateway restart"
 '
 
 PACK_BANNER_NAME="OpenClaw Agent Environment"

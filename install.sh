@@ -1327,7 +1327,7 @@ deploy_console() {
   echo ""
   echo -e "  ${BOLD}Connect:${NC}"
   echo -e "    ${CYAN}$(ssm_connect_cmd '<instance-id>')${NC}"
-  echo -e "    ${CYAN}loki tui${NC}"
+  echo -e "    ${CYAN}openclaw tui${NC}"
   echo ""
   echo -e "  ${DIM}Docs:${NC}  ${DOCS_URL}"
   echo ""
@@ -1675,7 +1675,7 @@ terraform_apply() {
 # ============================================================================
 # Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
-  local doc_content='{"schemaVersion":"1.0","description":"SSM session for Loki - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"loki tui || exec bash --login\""}}}'
+  local doc_content='{"schemaVersion":"1.0","description":"SSM session for OpenClaw - starts as ec2-user and launches TUI","sessionType":"Standard_Stream","inputs":{"runAsEnabled":true,"runAsDefaultUser":"ec2-user","shellProfile":{"linux":"cd ~ && bash --login -c \"openclaw tui || exec bash --login\""}}}'
 
   if aws ssm describe-document --name "$SSM_DOC_NAME" --region "$DEPLOY_REGION" &>/dev/null; then
     # Update existing document and set new version as default
@@ -1830,7 +1830,7 @@ show_complete() {
 
   # Load pack-specific commands for the completion screen
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
-  local pack_commands="loki tui"
+  local pack_commands="openclaw tui"
   local pack_name_display="Loki"
   if [[ -f "$pack_profile" ]]; then
     source "$pack_profile"
