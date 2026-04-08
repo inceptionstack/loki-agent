@@ -31,6 +31,9 @@
 >
 > # Kiro CLI agent (AWS agentic IDE — requires interactive login after deploy)
 > curl -sfL loki.run | bash -s -- -y --pack kiro-cli --profile builder
+>
+> # Codex CLI agent (OpenAI's coding agent — requires OpenAI API key)
+> curl -sfL loki.run | bash -s -- -y --pack codex-cli --profile builder
 > ```
 >
 > Requires: AWS CLI + admin access on a **dedicated sandbox account**.
@@ -52,7 +55,7 @@ Run `curl -sfL loki.run | bash` — the installer walks you through **pack**, **
 | Flag | Description |
 |------|-------------|
 | `--non-interactive` | Skip all prompts, use defaults (aliases: `--yes`, `-y`) |
-| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `nemoclaw`, `kiro-cli`, `pi`, `ironclaw` |
+| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `nemoclaw`, `kiro-cli`, `codex-cli`, `pi`, `ironclaw` |
 | `--profile <name>` | Permission profile: `builder`, `account_assistant`, `personal_assistant` |
 | `--method <method>` | Deploy method: `cfn` (CloudFormation), `terraform` / `tf` |
 
@@ -191,6 +194,7 @@ Loki uses a **pack-based architecture** for deploying different AI agent runtime
 | `ironclaw` | Agent *(experimental)* | IronClaw by NEAR AI. Rust-based agent with shell/file tools, MCP support. Single static binary. |
 | `nemoclaw` | Agent *(experimental)* | NemoClaw — OpenClaw inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with Landlock, seccomp, and network namespace isolation. Inference routed through bedrockify on the host (no NVIDIA API key needed). **Only compatible with `personal_assistant` profile** — the sandbox blocks all AWS API access. Requires Docker + t4g.xlarge. |
 | `kiro-cli` | Agent *(experimental)* | [Kiro CLI](https://kiro.dev/docs/cli) — AWS agentic IDE terminal client with MCP server support. Uses its own cloud inference (no Bedrock/bedrockify). Pre-installs AWS MCP servers (terraform, ecs, eks, core, docs). **Requires interactive SSO login after deploy:** `kiro-cli login --use-device-flow`. |
+| `codex-cli` | Agent *(experimental)* | [Codex CLI](https://developers.openai.com/codex/cli) — OpenAI's coding agent. Uses OpenAI API directly (requires API key). Supports exec mode, subagents, web search, sandbox modes. **This is the only pack that requires an external API key.** |
 
 ### How It Works
 
@@ -228,6 +232,9 @@ bash packs/nemoclaw/install.sh --region us-east-1 --model us.anthropic.claude-so
 
 # Or for Kiro CLI (no bedrockify needed, requires interactive login after install)
 bash packs/kiro-cli/install.sh --region us-east-1
+
+# Or for Codex CLI (requires OpenAI API key)
+bash packs/codex-cli/install.sh --openai-api-key sk-proj-...
 ```
 
 ### Adding New Packs
