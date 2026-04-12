@@ -15,13 +15,39 @@ This gives you full Opus quality when talking to your human, while keeping autom
 
 ## OpenClaw-Specific Configuration
 
-### Step 1: Configure Default Model + Heartbeat
+### Step 1: Configure Explicit Model Entries + Default Model + Heartbeat
 
-Run this OpenClaw config patch:
+Register the models with explicit `contextWindow` and set the default model and heartbeat in a single patch:
 
 ```bash
 openclaw config patch <<'EOF'
 {
+  "models": {
+    "providers": {
+      "amazon-bedrock": {
+        "models": [
+          {
+            "id": "global.anthropic.claude-opus-4-6-v1",
+            "name": "Claude Opus 4.6",
+            "contextWindow": 200000,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "input": ["text", "image"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          },
+          {
+            "id": "global.anthropic.claude-sonnet-4-6",
+            "name": "Claude Sonnet 4.6",
+            "contextWindow": 200000,
+            "maxTokens": 16384,
+            "reasoning": true,
+            "input": ["text", "image"],
+            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          }
+        ]
+      }
+    }
+  },
   "agents": {
     "defaults": {
       "model": {
@@ -37,6 +63,11 @@ EOF
 ```
 
 OpenClaw restarts automatically.
+
+> **Why explicit model entries?** Bedrock auto-discovery uses a
+> `defaultContextWindow` of 32K for discovered models. Without explicit entries
+> that set `contextWindow: 200000`, Opus 4.6 gets capped at 32K — causing
+> frequent "context limit exceeded" errors.
 
 ### Step 2: Configure Cron Jobs
 
@@ -85,6 +116,12 @@ Expected output:
 ```
 amazon-bedrock/global.anthropic.claude-sonnet-4-6
 ```
+
+```bash
+openclaw config get models.providers.amazon-bedrock.models
+```
+
+Verify that both models show `"contextWindow": 200000` (not 32000).
 
 ## Why `global.` prefix?
 
