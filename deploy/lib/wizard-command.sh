@@ -31,6 +31,7 @@ build_bootstrap_command() {
   if [[ "${state_ref[provider]}" == "litellm" && -n "${state_ref[providerBaseUrl]}" ]]; then
     cmd+=(--litellm-base-url "$(wizard_shell_quote "${state_ref[providerBaseUrl]}")")
   fi
+  [[ -n "${state_ref[repoBranch]}" ]] && cmd+=(--repo-branch "$(wizard_shell_quote "${state_ref[repoBranch]}")")
   [[ -n "${state_ref[gwPort]}" ]] && cmd+=(--gw-port "$(wizard_shell_quote "${state_ref[gwPort]}")")
   [[ -n "${state_ref[bedrockifyPort]}" ]] && cmd+=(--bedrockify-port "$(wizard_shell_quote "${state_ref[bedrockifyPort]}")")
   [[ -n "${state_ref[hermesModel]}" ]] && cmd+=(--hermes-model "$(wizard_shell_quote "${state_ref[hermesModel]}")")

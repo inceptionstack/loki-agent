@@ -11,6 +11,7 @@ wizard_state_init() {
   WIZARD_STATE=(
     [installMode]="simple"
     [environmentName]=""
+    [lastPackSelection]="openclaw"
     [pack]="openclaw"
     [profile]="builder"
     [provider]="bedrock"
@@ -36,7 +37,7 @@ wizard_state_init() {
     [allowedChatIds]=""
     [deployMethod]="cfn-cli"
     [repoBranch]="main"
-    [gwPort]=""
+    [gwPort]="3001"
     [bedrockifyPort]=""
     [hermesModel]=""
     [lokiWatermark]=""

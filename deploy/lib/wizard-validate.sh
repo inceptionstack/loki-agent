@@ -176,7 +176,7 @@ wizard_validate_environment_name() {
 
 wizard_validate_review_state() {
   local state_json="$1"
-  local pack profile provider auth region key base_url env_name
+  local pack profile provider auth region key base_url env_name gw_port
   pack="$(jq -r '.pack // ""' <<<"${state_json}")"
   profile="$(jq -r '.profile // ""' <<<"${state_json}")"
   provider="$(jq -r '.provider // ""' <<<"${state_json}")"
@@ -185,8 +185,10 @@ wizard_validate_review_state() {
   key="$(jq -r '.providerKey // ""' <<<"${state_json}")"
   base_url="$(jq -r '.providerBaseUrl // ""' <<<"${state_json}")"
   env_name="$(jq -r '.environmentName // ""' <<<"${state_json}")"
+  gw_port="$(jq -r '.gwPort // ""' <<<"${state_json}")"
 
   wizard_validate_environment_name "${env_name}" || return 1
+  wizard_validate_positive_int "${gw_port}" "Gateway port" || return 1
   wizard_validate_pack_profile "${pack}" "${profile}" || return 1
   if [[ "${provider}" != "own-cloud" ]]; then
     wizard_validate_pack_provider "${pack}" "${provider}" || return 1

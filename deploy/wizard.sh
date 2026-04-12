@@ -128,7 +128,8 @@ EOF
 
 set_pack_defaults() {
   local pack="${WIZARD_STATE[pack]}"
-  local instance root data gw
+  local previous_pack instance root data gw
+  previous_pack="${WIZARD_STATE[lastPackSelection]}"
   instance="$(wizard_pack_default_field "${pack}" instance_type)"
   root="$(wizard_pack_default_field "${pack}" root_volume_gb)"
   data="$(wizard_pack_default_field "${pack}" data_volume_gb)"
@@ -136,8 +137,10 @@ set_pack_defaults() {
   [[ -z "${instance}" ]] && instance="$(wizard_global_default_field instance_type)"
   [[ -z "${root}" ]] && root="$(wizard_global_default_field root_volume_gb)"
   [[ -z "${data}" ]] && data="$(wizard_global_default_field data_volume_gb)"
-  [[ -z "${WIZARD_STATE[environmentName]}" || "${WIZARD_STATE[environmentName]}" == "${WIZARD_STATE[lokiWatermark]}" ]] && \
+  [[ -z "${gw}" ]] && gw="3001"
+  [[ -z "${WIZARD_STATE[environmentName]}" || "${WIZARD_STATE[environmentName]}" == "${previous_pack}" ]] && \
     WIZARD_STATE[environmentName]="${pack}"
+  WIZARD_STATE[lastPackSelection]="${pack}"
   WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
   WIZARD_STATE[instanceType]="${instance}"
   WIZARD_STATE[rootVolumeGb]="${root}"
@@ -185,7 +188,7 @@ apply_profile_defaults() {
 }
 
 select_install_mode() {
-  wizard_ui_set_step 0 6
+  wizard_ui_set_step 0 7
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     WIZARD_STATE[installMode]="simple"
     return 0
@@ -201,7 +204,7 @@ select_install_mode() {
 }
 
 select_pack() {
-  wizard_ui_set_step 1 6
+  wizard_ui_set_step 1 7
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     WIZARD_STATE[pack]="openclaw"
     set_pack_defaults
@@ -223,8 +226,38 @@ select_pack() {
   set_pack_defaults
 }
 
+select_environment_name() {
+  local total_steps=7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  wizard_ui_set_step 2 "${total_steps}"
+  if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+    [[ -n "${WIZARD_STATE[environmentName]}" ]] || WIZARD_STATE[environmentName]="${WIZARD_STATE[pack]}"
+    return 0
+  fi
+
+  local value
+  while true; do
+    value="$(wizard_input \
+      "Environment Name" \
+      "Used as the AWS resource prefix." \
+      "${WIZARD_STATE[environmentName]}" \
+      "${WIZARD_STATE[pack]}" \
+      false)" || return 1
+    value="${value:-${WIZARD_STATE[pack]}}"
+    if ! wizard_validate_environment_name "${value}" >/tmp/loki-wizard.err 2>&1; then
+      wizard_error "$(cat /tmp/loki-wizard.err)"
+      continue
+    fi
+    WIZARD_STATE[environmentName]="${value}"
+    WIZARD_STATE[lokiWatermark]="${value}"
+    return 0
+  done
+}
+
 select_profile() {
-  wizard_ui_set_step 2 6
+  local total_steps=7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  wizard_ui_set_step 3 "${total_steps}"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     WIZARD_STATE[profile]="builder"
     apply_profile_defaults
@@ -262,7 +295,9 @@ enabled_provider_ids_for_pack() {
 }
 
 select_provider() {
-  wizard_ui_set_step 3 6
+  local total_steps=7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  wizard_ui_set_step 4 "${total_steps}"
   if [[ "${WIZARD_STATE[pack]}" == "kiro-cli" ]]; then
     WIZARD_STATE[provider]="own-cloud"
     WIZARD_STATE[providerAuthType]=""
@@ -328,7 +363,9 @@ configure_provider_screen() {
 }
 
 configure_provider() {
-  wizard_ui_set_step 4 6
+  local total_steps=7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && total_steps=12
+  wizard_ui_set_step 5 "${total_steps}"
   local provider="${WIZARD_STATE[provider]}"
   [[ "${provider}" == "own-cloud" ]] && return 0
 
@@ -449,17 +486,23 @@ configure_provider() {
 }
 
 advanced_model() {
-  wizard_ui_set_step 5 9
+  wizard_ui_set_step 6 12
   local provider="${WIZARD_STATE[provider]}"
   local action value rc
+  local -a options=(
+    "Primary Model"
+    "Fallback Model"
+    "Context Window"
+    "Max Output Tokens"
+  )
+  if [[ "${WIZARD_STATE[pack]}" == "hermes" ]]; then
+    options+=("Hermes Model")
+  fi
   while true; do
     action="$(configure_provider_screen \
       "Advanced — Model Configuration" \
-      "Primary: ${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${provider}" primaryModel)} • Fallback: ${WIZARD_STATE[fallbackModelOverride]:-$(wizard_provider_default "${provider}" fallbackModel)} • Context: ${WIZARD_STATE[contextWindowOverride]:-auto} • Max tokens: ${WIZARD_STATE[maxTokensOverride]:-auto}" \
-      "Primary Model" \
-      "Fallback Model" \
-      "Context Window" \
-      "Max Output Tokens")" || return 1
+      "Primary: ${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${provider}" primaryModel)} • Fallback: ${WIZARD_STATE[fallbackModelOverride]:-$(wizard_provider_default "${provider}" fallbackModel)} • Context: ${WIZARD_STATE[contextWindowOverride]:-auto} • Max tokens: ${WIZARD_STATE[maxTokensOverride]:-auto}$([[ "${WIZARD_STATE[pack]}" == "hermes" ]] && printf ' • Hermes: %s' "${WIZARD_STATE[hermesModel]:-(provider primary)}")" \
+      "${options[@]}")" || return 1
     case "${action}" in
       NEXT)
         wizard_validate_positive_int "${WIZARD_STATE[contextWindowOverride]}" "Context window" >/tmp/loki-wizard.err 2>&1 || {
@@ -476,6 +519,14 @@ advanced_model() {
           wizard_warning "Primary override is not in the provider manifest. Continuing with explicit override."
         elif [[ ${rc} -ne 0 ]]; then
           wizard_error "Primary model validation failed"
+          continue
+        fi
+        wizard_validate_model_override "${provider}" "${WIZARD_STATE[hermesModel]}" >/tmp/loki-wizard.err 2>&1
+        rc=$?
+        if [[ ${rc} -eq 2 ]]; then
+          wizard_warning "Hermes override is not in the provider manifest. Continuing with explicit override."
+        elif [[ ${rc} -ne 0 ]]; then
+          wizard_error "Hermes model validation failed"
           continue
         fi
         return 0
@@ -496,12 +547,16 @@ advanced_model() {
         value="$(wizard_input "Max Output Tokens" "Positive integer only." "${WIZARD_STATE[maxTokensOverride]}" "16384" false)" || true
         WIZARD_STATE[maxTokensOverride]="${value:-}"
         ;;
+      "Hermes Model")
+        value="$(wizard_input "Hermes Model" "Leave empty to use the provider primary model." "${WIZARD_STATE[hermesModel]}" "${WIZARD_STATE[primaryModelOverride]:-$(wizard_provider_default "${provider}" primaryModel)}" false)" || true
+        WIZARD_STATE[hermesModel]="${value:-}"
+        ;;
     esac
   done
 }
 
 advanced_instance() {
-  wizard_ui_set_step 6 9
+  wizard_ui_set_step 7 12
   local action value
   local choices=(t4g.medium t4g.large t4g.xlarge t4g.2xlarge m7g.xlarge c7g.xlarge BACK)
   while true; do
@@ -544,17 +599,19 @@ advanced_instance() {
 }
 
 advanced_networking() {
-  wizard_ui_set_step 7 9
+  wizard_ui_set_step 8 12
   local action value
   while true; do
     action="$(configure_provider_screen \
       "Advanced — Networking" \
-      "VPC: ${WIZARD_STATE[vpcMode]} • SSH: ${WIZARD_STATE[sshAccessMode]} • Existing VPC: ${WIZARD_STATE[existingVpcId]:-none}" \
+      "VPC: ${WIZARD_STATE[vpcMode]} • SSH: ${WIZARD_STATE[sshAccessMode]} • Branch: ${WIZARD_STATE[repoBranch]} • Gateway: ${WIZARD_STATE[gwPort]} • Existing VPC: ${WIZARD_STATE[existingVpcId]:-none}" \
       "VPC Mode" \
       "Existing VPC ID" \
       "Existing Subnet ID" \
       "SSH Access" \
       "Key Pair Name" \
+      "Repo Branch" \
+      "Gateway Port" \
       "Telegram Token" \
       "Allowed Chat IDs")" || return 1
     case "${action}" in
@@ -565,6 +622,10 @@ advanced_networking() {
             continue
           }
         fi
+        wizard_validate_positive_int "${WIZARD_STATE[gwPort]}" "Gateway port" >/tmp/loki-wizard.err 2>&1 || {
+          wizard_error "$(cat /tmp/loki-wizard.err)"
+          continue
+        }
         if [[ "${WIZARD_STATE[sshAccessMode]}" == "ssm-only" ]]; then
           WIZARD_STATE[keyPairName]=""
           WIZARD_STATE[sshAllowedCidr]="127.0.0.1/32"
@@ -604,6 +665,14 @@ advanced_networking() {
         value="$(wizard_input "Key Pair Name" "Required only when SSH access is keypair." "${WIZARD_STATE[keyPairName]}" "my-keypair" false)" || true
         WIZARD_STATE[keyPairName]="${value:-${WIZARD_STATE[keyPairName]}}"
         ;;
+      "Repo Branch")
+        value="$(wizard_input "Repo Branch" "Git branch to deploy from." "${WIZARD_STATE[repoBranch]}" "main" false)" || true
+        WIZARD_STATE[repoBranch]="${value:-${WIZARD_STATE[repoBranch]}}"
+        ;;
+      "Gateway Port")
+        value="$(wizard_input "Gateway Port" "Positive integer only." "${WIZARD_STATE[gwPort]}" "3001" false)" || true
+        WIZARD_STATE[gwPort]="${value:-${WIZARD_STATE[gwPort]}}"
+        ;;
       "Telegram Token")
         value="$(wizard_input "Telegram Token" "Optional unless bot features are needed." "${WIZARD_STATE[telegramToken]}" "123456789:AA..." true)" || true
         WIZARD_STATE[telegramToken]="${value:-${WIZARD_STATE[telegramToken]}}"
@@ -617,7 +686,7 @@ advanced_networking() {
 }
 
 advanced_deploy_method() {
-  wizard_ui_set_step 8 9
+  wizard_ui_set_step 9 12
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     WIZARD_STATE[deployMethod]="cfn-cli"
     return 0
@@ -633,7 +702,7 @@ advanced_deploy_method() {
 }
 
 advanced_security_services() {
-  wizard_ui_set_step 9 9
+  wizard_ui_set_step 10 12
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     return 0
   fi
@@ -646,13 +715,17 @@ advanced_security_services() {
     "Amazon GuardDuty" \
     "Amazon Inspector" \
     "IAM Access Analyzer" \
-    "AWS Config Recorder")" || return 1
+    "AWS Config Recorder" \
+    "Bedrock Model Access Form" \
+    "Request Quota Increases")" || return 1
 
   WIZARD_STATE[enableSecurityHub]="false"
   WIZARD_STATE[enableGuardDuty]="false"
   WIZARD_STATE[enableInspector]="false"
   WIZARD_STATE[enableAccessAnalyzer]="false"
   WIZARD_STATE[enableConfigRecorder]="false"
+  WIZARD_STATE[enableBedrockForm]="false"
+  WIZARD_STATE[requestQuotaIncreases]="false"
   while IFS= read -r service; do
     case "${service}" in
       "AWS Security Hub") WIZARD_STATE[enableSecurityHub]="true" ;;
@@ -660,6 +733,8 @@ advanced_security_services() {
       "Amazon Inspector") WIZARD_STATE[enableInspector]="true" ;;
       "IAM Access Analyzer") WIZARD_STATE[enableAccessAnalyzer]="true" ;;
       "AWS Config Recorder") WIZARD_STATE[enableConfigRecorder]="true" ;;
+      "Bedrock Model Access Form") WIZARD_STATE[enableBedrockForm]="true" ;;
+      "Request Quota Increases") WIZARD_STATE[requestQuotaIncreases]="true" ;;
     esac
   done <<<"${selected}"
 }
@@ -686,8 +761,8 @@ review_summary_text() {
 }
 
 review_screen() {
-  wizard_ui_set_step 5 6
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 10 10
+  wizard_ui_set_step 6 7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 11 12
 
   while true; do
     WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
@@ -727,9 +802,7 @@ review_screen() {
         }
         return 0
         ;;
-      "Edit Environment Name")
-        WIZARD_STATE[environmentName]="$(wizard_input "Environment Name" "Used as the AWS resource prefix." "${WIZARD_STATE[environmentName]}" "${WIZARD_STATE[pack]}" false)"
-        ;;
+      "Edit Environment Name") return 10 ;;
       "Edit Pack") return 11 ;;
       "Edit Profile") return 12 ;;
       "Edit Provider") return 13 ;;
@@ -745,8 +818,8 @@ review_screen() {
 }
 
 deploy_screen() {
-  wizard_ui_set_step 6 6
-  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 11 11
+  wizard_ui_set_step 7 7
+  [[ "${WIZARD_STATE[installMode]}" == "advanced" ]] && wizard_ui_set_step 12 12
   PARTIAL_COMMAND="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
   WIZARD_STATE[generatedBootstrapCommand]="${PARTIAL_COMMAND}"
 
@@ -891,10 +964,14 @@ main_flow() {
         ;;
       pack)
         select_pack || { step="install_mode"; continue; }
+        step="environment_name"
+        ;;
+      environment_name)
+        select_environment_name || { step="pack"; continue; }
         step="profile"
         ;;
       profile)
-        select_profile || { step="pack"; continue; }
+        select_profile || { step="environment_name"; continue; }
         step="provider"
         ;;
       provider)
@@ -941,6 +1018,7 @@ main_flow() {
               step="provider_config"
             fi
             ;;
+          10) step="environment_name" ;;
           11) step="pack" ;;
           12) step="profile" ;;
           13) step="provider" ;;

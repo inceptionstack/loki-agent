@@ -42,8 +42,25 @@ run_scenario_command() {
   awk '/^BOOTSTRAP_COMMAND:/{getline; print; exit}' <<<"${output}"
 }
 
+run_scenario_state_json() {
+  local scenario="$1"
+  local output
+  output="$(bash "${SCRIPT_DIR}/wizard.sh" --dry-run --scenario "${scenario}")"
+  awk '
+    /^STATE_JSON:/ {capture=1; next}
+    /^BOOTSTRAP_COMMAND:/ {capture=0}
+    capture {print}
+  ' <<<"${output}"
+}
+
 scenario_tests() {
-  local cmd
+  local cmd state_json expected_pack
+
+  for scenario in $(seq 1 19); do
+    state_json="$(run_scenario_state_json "${scenario}")"
+    expected_pack="$(jq -r '.pack' <<<"${state_json}")"
+    assert_contains "$(jq -r '.environmentName' <<<"${state_json}")" "${expected_pack}" "scenario ${scenario} environment name defaults to pack"
+  done
 
   cmd="$(run_scenario_command 1)"
   assert_contains "${cmd}" "--provider bedrock" "scenario 1 provider"
