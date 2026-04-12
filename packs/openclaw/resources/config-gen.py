@@ -18,10 +18,23 @@ litellm_key = os.environ.get("LITELLM_KEY_ENV") or (sys.argv[7] if len(sys.argv)
 litellm_model = sys.argv[8] if len(sys.argv) > 8 else "claude-opus-4-6"
 provider_key = os.environ.get("PROVIDER_KEY_ENV") or (sys.argv[9] if len(sys.argv) > 9 else "")
 home = os.path.expanduser("~")
+
+# Explicit model entries with contextWindow to prevent Bedrock discovery 32K default.
+# Without these, auto-discovery assigns defaultContextWindow=32000 to all models,
+# silently capping Opus/Sonnet 4.6 (200K) and causing "context limit exceeded" errors.
+bedrock_models = [
+    {"id": "global.anthropic.claude-opus-4-6-v1", "name": "Claude Opus 4.6", "contextWindow": 200000, "maxTokens": 16384, "reasoning": True, "input": ["text", "image"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}},
+    {"id": "global.anthropic.claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "contextWindow": 200000, "maxTokens": 16384, "reasoning": True, "input": ["text", "image"], "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}},
+]
+
+# Default to global. prefix for cross-region routing; respect user-provided model ID
+default_primary = model if ("." in model and "anthropic" in model) else "global.anthropic.claude-opus-4-6-v1"
+default_fallback = "global.anthropic.claude-sonnet-4-6"
+
 cfg = {
-  "models": {"providers": {"amazon-bedrock": {"baseUrl": f"https://bedrock-runtime.{bedrock_region}.amazonaws.com", "auth": "aws-sdk", "api": "bedrock-converse-stream", "models": []}}},
+  "models": {"providers": {"amazon-bedrock": {"baseUrl": f"https://bedrock-runtime.{bedrock_region}.amazonaws.com", "auth": "aws-sdk", "api": "bedrock-converse-stream", "models": bedrock_models}}},
   "plugins": {"entries": {"amazon-bedrock": {"config": {"discovery": {"enabled": True, "region": bedrock_region, "providerFilter": ["anthropic"]}}}}},
-  "agents": {"defaults": {"model": {"primary": f"amazon-bedrock/{model}", "fallbacks": ["amazon-bedrock/us.anthropic.claude-sonnet-4-6"]}, "workspace": f"{home}/.openclaw/workspace", "compaction": {"mode": "safeguard"}, "heartbeat": {"model": f"amazon-bedrock/us.anthropic.claude-sonnet-4-6", "target": "telegram", "every": "30m", "lightContext": True, "isolatedSession": True}, "maxConcurrent": 4, "subagents": {"maxConcurrent": 8}}},
+  "agents": {"defaults": {"model": {"primary": f"amazon-bedrock/{default_primary}", "fallbacks": [f"amazon-bedrock/{default_fallback}"]}, "workspace": f"{home}/.openclaw/workspace", "compaction": {"mode": "safeguard"}, "heartbeat": {"model": f"amazon-bedrock/{default_fallback}", "target": "telegram", "every": "30m", "lightContext": True, "isolatedSession": True}, "maxConcurrent": 4, "subagents": {"maxConcurrent": 8}}},
   "tools": {"web": {"search": {"enabled": False}, "fetch": {"enabled": True}}},
   "hooks": {"internal": {"enabled": True, "entries": {"boot-md": {"enabled": True}, "bootstrap-extra-files": {"enabled": True}, "command-logger": {"enabled": True}, "session-memory": {"enabled": True}}}},
   "gateway": {"port": int(gw_port), "mode": "local", "bind": "loopback", "auth": {"mode": "token", "token": gw_token}}
@@ -31,10 +44,10 @@ if model_mode == "litellm" and litellm_url and litellm_key:
     {"id": "claude-opus-4-6", "name": "Claude Opus 4.6", "reasoning": True, "input": ["text", "image"], "contextWindow": 200000, "maxTokens": 64000},
     {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "reasoning": True, "input": ["text", "image"], "contextWindow": 200000, "maxTokens": 64000},
     {"id": "claude-3.5-haiku", "name": "Claude 3.5 Haiku", "reasoning": False, "input": ["text", "image"], "contextWindow": 200000, "maxTokens": 8192}]}
-  cfg["agents"]["defaults"]["model"] = {"primary": f"litellm/{litellm_model}", "fallbacks": ["litellm/claude-sonnet-4-6", f"amazon-bedrock/{model}"]}
+  cfg["agents"]["defaults"]["model"] = {"primary": f"litellm/{litellm_model}", "fallbacks": ["litellm/claude-sonnet-4-6", f"amazon-bedrock/{default_primary}"]}
 elif model_mode == "api-key" and provider_key:
   cfg["models"]["providers"]["anthropic"] = {"apiKey": provider_key, "models": []}
-  cfg["agents"]["defaults"]["model"] = {"primary": "anthropic/claude-opus-4-6-20260514", "fallbacks": ["anthropic/claude-sonnet-4-6-20260514", f"amazon-bedrock/{model}"]}
+  cfg["agents"]["defaults"]["model"] = {"primary": "anthropic/claude-opus-4-6-20260514", "fallbacks": ["anthropic/claude-sonnet-4-6-20260514", f"amazon-bedrock/{default_primary}"]}
 with open(f"{home}/.openclaw/openclaw.json", "w") as f:
   json.dump(cfg, f, indent=2)
 print(f"Config written (mode={model_mode})")

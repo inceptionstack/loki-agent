@@ -21,7 +21,7 @@ params:
     default: us-east-1
   - name: model
     description: "Default Bedrock model ID"
-    default: "us.anthropic.claude-opus-4-6-v1"
+    default: "global.anthropic.claude-opus-4-6-v1"
   - name: port
     description: "Gateway port"
     default: "3001"

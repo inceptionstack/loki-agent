@@ -23,7 +23,7 @@ source "${SCRIPT_DIR}/../common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 # Defaults from config file (written by bootstrap dispatcher), then CLI overrides
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_ARG_MODEL="$(pack_config_get model "global.anthropic.claude-opus-4-6-v1")"
 PACK_ARG_PORT="$(pack_config_get gw_port "3001")"
 PACK_ARG_TOKEN="$(pack_config_get gw_token "")"
 PACK_ARG_MODEL_MODE="$(pack_config_get model_mode "bedrock")"
@@ -41,7 +41,7 @@ Install OpenClaw and configure the gateway service.
 
 Options:
   --region         AWS region for Bedrock         (default: us-east-1)
-  --model          Default Bedrock model ID        (default: us.anthropic.claude-opus-4-6-v1)
+  --model          Default Bedrock model ID        (default: global.anthropic.claude-opus-4-6-v1)
   --port           Gateway port                    (default: 3001)
   --token          Gateway auth token              (default: auto-generated)
   --model-mode     bedrock | litellm | api-key   (default: bedrock)
@@ -52,7 +52,7 @@ Options:
   --help           Show this help message
 
 Examples:
-  ./install.sh --region us-east-1 --model us.anthropic.claude-opus-4-6-v1 --port 3001
+  ./install.sh --region us-east-1 --model global.anthropic.claude-opus-4-6-v1 --port 3001
   ./install.sh --model-mode litellm --litellm-url http://proxy:4000 --litellm-key sk-xxx
 EOF
 }

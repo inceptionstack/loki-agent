@@ -213,7 +213,7 @@ Parameters:
 
   DefaultModel:
     Type: String
-    Default: 'us.anthropic.claude-opus-4-6-v1'
+    Default: 'global.anthropic.claude-opus-4-6-v1'
     Description: "The primary AI model. Claude Opus 4.6 is recommended for best performance. Used when ModelMode is 'bedrock'."
 
   ModelMode:
