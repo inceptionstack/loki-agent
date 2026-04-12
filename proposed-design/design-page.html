@@ -1,0 +1,2267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provider Packs Design — LLM Provider Decoupling</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    suppressErrorRendering: false,
+    securityLevel: 'loose',
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#161b22',
+      primaryColor: '#1f6feb',
+      primaryTextColor: '#c9d1d9',
+      primaryBorderColor: '#388bfd',
+      secondaryColor: '#238636',
+      tertiaryColor: '#21262d',
+      lineColor: '#8b949e',
+      textColor: '#c9d1d9',
+      mainBkg: '#1f6feb',
+      nodeBorder: '#388bfd',
+      clusterBkg: '#161b22',
+      clusterBorder: '#30363d',
+      titleColor: '#f0f6fc',
+      edgeLabelBackground: '#0d1117',
+      nodeTextColor: '#f0f6fc',
+      actorTextColor: '#f0f6fc',
+      actorBkg: '#1f6feb',
+      actorBorder: '#388bfd',
+      activationBorderColor: '#58a6ff',
+      activationBkgColor: '#1c2128',
+      sequenceNumberColor: '#f0f6fc',
+      sectionBkgColor: '#161b22',
+      altSectionBkgColor: '#1c2128',
+      sectionBkgColor2: '#21262d',
+      taskBkgColor: '#1f6feb',
+      taskTextColor: '#f0f6fc',
+      taskBorderColor: '#388bfd',
+      gridColor: '#30363d',
+      doneTaskBkgColor: '#238636',
+      critBkgColor: '#da3633',
+      todayLineColor: '#f85149',
+      fontFamily: '-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 20 },
+    sequence: { mirrorActors: false, bottomMarginAdj: 1, actorFontSize: 14, messageFontSize: 13, noteFontSize: 12 }
+  });
+</script>
+<style>
+  :root { --bg: #0d1117; --fg: #c9d1d9; --accent: #58a6ff; --border: #30363d; --code-bg: #161b22; --heading: #f0f6fc; --green: #3fb950; --yellow: #d29922; --red: #f85149; --purple: #bc8cff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); line-height: 1.7; padding: 0; }
+  .container { max-width: 1000px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { color: var(--heading); font-size: 2.2em; margin: 0 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 16px; }
+  h1 small { font-size: 0.45em; color: var(--accent); display: block; margin-top: 4px; font-weight: 400; }
+  h2 { color: var(--heading); font-size: 1.5em; margin: 48px 0 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  h3 { color: var(--accent); font-size: 1.15em; margin: 32px 0 12px; }
+  p { margin: 12px 0; }
+  ul, ol { margin: 12px 0 12px 24px; }
+  li { margin: 4px 0; }
+  code { background: var(--code-bg); color: var(--accent); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; font-family: 'SFMono-Regular', Consolas, monospace; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow-x: auto; margin: 16px 0; line-height: 1.5; }
+  pre code { background: none; color: var(--fg); padding: 0; }
+  strong { color: var(--heading); }
+  em { color: var(--yellow); font-style: italic; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+  th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+  th { background: var(--code-bg); color: var(--heading); font-weight: 600; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; margin: 2px 4px 2px 0; }
+  .badge-green { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+  .badge-red { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .callout { border-left: 4px solid var(--accent); background: rgba(88,166,255,0.06); padding: 16px 20px; margin: 20px 0; border-radius: 0 8px 8px 0; }
+  .callout-warn { border-left-color: var(--yellow); background: rgba(210,153,34,0.06); }
+  .callout-good { border-left-color: var(--green); background: rgba(63,185,80,0.06); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 20px 0; }
+  .card { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .card h4 { margin: 0 0 8px; color: var(--heading); }
+  .separator { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+  .tag { font-size: 0.75em; color: var(--fg); opacity: 0.5; }
+  .mermaid-wrap { background: var(--code-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 20px 0; overflow-x: auto; }
+  .mermaid { display: flex; justify-content: center; }
+  .mermaid svg { max-width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>🔌 Provider Packs Design <small>LLM Provider Decoupling — v3 (post architecture review)</small></h1>
+
+<h2>Problem</h2>
+<p>Model IDs and provider config are <strong>hardcoded across 5+ files per pack</strong>. Each agent pack independently handles provider selection, making it impossible to add new providers without modifying every pack.</p>
+
+<h2>Goal</h2>
+<p>Decouple <strong>LLM provider selection</strong> from <strong>agent pack selection</strong>. User picks three things:</p>
+<div class="grid">
+  <div class="card"><h4>🧩 Agent Pack</h4><p>openclaw, hermes, pi, claude-code, ironclaw, nemoclaw, kiro-cli</p></div>
+  <div class="card"><h4>🛡️ Permission Profile</h4><p>builder, account_assistant, personal_assistant</p></div>
+  <div class="card"><h4>🧠 LLM Provider</h4><p>bedrock, anthropic-api, openai-api, openrouter, litellm</p></div>
+</div>
+
+<h2>Architecture</h2>
+
+<h3>Two-Layer Config Generation</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TB
+  subgraph L1["<b>Layer 1: RESOLVE</b> &nbsp;(providers/resolve.py)"]
+    direction LR
+    M["📄 Provider<br/>Manifest"] --> R["⚙️ resolve.py"]
+    O["🎯 Overrides<br/>(--model, --region)"] --> R
+    REG["📋 Pack Registry<br/>(compatibility)"] --> R
+    R --> |"atomic write"| CFG["📦 Normalized<br/>Config JSON"]
+  end
+
+
+    
+    FS --> |"export env var"| ENV["💾 ENV VARS<br/>(never on disk)"]
+  end
+
+  subgraph L2["<b>Layer 2: PACK-NATIVE RENDERING</b>"]
+    direction LR
+    CFG2["📦 Resolved Config"] --> OC["🦞 OpenClaw<br/>config-gen.py<br/>→ openclaw.json"]
+    CFG2 --> HM["🏛️ Hermes<br/>install.sh<br/>→ config.yaml"]
+    CFG2 --> CC["💻 Claude Code<br/>install.sh<br/>→ env vars"]
+    CFG2 --> PI["🥧 Pi<br/>install.sh<br/>→ models.json"]
+  end
+
+  L1 --> SEC
+  SEC --> L2
+
+  style L1 fill:#0d1117,stroke:#388bfd,stroke-width:2px,color:#f0f6fc
+  style L2 fill:#0d1117,stroke:#238636,stroke-width:2px,color:#f0f6fc
+  style SEC fill:#0d1117,stroke:#d29922,stroke-width:2px,color:#f0f6fc
+  style CFG fill:#1f6feb,stroke:#388bfd,color:#f0f6fc
+  style R fill:#1f6feb,stroke:#388bfd,color:#f0f6fc
+</pre>
+</div>
+
+<h3>Responsibility Boundaries</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+graph LR
+  subgraph RESOLVE["resolve.py"]
+    A1["✅ Load manifests"]
+    A2["✅ Validate compatibility"]
+    A3["✅ Merge overrides"]
+    A4["✅ Write atomic JSON"]
+
+    A6["❌ No pack rendering"]
+  end
+
+
+    B1["✅ ARN → env var"]
+
+    B3["❌ No disk writes"]
+  end
+
+  subgraph RENDER["Pack Renderers"]
+    C1["✅ Model ID translation"]
+    C2["✅ Env flag logic"]
+    C3["✅ Runtime config format"]
+    C4["❌ No provider logic"]
+  end
+
+  RESOLVE --> FETCH --> RENDER
+
+  style RESOLVE fill:#161b22,stroke:#388bfd,stroke-width:2px,color:#c9d1d9
+  style FETCH fill:#161b22,stroke:#d29922,stroke-width:2px,color:#c9d1d9
+  style RENDER fill:#161b22,stroke:#238636,stroke-width:2px,color:#c9d1d9
+</pre>
+</div>
+
+<h3>Directory Structure</h3>
+<pre><code>providers/
+  resolve.py                    # Shared resolver
+  bedrock/manifest.yaml
+  anthropic-api/manifest.yaml
+  openai-api/manifest.yaml
+  litellm/manifest.yaml
+  openrouter/manifest.yaml
+
+packs/
+  registry.yaml                 # Single source of truth: pack metadata,
+                                # provider-aware deps, supported providers
+  common.sh                     # Shared helpers
+  lib/provider_render.sh        # Shared renderer helpers
+  openclaw/install.sh + config-gen.py
+  hermes/install.sh
+  claude-code/install.sh
+  pi/install.sh</code></pre>
+
+<div class="callout-warn callout">
+<strong>No <code>providers/registry.yaml</code></strong> — the pack registry is the single source of truth for pack/provider compatibility. Provider manifests describe providers only.
+</div>
+
+<h2>Provider Manifest Schema</h2>
+<pre><code>schemaVersion: v1
+name: bedrock
+displayName: AWS Bedrock
+kind: llm-provider
+
+auth:
+  method: aws-sdk
+  requiredEnv: []
+  optionalEnv: [AWS_REGION]
+
+connection:
+  transport: native
+  api: bedrock-converse-stream
+  baseUrlTemplate: "https://bedrock-runtime.{region}.amazonaws.com"
+  regionRequired: true
+
+capabilities:
+  chat: true
+  embeddings: true
+  streaming: true
+
+defaults:
+  roles:
+    chat_primary: global.anthropic.claude-opus-4-6-v1
+    chat_fallback: global.anthropic.claude-sonnet-4-6
+    chat_heartbeat: global.anthropic.claude-sonnet-4-6
+    embeddings: amazon.titan-embed-text-v2:0
+
+models:
+  - id: global.anthropic.claude-opus-4-6-v1
+    name: Claude Opus 4.6
+    kind: chat
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes: [text, image]
+  - id: global.anthropic.claude-sonnet-4-6
+    name: Claude Sonnet 4.6
+    kind: chat
+    contextWindow: 200000
+    maxTokens: 16384
+    reasoning: true
+    inputTypes: [text, image]</code></pre>
+
+<h2>Provider Catalog</h2>
+<div class="grid">
+  <div class="card"><h4>☁️ AWS Bedrock <span class="badge badge-green">default</span></h4><p><strong>Auth:</strong> IAM instance profile <em>or</em> Bedrock API Key (bearer token)</p><p><strong>Primary:</strong> <code>global.anthropic.claude-opus-4-6-v1</code></p><p><strong>Fallback:</strong> <code>global.anthropic.claude-sonnet-4-6</code></p><p><strong>Context:</strong> 200K</p><p><span class="badge badge-green">all packs</span></p></div>
+  <div class="card"><h4>🔑 Anthropic API</h4><p><strong>Auth:</strong> <code>ANTHROPIC_API_KEY</code></p><p><strong>Primary:</strong> <code>claude-opus-4-6-20250514</code></p><p><strong>Fallback:</strong> <code>claude-sonnet-4-6-20250514</code></p><p><strong>Context:</strong> 200K</p><p><span class="badge badge-blue">openclaw</span> <span class="badge badge-blue">hermes</span> <span class="badge badge-blue">claude-code</span></p></div>
+  <div class="card"><h4>🤖 OpenAI API</h4><p><strong>Auth:</strong> <code>OPENAI_API_KEY</code></p><p><strong>Primary:</strong> <code>gpt-4.1</code></p><p><strong>Fallback:</strong> <code>gpt-4.1-mini</code></p><p><strong>Context:</strong> 1M</p><p><span class="badge badge-blue">openclaw</span> <span class="badge badge-blue">hermes</span></p></div>
+  <div class="card"><h4>🔀 LiteLLM Proxy</h4><p><strong>Auth:</strong> optional key + base URL</p><p><strong>Primary:</strong> <code>claude-opus-4-6</code></p><p><strong>Fallback:</strong> <code>claude-sonnet-4-6</code></p><p><strong>Context:</strong> 200K</p><p><span class="badge badge-blue">openclaw</span> <span class="badge badge-blue">pi</span></p></div>
+  <div class="card"><h4>🌐 OpenRouter</h4><p><strong>Auth:</strong> <code>OPENROUTER_API_KEY</code></p><p><strong>Primary:</strong> <code>anthropic/claude-opus-4-6</code></p><p><strong>Fallback:</strong> <code>anthropic/claude-sonnet-4-6</code></p><p><strong>Context:</strong> 200K</p><p><span class="badge badge-blue">openclaw</span> <span class="badge badge-blue">hermes</span> <span class="badge badge-blue">pi</span></p></div>
+</div>
+
+<h2>Pack/Provider Compatibility Matrix</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+%%{init: {'theme': 'dark'}}%%
+block-beta
+  columns 6
+  space:1 B["☁️ Bedrock"] A["🔑 Anthropic"] O["🤖 OpenAI"] OR["🌐 OpenRouter"] L["🔀 LiteLLM"]
+  OC["🦞 OpenClaw"]:1 OC_B["✅"]:1 OC_A["✅"]:1 OC_O["✅"]:1 OC_OR["✅"]:1 OC_L["✅"]:1
+  HM["🏛️ Hermes"]:1 HM_B["✅"]:1 HM_A["✅"]:1 HM_O["✅"]:1 HM_OR["✅"]:1 HM_L["—"]:1
+  CC["💻 Claude Code"]:1 CC_B["✅"]:1 CC_A["✅"]:1 CC_O["—"]:1 CC_OR["—"]:1 CC_L["—"]:1
+  PI["🥧 Pi"]:1 PI_B["✅"]:1 PI_A["—"]:1 PI_O["—"]:1 PI_OR["✅"]:1 PI_L["✅"]:1
+  BF["⚡ Bedrockify<br/>(utility)"]:1 BF_B["✅"]:1 BF_A["—"]:1 BF_O["—"]:1 BF_OR["—"]:1 BF_L["—"]:1
+
+  style OC_B fill:#238636,color:#f0f6fc
+  style OC_A fill:#238636,color:#f0f6fc
+  style OC_O fill:#238636,color:#f0f6fc
+  style OC_OR fill:#238636,color:#f0f6fc
+  style OC_L fill:#238636,color:#f0f6fc
+  style HM_B fill:#238636,color:#f0f6fc
+  style CC_B fill:#238636,color:#f0f6fc
+  style PI_B fill:#238636,color:#f0f6fc
+  style BF_B fill:#238636,color:#f0f6fc
+  style HM_A fill:#238636,color:#f0f6fc
+  style HM_O fill:#238636,color:#f0f6fc
+  style HM_OR fill:#238636,color:#f0f6fc
+  style HM_L fill:#21262d,color:#484f58
+  style CC_A fill:#238636,color:#f0f6fc
+  style CC_O fill:#21262d,color:#484f58
+  style CC_OR fill:#21262d,color:#484f58
+  style CC_L fill:#21262d,color:#484f58
+  style PI_A fill:#21262d,color:#484f58
+  style PI_O fill:#21262d,color:#484f58
+  style PI_OR fill:#238636,color:#f0f6fc
+  style PI_L fill:#238636,color:#f0f6fc
+  style BF_A fill:#21262d,color:#484f58
+  style BF_O fill:#21262d,color:#484f58
+  style BF_OR fill:#21262d,color:#484f58
+  style BF_L fill:#21262d,color:#484f58
+</pre>
+</div>
+
+<h2>Pack Registry (Single Source of Truth)</h2>
+<pre><code>packs:
+  openclaw:
+    supported_providers: [bedrock, anthropic-api, openai-api, openrouter, litellm]
+    deps:
+      bedrock: [bedrockify]
+      anthropic-api: []
+      openai-api: []
+      openrouter: []
+      litellm: []
+
+  hermes:
+    supported_providers: [bedrock, anthropic-api, openai-api, openrouter]
+    deps:
+      bedrock: [bedrockify]
+      anthropic-api: []
+      openai-api: []
+      openrouter: []
+
+  claude-code:
+    supported_providers: [bedrock, anthropic-api]
+    deps:
+      bedrock: []           # No bedrockify — direct Bedrock
+      anthropic-api: []     # Native Anthropic API support
+
+  pi:
+    supported_providers: [bedrock, openrouter, litellm]
+    deps:
+      bedrock: [bedrockify]
+      openrouter: []        # Direct OpenAI-compatible
+      litellm: []           # Direct OpenAI-compatible
+
+  ironclaw:
+    supported_providers: [bedrock]
+    deps:
+      bedrock: [bedrockify]
+
+  nemoclaw:
+    supported_providers: [bedrock]
+    deps:
+      bedrock: [bedrockify]
+
+  kiro-cli:
+    supported_providers: []      # Own cloud inference, no provider needed
+    deps: {}</code></pre>
+
+<div class="callout-good callout">
+<strong>Dependencies are provider-conditional.</strong> <code>hermes + bedrock</code> needs bedrockify. <code>claude-code + bedrock</code> doesn't.
+</div>
+
+<h2>Normalized Resolved Config</h2>
+<pre><code>{
+  "schemaVersion": "v1",
+  "resolvedAt": "2026-04-12T06:00:00Z",
+  "pack": "openclaw",
+  "profile": "builder",
+  "providers": {
+    "chat": {
+      "name": "bedrock",
+      "auth_method": "aws-sdk",
+      "auth_mode": "iam",
+      "transport": "native",
+      "api": "bedrock-converse-stream",
+      "region": "us-east-1",
+      "base_url": "https://bedrock-runtime.us-east-1.amazonaws.com",
+      "roles": {
+        "primary": "global.anthropic.claude-opus-4-6-v1",
+        "fallback": "global.anthropic.claude-sonnet-4-6",
+        "heartbeat": "global.anthropic.claude-sonnet-4-6"
+      },
+      "models": [...]
+    },
+    "embeddings": {
+      "name": "bedrock",
+      "roles": { "default": "amazon.titan-embed-text-v2:0" }
+    }
+  },
+  "deps": ["bedrockify"]
+}</code></pre>
+
+<div class="callout">
+<strong>Provider roles</strong> (<code>providers.chat</code>, <code>providers.embeddings</code>) future-proof the schema for dual-provider without a breaking rewrite.
+</div>
+
+<h2>Deployment Sequence</h2>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+sequenceDiagram
+  participant CFN as ☁️ CloudFormation
+  participant UD as 🖥️ EC2 UserData
+  participant BS as 📜 bootstrap.sh
+  participant RES as ⚙️ resolve.py
+  
+  participant DEP as 📦 Dependency Packs
+  participant PACK as 🧩 Target Pack
+  participant SVC as 🚀 systemd
+
+  CFN->>UD: Launch instance with params
+  Note over UD: PackName, ProviderName,<br/>ProviderRegion, overrides
+
+  UD->>BS: bootstrap.sh --pack openclaw<br/>--provider bedrock --region us-east-1
+  
+  BS->>RES: Load provider manifest
+  RES->>RES: Validate pack+provider compatibility
+  RES->>RES: Apply model overrides
+  RES-->>BS: ✅ Atomic write config JSON
+  
+  
+  
+
+  BS->>DEP: Install dependencies (provider-aware)
+  Note over DEP: e.g. bedrockify for hermes+bedrock<br/>SKIP for claude-code+bedrock
+  DEP-->>BS: ✅ Dependencies ready
+
+  BS->>PACK: Run pack installer
+  PACK->>PACK: Pack-native renderer<br/>reads resolved config
+  PACK-->>BS: ✅ Runtime config written
+
+  BS->>SVC: Start gateway service
+  SVC-->>BS: ✅ Running → LLM Provider
+</pre>
+</div>
+
+<h2>Bootstrap CLI</h2>
+<pre><code># Bedrock (default)
+bootstrap.sh --pack openclaw --provider bedrock --region us-east-1
+
+# Anthropic API
+bootstrap.sh --pack openclaw --provider anthropic-api --provider-key "$KEY"
+
+# OpenRouter
+bootstrap.sh --pack openclaw --provider openrouter --provider-key "$OPENROUTER_KEY"
+
+# Override primary model
+bootstrap.sh --pack openclaw --provider bedrock --model global.anthropic.claude-sonnet-4-6</code></pre>
+
+<h3>Validation — Hard Fail, No Silent Fallback</h3>
+<table>
+<tr><th>Scenario</th><th>Behavior</th></tr>
+
+<tr><td><strong>Bedrock API Key</strong><br><span class="badge badge-green">no IAM needed</span></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider bedrock \
+  --provider-auth bearer \
+  --provider-key "$AWS_BEARER_TOKEN_BEDROCK" \
+  --region us-east-1</code></pre></td></tr>
+<tr><td>Invalid pack+provider combo</td><td><span class="badge badge-red">FAIL</span> with supported provider list</td></tr>
+<tr><td>Missing required credentials</td><td><span class="badge badge-red">FAIL</span> with clear error</td></tr>
+<tr><td>Invalid model ID</td><td><span class="badge badge-red">FAIL</span> — no silent substitution</td></tr>
+<tr><td>Missing resolved config</td><td><span class="badge badge-red">FAIL</span> — bootstrap failure</td></tr>
+</table>
+
+<h2>CloudFormation Parameters</h2>
+<pre><code>ProviderName:
+  Type: String
+  Default: bedrock
+  AllowedValues: [bedrock, anthropic-api, openai-api, openrouter, litellm]
+
+ProviderRegion:
+  Type: String
+  Default: us-east-1
+  Description: "Region for the LLM provider."
+PrimaryModelOverride:
+  Type: String
+  Default: ''
+  Description: "Override primary model. Leave empty for provider default."</code></pre>
+
+<h3>CFN Rules</h3>
+<table>
+<tr><th>Provider</th><th>Requires</th></tr>
+<tr><td><code>anthropic-api</code></td><td><code>ProviderApiKey</code></td></tr>
+<tr><td><code>openai-api</code></td><td><code>ProviderApiKey</code></td></tr>
+<tr><td><code>openrouter</code></td><td><code>ProviderApiKey</code></td></tr>
+<tr><td><code>litellm</code></td><td><code>ProviderBaseUrl</code></td></tr>
+<tr><td><code>bedrock</code></td><td>Nothing (IAM auth) <span class="badge badge-green">easiest</span></td></tr>
+</table>
+
+<h2>Pack Rendering</h2>
+
+<h3>Per-Pack Translation</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+  CFG["📦 Resolved Config<br/><i>Canonical model IDs</i>"]
+  
+  CFG --> OC["🦞 <b>OpenClaw</b><br/>config-gen.py"]
+  CFG --> HM["🏛️ <b>Hermes</b><br/>install.sh"]
+  CFG --> CC["💻 <b>Claude Code</b><br/>install.sh"]
+  CFG --> PI["🥧 <b>Pi</b><br/>install.sh"]
+  CFG --> BF["⚡ <b>Bedrockify</b><br/>install.sh"]
+
+  OC --> OC_OUT["openclaw.json<br/><code>models.providers.amazon-bedrock</code><br/><code>agents.defaults.model.primary</code>"]
+  HM --> HM_OUT["config.yaml + .env<br/><code>anthropic/claude-opus-4.6</code><br/>(OpenAI-style via bedrockify)"]
+  CC --> CC_OUT["Shell env vars<br/><code>CLAUDE_CODE_USE_BEDROCK=1</code><br/><code>ANTHROPIC_MODEL=...</code>"]
+  PI --> PI_OUT["models.json<br/>bedrockify endpoint<br/>+ model entries"]
+  BF --> BF_OUT["systemd daemon<br/>chat model + embed model<br/>(Bedrock-only)"]
+
+  style CFG fill:#1f6feb,stroke:#388bfd,color:#f0f6fc
+  style OC fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style HM fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style CC fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style PI fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style BF fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+</pre>
+</div>
+
+<table>
+<tr><th>Pack</th><th>Reads</th><th>Renders</th><th>Translates</th></tr>
+<tr><td>OpenClaw</td><td><code>providers.chat.*</code></td><td><code>~/.openclaw/openclaw.json</code></td><td>Maps to <code>models.providers.&lt;key&gt;</code></td></tr>
+<tr><td>Hermes</td><td><code>providers.chat.roles.primary</code></td><td><code>~/.hermes/config.yaml</code></td><td>Bedrock ID → OpenAI-style</td></tr>
+<tr><td>Claude Code</td><td><code>providers.chat.name</code></td><td>Shell env vars</td><td><code>CLAUDE_CODE_USE_BEDROCK=1</code></td></tr>
+<tr><td>Pi</td><td><code>providers.chat.models</code></td><td><code>~/.pi/agent/models.json</code></td><td>Model entries for bedrockify</td></tr>
+<tr><td>Bedrockify <em>(utility)</em></td><td><code>providers.chat + embeddings</code></td><td>systemd daemon config</td><td>Bedrock-only; hard fail otherwise</td></tr>
+</table>
+
+
+<h2>Deploy Wizard UX</h2>
+
+<p>The web-based deploy wizard is the primary user-facing entry point. It must reflect the new three-choice model and guide users through provider selection with clear defaults and validation.</p>
+
+<h3>Wizard Flow</h3>
+<div class="mermaid-wrap">
+<pre class="mermaid">
+%%{init: {'theme': 'dark'}}%%
+stateDiagram-v2
+  [*] --> InstallMode: Start
+  InstallMode --> PackSelection: Simple or Advanced
+  PackSelection --> ProfileSelection: Choose pack
+  ProfileSelection --> ProviderSelection: Choose profile
+  ProviderSelection --> ProviderConfig: Choose provider
+  
+  state ProviderConfig {
+    [*] --> BedrockAuth: Bedrock
+    [*] --> APIKeyEntry: Anthropic/OpenAI/OpenRouter
+    [*] --> URLConfig: LiteLLM
+    BedrockAuth --> IAM: IAM (default)
+    BedrockAuth --> Bearer: Bearer token
+  }
+  
+  ProviderConfig --> AdvancedConfig: Advanced mode
+  ProviderConfig --> Review: Simple mode
+  
+  state AdvancedConfig {
+    [*] --> ModelOverrides
+    ModelOverrides --> InstanceStorage
+    InstanceStorage --> Networking
+    Networking --> DeployMethod
+  }
+  
+  AdvancedConfig --> Review
+  Review --> Deploy: Confirm
+  Review --> PackSelection: ← Back
+  Deploy --> [*]: ✅ Agent Running
+</pre>
+</div>
+
+<h3>Step 1: Choose Agent Pack</h3>
+<div class="callout">
+Card-based selection. Each card shows: pack name, icon, one-line description, and supported provider badges. Pre-select <strong>openclaw</strong> as default.
+</div>
+<table>
+<tr><th>Pack</th><th>Description</th><th>Providers</th></tr>
+<tr><td>🦞 OpenClaw</td><td>Stateful AI agent with 24/7 gateway</td><td><span class="badge badge-green">bedrock</span> <span class="badge badge-blue">anthropic</span> <span class="badge badge-blue">openai</span> <span class="badge badge-blue">openrouter</span> <span class="badge badge-blue">litellm</span></td></tr>
+<tr><td>💻 Claude Code</td><td>Claude Code CLI agent</td><td><span class="badge badge-green">bedrock</span> <span class="badge badge-blue">anthropic</span></td></tr>
+<tr><td>🏛️ Hermes</td><td>NousResearch CLI agent</td><td><span class="badge badge-green">bedrock</span> <span class="badge badge-blue">anthropic</span> <span class="badge badge-blue">openai</span> <span class="badge badge-blue">openrouter</span></td></tr>
+<tr><td>🥧 Pi</td><td>Pi coding agent</td><td><span class="badge badge-green">bedrock</span> <span class="badge badge-blue">openrouter</span> <span class="badge badge-blue">litellm</span></td></tr>
+<tr><td>⚡ IronClaw</td><td>IronClaw agent</td><td><span class="badge badge-green">bedrock</span></td></tr>
+<tr><td>🐉 NemoClaw</td><td>Sandboxed OpenClaw agent</td><td><span class="badge badge-green">bedrock</span></td></tr>
+<tr><td>⚡ Kiro CLI</td><td>AWS agentic IDE terminal client</td><td><span class="badge badge-green">own cloud</span></td></tr>
+</table>
+
+<h3>Step 2: Choose Permission Profile</h3>
+<table>
+<tr><th>Profile</th><th>Access Level</th><th>Use Case</th></tr>
+<tr><td><strong>builder</strong></td><td>AdministratorAccess</td><td>Full admin — build infra, deploy apps</td></tr>
+<tr><td><strong>account_assistant</strong></td><td>ReadOnlyAccess</td><td>Read-only — monitoring, reporting</td></tr>
+<tr><td><strong>personal_assistant</strong></td><td>Bedrock only</td><td>Chat-only — no AWS resource access</td></tr>
+</table>
+
+
+<h3>Step 3: Choose LLM Provider</h3>
+<p>Card-based selection. <strong>Grey out incompatible providers</strong> based on pack choice. Show "why disabled" tooltip on hover.</p>
+
+<div class="mermaid-wrap">
+<pre class="mermaid">
+flowchart TB
+  subgraph PICK["Provider Selection"]
+    direction LR
+    BD["☁️ <b>Bedrock</b><br/>IAM auth<br/>No keys needed<br/><i>Recommended</i>"]
+    AN["🔑 <b>Anthropic</b><br/>API key required<br/>Direct access"]
+    OA["🤖 <b>OpenAI</b><br/>API key required<br/>GPT-4.1 / o3"]
+    OR["🌐 <b>OpenRouter</b><br/>API key required<br/>Multi-provider proxy"]
+    LT["🔀 <b>LiteLLM</b><br/>Self-hosted proxy<br/>Base URL required"]
+  end
+
+  BD --> |"All packs"| OK1["✅"]
+  AN --> |"OpenClaw only"| OK2["✅"]
+  OA --> |"OpenClaw only"| OK3["✅"]
+  OR --> |"OpenClaw only"| OK4["✅"]
+  LT --> |"OpenClaw only"| OK5["✅"]
+
+  style BD fill:#238636,stroke:#3fb950,color:#f0f6fc
+  style AN fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style OA fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style OR fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+  style LT fill:#161b22,stroke:#58a6ff,color:#c9d1d9
+</pre>
+</div>
+
+<h3>Step 4: Provider Configuration</h3>
+<p>Dynamic form fields based on selected provider:</p>
+<table>
+<tr><th>Provider</th><th>Required Fields</th><th>Optional Fields</th><th>Defaults</th></tr>
+<tr><td><code>bedrock</code></td><td>Region</td><td>Model override</td><td>Region: us-east-1, Model: Opus 4.6</td></tr>
+<tr><td><code>anthropic-api</code></td><td>API Key</td><td>Model override</td><td>Model: claude-opus-4-6-20250514</td></tr>
+<tr><td><code>openai-api</code></td><td>API Key</td><td>Model override</td><td>Model: gpt-4.1</td></tr>
+<tr><td><code>openrouter</code></td><td>API Key</td><td>Model override</td><td>Model: anthropic/claude-opus-4-6</td></tr>
+<tr><td><code>litellm</code></td><td>Base URL</td><td>API Key, Model override</td><td>Model: claude-opus-4-6</td></tr>
+</table>
+
+<div class="callout">
+<strong>UX details:</strong>
+<ul>
+<li>API Key fields: password-type input with show/hide toggle</li>
+<li></li>
+<li>Model override: collapsed "Advanced" section, shows provider default as placeholder</li>
+<li>For Bedrock: show "No API key needed — uses IAM role" reassurance message</li>
+</ul>
+</div>
+
+<h3>Step 5: Review &amp; Deploy</h3>
+<p>Summary card showing all selections before deployment:</p>
+<div class="card" style="border-color: var(--accent);">
+  <h4>📋 Deployment Summary</h4>
+  <p><strong>Agent Pack:</strong> 🦞 OpenClaw</p>
+  <p><strong>Profile:</strong> builder (AdministratorAccess)</p>
+  <p><strong>Provider:</strong> ☁️ AWS Bedrock</p>
+  <p><strong>Region:</strong> us-east-1</p>
+  <p><strong>Primary Model:</strong> Claude Opus 4.6 <code>global.anthropic.claude-opus-4-6-v1</code></p>
+  <p><strong>Fallback Model:</strong> Claude Sonnet 4.6 <code>global.anthropic.claude-sonnet-4-6</code></p>
+  <p><strong>Instance:</strong> t4g.xlarge (ARM64 Graviton)</p>
+  <p style="margin-top:12px"><strong>Estimated cost:</strong> ~$0.15/hr (instance) + model usage</p>
+</div>
+
+<div class="callout-warn callout">
+<strong>Pre-deploy validation checks:</strong>
+<ul>
+<li>Pack + provider compatibility ✅</li>
+<li></li>
+<li>Required fields populated ✅</li>
+<li>API key format sanity check (starts with expected prefix) ✅</li>
+<li>Region has Bedrock model access (for Bedrock provider) ✅</li>
+</ul>
+</div>
+
+<h3>Wizard Implementation Changes</h3>
+<table>
+<tr><th>Component</th><th>Change</th></tr>
+<tr><td>Pack selection step</td><td>Add provider badges per pack card. Load from pack registry.</td></tr>
+<tr><td>New: Provider step</td><td>Insert between profile and advanced config. Card-based with greyed-out incompatible options.</td></tr>
+<tr><td>Config step</td><td>Dynamic form fields driven by provider choice. Remove old ModelMode/DefaultModel/LiteLLM fields.</td></tr>
+<tr><td>Review step</td><td>Show human-readable provider + model names. Show cost estimate if available.</td></tr>
+<tr><td>CFN generation</td><td>Map wizard selections to new CFN parameters (ProviderName, ProviderRegion, etc.)</td></tr>
+<tr><td>Validation</td><td>Client-side: combo checks, required fields. Pre-deploy: API key format, region availability.</td></tr>
+<tr><td>URL params</td><td>Support deep-link pre-selection: <code>?pack=openclaw&provider=bedrock</code></td></tr>
+</table>
+
+<h3>Error States</h3>
+<div class="grid">
+  <div class="card" style="border-color: var(--red);">
+    <h4>❌ Incompatible Combo</h4>
+    <p><em>"Pi doesn't support Anthropic API. Choose Bedrock, OpenRouter, or switch to OpenClaw."</em></p>
+    <p>Grey out provider card. Show supported alternatives.</p>
+  </div>
+  <div class="card" style="border-color: var(--red);">
+    <h4>❌ Missing API Key</h4>
+    <p><em>"Anthropic API requires an API key."</em></p>
+    <p>Highlight field. Block deploy button.</p>
+  </div>
+  <div class="card" style="border-color: var(--yellow);">
+    <h4>⚠️ Profile Warning</h4>
+
+    <p>Warning banner, don't block.</p>
+  </div>
+</div>
+
+<hr class="separator">
+
+<!-- Wizard Storyboard Section - insert before Implementation Order -->
+
+
+
+
+
+<h2>Wizard Flow Map</h2>
+<p>Each node is a real <code>gum</code>-rendered TUI screen. Follow the arrows to see how user choices branch through the installer.</p>
+
+<style>
+.wf { overflow-x:auto; padding:20px 0; }
+.wf-card { flex-shrink:0; }
+.wf-term { background:#0c0c0c; border:2px solid #444; border-radius:6px; overflow:hidden; font-family:'SFMono-Regular',Consolas,monospace; font-size:7px; line-height:1.2; }
+.wf-bar { background:#1a1a2e; padding:2px 6px; border-bottom:1px solid #333; display:flex; align-items:center; }
+.wd { display:flex; gap:2px; }
+.dr,.dy,.dg { width:5px; height:5px; border-radius:50%; display:inline-block; }
+.dr { background:#ff5f57; } .dy { background:#febc2e; } .dg { background:#28c840; }
+.wf-body { padding:3px 5px; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap; max-height:160px; overflow:hidden; }
+
+.wf-row { display:flex; align-items:flex-start; justify-content:center; gap:12px; position:relative; }
+.wf-col { display:flex; flex-direction:column; align-items:center; gap:0; }
+.wf-arr { color:#484f58; font-size:20px; line-height:1; text-align:center; padding:4px 0; }
+.wf-arr-h { color:#484f58; font-size:18px; display:flex; align-items:center; padding:0 2px; flex-shrink:0; }
+.wf-tag { font-size:9px; padding:2px 6px; border-radius:8px; color:white; font-weight:600; display:inline-block; margin:2px 0; white-space:nowrap; }
+.wf-tag-g { background:#238636; } .wf-tag-b { background:#1f6feb; } .wf-tag-o { background:#d29922; }
+.wf-tag-p { background:#6e40c9; } .wf-tag-r { background:#da3633; }
+.wf-lbl { font-size:10px; color:#8b949e; text-align:center; max-width:240px; margin-top:3px; }
+.wf-bracket { display:flex; align-items:stretch; }
+.wf-bracket-line { width:2px; background:#484f58; margin:0 4px; }
+.wf-fan { display:flex; flex-direction:column; gap:8px; padding:4px 0; }
+.wf-fan-row { display:flex; align-items:center; gap:6px; }
+.wf-hline { height:2px; width:20px; background:#484f58; flex-shrink:0; }
+.wf-vline { width:2px; height:16px; background:#484f58; margin:0 auto; }
+.wf-section { border:1px solid #30363d; border-radius:10px; padding:12px; margin:8px 0; background:#0d1117; }
+.wf-section-title { font-size:11px; color:#6e40c9; font-weight:700; margin-bottom:8px; text-transform:uppercase; letter-spacing:1px; }
+
+/* Connector lines via SVG overlay */
+.wf-flow { display:flex; flex-direction:column; align-items:center; gap:0; min-width:max-content; padding:0 20px; }
+</style>
+
+<div class="journey-legend" style="display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 20px;">
+  <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#c9d1d9;"><span style="width:10px;height:10px;border-radius:50%;background:#238636;display:inline-block;"></span> Simple + Bedrock IAM</div>
+  <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#c9d1d9;"><span style="width:10px;height:10px;border-radius:50%;background:#1f6feb;display:inline-block;"></span> Simple + API Key</div>
+  <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#c9d1d9;"><span style="width:10px;height:10px;border-radius:50%;background:#d29922;display:inline-block;"></span> Bedrock Bearer</div>
+  <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#c9d1d9;"><span style="width:10px;height:10px;border-radius:50%;background:#6e40c9;display:inline-block;"></span> Advanced mode</div>
+  <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:#c9d1d9;"><span style="width:10px;height:10px;border-radius:50%;background:#da3633;display:inline-block;"></span> Error</div>
+</div>
+
+<div class="wf" style="overflow-x:auto;">
+<div class="wf-flow">
+
+<!-- ROW 0: Install Mode -->
+<div class="wf-section">
+  <div class="wf-section-title">Step 0 — Install Mode</div>
+  <div class="wf-row">
+    <div class="wf-card" id="wf-mode_simple">
+  <div class="wf-term" style="width:220px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔════════════════════╗ 
+ ║  ⚙️  Install Mode  ║ 
+ ╚════════════════════╝ 
+
+  How much do you want to configure?
+
+  ❯ Simple       — Sensible defaults, 3 choices and done
+    Advanced     — Full control: models, instance, storage, networking
+
+  ↑↓ navigate • enter select
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h" style="flex-direction:column;padding:0 8px;">
+      <span class="wf-tag wf-tag-g">Simple</span>
+      <span style="color:#484f58;">→</span>
+      <span style="font-size:9px;color:#6a737d;">skip advanced</span>
+    </div>
+    <div class="wf-card" id="wf-mode_advanced">
+  <div class="wf-term" style="width:220px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔════════════════════╗ 
+ ║  ⚙️  Install Mode  ║ 
+ ╚════════════════════╝ 
+
+  How much do you want to configure?
+
+    Simple       — Sensible defaults, 3 choices and done
+  ❯ Advanced     — Full control: models, instance, storage, networking
+
+  ↑↓ navigate • enter select
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h" style="flex-direction:column;padding:0 8px;">
+      <span class="wf-tag wf-tag-p">Advanced</span>
+      <span style="color:#484f58;">→</span>
+      <span style="font-size:9px;color:#6a737d;">unlock extras</span>
+    </div>
+  </div>
+</div>
+
+<div class="wf-arr">↓ both paths</div>
+
+<!-- ROW 1: Pack Selection -->
+<div class="wf-section">
+  <div class="wf-section-title">Step 1 — Choose Agent Pack</div>
+  <div class="wf-row" style="gap:8px;">
+    <div class="wf-card" id="wf-step1">
+  <div class="wf-term" style="width:240px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🔧 Deploy Agent — Step 1 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Agent Pack
+  Select the AI agent to deploy.
+
+  ❯ 🦞 OpenClaw — Stateful AI agent with 24/7 gateway (recommended)
+      bedrock  anthropic  openai  openrouter  litellm
+
+    💻 Claude Code — Claude Code CLI agent
+      bedrock  anthropic
+
+    🏛️ Hermes — NousResearch CLI agent
+      bedrock  anthropic  openai  openrouter
+
+    🥧 Pi — Pi coding agent
+      bedrock  openrouter  litellm
+
+    ⚡ IronClaw — IronClaw agent
+      bedrock
+
+    🐉 NemoClaw — Sandboxed OpenClaw agent
+      bedrock
+
+  ↑↓ navigate • enter select
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">→</div>
+    <div class="wf-card" id="wf-step1_hermes">
+  <div class="wf-term" style="width:240px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🔧 Deploy Agent — Step 1 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Agent Pack
+  Select the AI agent to deploy.
+
+    🦞 OpenClaw — Stateful AI agent with 24/7 gateway (recommended)
+      bedrock  anthropic  openai  openrouter  litellm
+
+    💻 Claude Code — Claude Code CLI agent
+      bedrock  anthropic
+
+  ❯ 🏛️ Hermes — NousResearch CLI agent
+      bedrock  anthropic  openai  openrouter
+
+    🥧 Pi — Pi coding agent
+      bedrock  openrouter  litellm
+
+    ⚡ IronClaw — IronClaw agent
+      bedrock
+
+    🐉 NemoClaw — Sandboxed OpenClaw agent
+      bedrock
+
+  ↑↓ navigate • enter select
+
+</div>
+  </div>
+</div>
+  </div>
+  <div style="font-size:9px;color:#6a737d;text-align:center;margin-top:4px;">Provider badges per pack filter Step 3 options</div>
+</div>
+
+<div class="wf-arr">↓</div>
+
+<!-- ROW 2: Profile -->
+<div class="wf-section">
+  <div class="wf-section-title">Step 2 — Permission Profile</div>
+  <div class="wf-row">
+    <div class="wf-card" id="wf-step2">
+  <div class="wf-term" style="width:280px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🛡️ Deploy Agent — Step 2 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Permission Profile
+  What level of AWS access should the agent have?
+
+  ❯ builder             — Full AWS admin access (AdministratorAccess)
+    account_assistant   — Read-only AWS access (ReadOnlyAccess)
+    personal_assistant  — Bedrock only, no AWS resource access
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+  </div>
+</div>
+  </div>
+  <div style="font-size:9px;color:#6a737d;text-align:center;margin-top:4px;">builder · account_assistant · personal_assistant</div>
+</div>
+
+<div class="wf-arr">↓</div>
+
+<!-- ROW 3: Provider Selection (branching) -->
+<div class="wf-section">
+  <div class="wf-section-title">Step 3 — Choose LLM Provider <span style="font-weight:400;color:#484f58;">(filtered by pack)</span></div>
+  <div class="wf-row" style="gap:8px;">
+    <div class="wf-card" id="wf-step3">
+  <div class="wf-term" style="width:220px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  How should the agent connect to AI models?
+
+  ❯ ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+    🔑 Anthropic API     — Direct API key (claude-opus-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy (anthropic/claude-opus-4-6)
+    🔀 LiteLLM           — Self-hosted proxy
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">or</div>
+    <div class="wf-card" id="wf-step3_hermes">
+  <div class="wf-term" style="width:220px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  Hermes supports Bedrock, Anthropic, OpenAI, and OpenRouter.
+
+  ❯ ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+    🔑 Anthropic API     — Direct API key (claude-sonnet-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy
+    🔀 LiteLLM           — Not supported with Hermes
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">or</div>
+    <div class="wf-card" id="wf-step3_anthropic">
+  <div class="wf-term" style="width:220px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  How should the agent connect to AI models?
+
+    ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+  ❯ 🔑 Anthropic API     — Direct API key (claude-opus-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy (anthropic/claude-opus-4-6)
+    🔀 LiteLLM           — Self-hosted proxy
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+  </div>
+</div>
+  </div>
+  <div style="font-size:9px;color:#6a737d;text-align:center;margin-top:4px;">OpenClaw: 5 · Hermes: 4 · Claude Code: 2 · Pi: 3 · IronClaw: 1 · NemoClaw: 1</div>
+</div>
+
+<div class="wf-arr">↓ branches by provider</div>
+
+<!-- ROW 4: Config (3 parallel branches) -->
+<div class="wf-section">
+  <div class="wf-section-title">Step 4 — Provider Configuration <span style="font-weight:400;color:#484f58;">(branches by choice)</span></div>
+  <div class="wf-row" style="gap:8px; align-items:flex-start;">
+    
+    <!-- Bedrock branch -->
+    <div class="wf-col">
+      <span class="wf-tag wf-tag-g">☁️ Bedrock</span>
+      <div class="wf-vline"></div>
+      <div class="wf-row" style="gap:6px;">
+        <div class="wf-card" id="wf-step4_bedrock_iam">
+  <div class="wf-term" style="width:200px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure AWS Bedrock
+
+  Authentication
+  ❯ IAM Instance Profile      — Zero keys, uses EC2 role (recommended)
+    Bedrock API Key (Bearer)   — Long-term token, no IAM/AWS CLI needed
+
+  ✓ No API key needed — uses IAM instance profile
+
+  Provider Region
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> us-east-1 </span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>  <span style="color: #585858">(ARM64 Graviton)</span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+        <div class="wf-card" id="wf-step4_bedrock_bearer">
+  <div class="wf-term" style="width:200px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure AWS Bedrock
+
+  Authentication
+    IAM Instance Profile      — Zero keys, uses EC2 role (recommended)
+  ❯ Bedrock API Key (Bearer)   — Long-term token, no IAM/AWS CLI needed
+
+  🔑 Bedrock API Key required
+
+  API Key (Bearer Token)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> ABS-•••••••••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Provider Region
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> us-east-1 </span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>  <span style="color: #585858">(ARM64 Graviton)</span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+      </div>
+      <div style="font-size:9px;color:#6a737d;margin-top:3px;">IAM (zero keys) ← or → Bearer token</div>
+    </div>
+    
+    <div style="width:2px;background:#30363d;align-self:stretch;margin:0 4px;flex-shrink:0;"></div>
+    
+    <!-- API Key branch -->
+    <div class="wf-col">
+      <span class="wf-tag wf-tag-b">🔑 API Key Providers</span>
+      <div class="wf-vline"></div>
+      <div class="wf-row" style="gap:6px;">
+        <div class="wf-card" id="wf-step4_anthropic">
+  <div class="wf-term" style="width:200px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure Anthropic API
+  🔑 API key required
+
+  Authentication
+  ❯ Direct API Key
+
+  API Key
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> sk-ant-api03-•••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+      </div>
+      <div style="font-size:9px;color:#6a737d;margin-top:3px;">Anthropic · OpenAI · OpenRouter</div>
+    </div>
+    
+    <div style="width:2px;background:#30363d;align-self:stretch;margin:0 4px;flex-shrink:0;"></div>
+    
+    <!-- Error branch -->
+    <div class="wf-col">
+      <span class="wf-tag wf-tag-r">⚠️ Error</span>
+      <div class="wf-vline"></div>
+      <div class="wf-card" id="wf-error_key">
+  <div class="wf-term" style="width:200px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure Anthropic API
+
+  Authentication
+  ❯ Direct API Key
+
+  API Key
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                    </span> <span style="color: #ff0000">✗ Required</span>
+
+  ⚠ Anthropic API requires an API key to proceed.
+
+  enter a valid API key to continue             Next → (blocked)
+
+</div>
+  </div>
+</div>
+      <div style="font-size:9px;color:#da3633;margin-top:3px;">↩ fix and retry</div>
+    </div>
+    
+  </div>
+</div>
+
+<div class="wf-arr">↓ Simple goes straight to Review</div>
+
+<!-- ROW 5: Advanced extras -->
+<div class="wf-section" style="border-color:#6e40c9;">
+  <div class="wf-section-title" style="color:#6e40c9;">Advanced Only — Extra Config Steps</div>
+  <div style="font-size:9px;color:#6a737d;margin-bottom:8px;">These 4 screens appear only in Advanced mode. Simple skips straight to Review.</div>
+  <div class="wf-row" style="gap:6px;">
+    <div class="wf-card" id="wf-adv_models">
+  <div class="wf-term" style="width:190px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════════╗ 
+ ║  🧠 Advanced — Model Configuration  ║ 
+ ╚═════════════════════════════════════╝ 
+
+  Model Overrides
+  Leave empty to use provider defaults.
+
+  Primary Model
+  (provider default: global.anthropic.claude-opus-4-6-v1)
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                                  </span>
+
+  Fallback Model
+  (provider default: global.anthropic.claude-sonnet-4-6)
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                                  </span>
+
+  Context Window
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 200000 </span>  <span style="color: #585858">(from provider manifest)</span>
+
+  Max Output Tokens
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 16384 </span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">→</div>
+    <div class="wf-card" id="wf-adv_instance">
+  <div class="wf-term" style="width:190px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════════════╗ 
+ ║  🖥️  Advanced — Instance Configuration  ║ 
+ ╚═════════════════════════════════════════╝ 
+
+  Instance Size
+  Choose compute resources for the agent.
+
+    t4g.medium    — 2 vCPU,  4 GB  (light use, cheapest)
+  ❯ t4g.xlarge    — 4 vCPU, 16 GB  (recommended)
+    t4g.2xlarge   — 8 vCPU, 32 GB  (heavy workloads)
+    m7g.xlarge    — 4 vCPU, 16 GB  (sustained, no burst)
+
+  Root Volume (GB)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 40 </span>
+
+  Data Volume (GB)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 80 </span>  <span style="color: #585858">(EBS gp3, mounted at /mnt/ebs-data)</span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">→</div>
+    <div class="wf-card" id="wf-adv_networking">
+  <div class="wf-term" style="width:190px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔════════════════════════════╗ 
+ ║  🌐 Advanced — Networking  ║ 
+ ╚════════════════════════════╝ 
+
+  Network Configuration
+
+  VPC
+  ❯ Create new VPC (default)
+    Use existing VPC
+
+  SSH Access
+  ❯ SSM only (no SSH, recommended)
+    SSH key pair
+
+  Telegram Bot Token
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 7234567890:AAH•••••••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Allowed Chat IDs
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 1775159795 </span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">→</div>
+    <div class="wf-card" id="wf-adv_deploy">
+  <div class="wf-term" style="width:190px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═══════════════════════════════════╗ 
+ ║  🚀 Advanced — Deployment Method  ║ 
+ ╚═══════════════════════════════════╝ 
+
+  Deployment method
+
+  ❯ CloudFormation CLI       deploy stack via aws cloudformation (recommended)
+    CloudFormation Console    open template in AWS Console
+    Terraform                 generate &amp; apply .tf module
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+  </div>
+</div>
+  </div>
+  <div style="font-size:9px;color:#6a737d;text-align:center;margin-top:4px;">Models → Instance → Networking → Deploy Method</div>
+</div>
+
+<div class="wf-arr">↓ all paths converge</div>
+
+<!-- ROW 6: Review -->
+<div class="wf-section" style="border-color:#238636;">
+  <div class="wf-section-title" style="color:#238636;">Step 5 — Review & Deploy</div>
+  <div class="wf-row" style="gap:8px;">
+    <div class="wf-card" id="wf-step5">
+  <div class="wf-term" style="width:240px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🚀 Deploy Agent — Step 5 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Review &amp; Deploy
+
+  <span style="font-weight: bold; color: #F5F1DE">Agent Pack     </span> <span style="color: #5fafff">🦞 OpenClaw</span>
+  <span style="font-weight: bold; color: #F5F1DE">Profile        </span> <span style="color: #5fafff">builder</span> <span style="color: #585858">(AdministratorAccess)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Provider       </span> <span style="color: #5fafff">☁️  AWS Bedrock</span>
+  <span style="font-weight: bold; color: #F5F1DE">Region         </span> <span style="color: #5fafff">us-east-1</span>
+  <span style="font-weight: bold; color: #F5F1DE">Primary Model  </span> <span style="color: #87d787">Claude Opus 4.6</span> <span style="color: #585858">global.anthropic.claude-opus-4-6-v1</span>
+  <span style="font-weight: bold; color: #F5F1DE">Fallback Model </span> <span style="color: #87d787">Claude Sonnet 4.6</span> <span style="color: #585858">global.anthropic.claude-sonnet-4-6</span>
+  <span style="font-weight: bold; color: #F5F1DE">Instance       </span> <span style="color: #5fafff">t4g.xlarge</span> <span style="color: #585858">(ARM64 Graviton)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Auth           </span> <span style="color: #87d787">IAM instance profile (no keys)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Dependencies   </span> <span style="color: #5fafff">bedrockify</span>
+
+  <span style="color: #585858">──────────────────────────────────────────</span>
+  <span style="color: #87d787">  ✓ Pack + provider compatible</span>
+  <span style="color: #87d787">  ✓ No API keys required</span>
+  <span style="color: #87d787">  ✓ All validations passed</span>
+
+  <span style="color: #585858">Estimated cost: ~$0.15/hr (instance) + model usage</span>
+
+  ← back to edit                                    🚀 Deploy
+
+</div>
+  </div>
+</div>
+    <div class="wf-arr-h">or</div>
+    <div class="wf-card" id="wf-step5_hermes">
+  <div class="wf-term" style="width:240px;">
+    <div class="wf-bar"><span class="wd"><span class="dr"></span><span class="dy"></span><span class="dg"></span></span></div>
+    <div class="wf-body">
+ ╔═════════════════════════════════╗ 
+ ║  🚀 Deploy Agent — Step 5 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Review &amp; Deploy
+
+  <span style="font-weight: bold; color: #F5F1DE">Agent Pack     </span> <span style="color: #5fafff">🏛️ Hermes</span>
+  <span style="font-weight: bold; color: #F5F1DE">Profile        </span> <span style="color: #5fafff">builder</span>
+  <span style="font-weight: bold; color: #F5F1DE">Provider       </span> <span style="color: #5fafff">🔑 Anthropic API</span>
+  <span style="font-weight: bold; color: #F5F1DE">Primary Model  </span> <span style="color: #87d787">claude-sonnet-4-6</span>
+  <span style="font-weight: bold; color: #F5F1DE">Instance       </span> <span style="color: #5fafff">t4g.xlarge</span>
+  <span style="font-weight: bold; color: #F5F1DE">Auth           </span> <span style="color: #ffaf00">API Key (sk-ant-•••)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Dependencies   </span> <span style="color: #585858">none (native Anthropic support)</span>
+
+  <span style="color: #585858">──────────────────────────────────────────</span>
+  <span style="color: #87d787">  ✓ Pack + provider compatible</span>
+  <span style="color: #87d787">  ✓ API key format valid</span>
+  <span style="color: #87d787">  ✓ No bedrockify needed (direct provider)</span>
+
+  ← back to edit                                    🚀 Deploy
+
+</div>
+  </div>
+</div>
+  </div>
+  <div style="font-size:9px;color:#238636;text-align:center;margin-top:4px;">✓ All validations passed → 🚀 Deploy</div>
+</div>
+
+</div><!-- end wf-flow -->
+</div><!-- end wf -->
+
+
+<h2>Advanced Mode — TUI Screens</h2>
+<p>These screens appear only when the user selects <strong>Advanced</strong> install mode. They slot between Step 4 (provider config) and Step 5 (review).</p>
+
+<h3>Install Mode Selection <span class="badge badge-blue">All journeys — first screen</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔════════════════════╗ 
+ ║  ⚙️  Install Mode  ║ 
+ ╚════════════════════╝ 
+
+  How much do you want to configure?
+
+  ❯ Simple       — Sensible defaults, 3 choices and done
+    Advanced     — Full control: models, instance, storage, networking
+
+  ↑↓ navigate • enter select
+
+</div>
+</div>
+<div class="step-explain">First screen in the wizard. <strong>Simple</strong> (default) skips model/instance/networking config and uses sensible defaults. <strong>Advanced</strong> unlocks 4 additional config screens.</div>
+
+<h3>Install Mode — Advanced Selected <span class="badge badge-purple" style="background:#6e40c9;color:white;">Advanced path</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔════════════════════╗ 
+ ║  ⚙️  Install Mode  ║ 
+ ╚════════════════════╝ 
+
+  How much do you want to configure?
+
+    Simple       — Sensible defaults, 3 choices and done
+  ❯ Advanced     — Full control: models, instance, storage, networking
+
+  ↑↓ navigate • enter select
+
+</div>
+</div>
+<div class="step-explain">User toggles to Advanced. After pack → profile → provider → auth/key, they'll see model, instance, networking, and deploy method screens before review.</div>
+
+<h3>Advanced: Model Configuration <span class="badge badge-purple" style="background:#6e40c9;color:white;">Advanced only</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════════╗ 
+ ║  🧠 Advanced — Model Configuration  ║ 
+ ╚═════════════════════════════════════╝ 
+
+  Model Overrides
+  Leave empty to use provider defaults.
+
+  Primary Model
+  (provider default: global.anthropic.claude-opus-4-6-v1)
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                                  </span>
+
+  Fallback Model
+  (provider default: global.anthropic.claude-sonnet-4-6)
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                                  </span>
+
+  Context Window
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 200000 </span>  <span style="color: #585858">(from provider manifest)</span>
+
+  Max Output Tokens
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 16384 </span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">Override provider defaults for primary/fallback models, context window, and max output tokens. Empty fields = use provider manifest defaults. Pre-populated from provider manifest.</div>
+
+<h3>Advanced: Instance & Storage <span class="badge badge-purple" style="background:#6e40c9;color:white;">Advanced only</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════════════╗ 
+ ║  🖥️  Advanced — Instance Configuration  ║ 
+ ╚═════════════════════════════════════════╝ 
+
+  Instance Size
+  Choose compute resources for the agent.
+
+    t4g.medium    — 2 vCPU,  4 GB  (light use, cheapest)
+  ❯ t4g.xlarge    — 4 vCPU, 16 GB  (recommended)
+    t4g.2xlarge   — 8 vCPU, 32 GB  (heavy workloads)
+    m7g.xlarge    — 4 vCPU, 16 GB  (sustained, no burst)
+
+  Root Volume (GB)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 40 </span>
+
+  Data Volume (GB)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 80 </span>  <span style="color: #585858">(EBS gp3, mounted at /mnt/ebs-data)</span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">Instance type selection via <code>gum choose</code>. Storage volumes via <code>gum input</code>. Defaults: t4g.xlarge (Graviton), 40GB root, 80GB EBS data. All ARM64 options — no x86.</div>
+
+<h3>Advanced: Networking & Messaging <span class="badge badge-purple" style="background:#6e40c9;color:white;">Advanced only</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔════════════════════════════╗ 
+ ║  🌐 Advanced — Networking  ║ 
+ ╚════════════════════════════╝ 
+
+  Network Configuration
+
+  VPC
+  ❯ Create new VPC (default)
+    Use existing VPC
+
+  SSH Access
+  ❯ SSM only (no SSH, recommended)
+    SSH key pair
+
+  Telegram Bot Token
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 7234567890:AAH•••••••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Allowed Chat IDs
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> 1775159795 </span>
+
+  tab to cycle • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">VPC choice (new vs existing), SSH access (SSM recommended, key pair optional), Telegram bot token and allowed chat IDs. Token is masked with format validation.</div>
+
+<h3>Advanced: Deployment Method <span class="badge badge-purple" style="background:#6e40c9;color:white;">Advanced only</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═══════════════════════════════════╗ 
+ ║  🚀 Advanced — Deployment Method  ║ 
+ ╚═══════════════════════════════════╝ 
+
+  Deployment method
+
+  ❯ CloudFormation CLI       deploy stack via aws cloudformation (recommended)
+    CloudFormation Console    open template in AWS Console
+    Terraform                 generate &amp; apply .tf module
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+</div>
+<div class="step-explain">Matches real <code>install.sh</code> deploy method: <code>gum choose</code> with 3 options. CloudFormation CLI (default), CloudFormation Console (opens template URL), Terraform (generates + applies .tf module). Terraform availability checked after selection.</div>
+
+
+<h2>Wizard Storyboard — TUI Mockups (gum)</h2>
+<p>Rendered using <strong><a href="https://github.com/charmbracelet/gum">charmbracelet/gum</a></strong> v0.17.0 — the same TUI toolkit used by <code>install.sh</code>.</p>
+<div class="callout">
+<strong>Components:</strong> <code>gum choose</code> (menus), <code>gum input</code> (text fields), <code>gum confirm</code> (yes/no), <code>gum style</code> (formatting/borders), <code>gum spin</code> (spinners)
+</div>
+
+
+<h3>Step 1: Choose Agent Pack (OpenClaw selected) <span class="badge badge-blue">Journey 1,2,4,5,7</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🔧 Deploy Agent — Step 1 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Agent Pack
+  Select the AI agent to deploy.
+
+  ❯ 🦞 OpenClaw — Stateful AI agent with 24/7 gateway (recommended)
+      bedrock  anthropic  openai  openrouter  litellm
+
+    💻 Claude Code — Claude Code CLI agent
+      bedrock  anthropic
+
+    🏛️ Hermes — NousResearch CLI agent
+      bedrock  anthropic  openai  openrouter
+
+    🥧 Pi — Pi coding agent
+      bedrock  openrouter  litellm
+
+    ⚡ IronClaw — IronClaw agent
+      bedrock
+
+    🐉 NemoClaw — Sandboxed OpenClaw agent
+      bedrock
+
+  ↑↓ navigate • enter select
+
+</div>
+</div>
+<div class="step-explain">Pack cards show <strong>all supported providers per pack</strong> as badges. OpenClaw: bedrock/anthropic/openai/openrouter/litellm. Hermes: bedrock/anthropic/openai/openrouter. Claude Code: bedrock/anthropic. Pi: bedrock/openrouter/litellm. User sees upfront which providers are available.</div>
+
+
+<h3>Step 1: Choose Agent Pack (Hermes selected) <span class="badge badge-blue">Journey 3</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🔧 Deploy Agent — Step 1 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Agent Pack
+  Select the AI agent to deploy.
+
+    🦞 OpenClaw — Stateful AI agent with 24/7 gateway (recommended)
+      bedrock  anthropic  openai  openrouter  litellm
+
+    💻 Claude Code — Claude Code CLI agent
+      bedrock  anthropic
+
+  ❯ 🏛️ Hermes — NousResearch CLI agent
+      bedrock  anthropic  openai  openrouter
+
+    🥧 Pi — Pi coding agent
+      bedrock  openrouter  litellm
+
+    ⚡ IronClaw — IronClaw agent
+      bedrock
+
+    🐉 NemoClaw — Sandboxed OpenClaw agent
+      bedrock
+
+  ↑↓ navigate • enter select
+
+</div>
+</div>
+<div class="step-explain">User navigates to Hermes. Provider badges show bedrock/anthropic/openai/openrouter — user knows <em>before</em> entering Step 3 which providers are available.</div>
+
+
+<h3>Step 2: Choose Permission Profile <span class="badge badge-blue">All Journeys</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🛡️ Deploy Agent — Step 2 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose Permission Profile
+  What level of AWS access should the agent have?
+
+  ❯ builder             — Full AWS admin access (AdministratorAccess)
+    account_assistant   — Read-only AWS access (ReadOnlyAccess)
+    personal_assistant  — Bedrock only, no AWS resource access
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+</div>
+<div class="step-explain">Standard permission profile selection via <code>gum choose</code>. Three tiers with clear access descriptions.</div>
+
+
+<h3>Step 3: Provider Selection (OpenClaw — all 5 providers) <span class="badge badge-blue">Journey 1</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  How should the agent connect to AI models?
+
+  ❯ ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+    🔑 Anthropic API     — Direct API key (claude-opus-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy (anthropic/claude-opus-4-6)
+    🔀 LiteLLM           — Self-hosted proxy
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+</div>
+<div class="step-explain">All 5 providers available because pack=openclaw supports all. Bedrock highlighted as recommended default.</div>
+
+
+<h3>Step 3: Provider Selection (Anthropic selected) <span class="badge badge-blue">Journey 2</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  How should the agent connect to AI models?
+
+    ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+  ❯ 🔑 Anthropic API     — Direct API key (claude-opus-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy (anthropic/claude-opus-4-6)
+    🔀 LiteLLM           — Self-hosted proxy
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+</div>
+<div class="step-explain">User navigates to Anthropic API. Step 4 will show API key input form.</div>
+
+
+<h3>Step 3: Provider Selection (Hermes — 4 providers) <span class="badge badge-blue">Journey 3</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🧠 Deploy Agent — Step 3 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Choose LLM Provider
+  Hermes supports Bedrock, Anthropic, OpenAI, and OpenRouter.
+
+  ❯ ☁️  AWS Bedrock       — IAM role or Bedrock API Key (recommended)
+    🔑 Anthropic API     — Direct API key (claude-sonnet-4-6)
+    🤖 OpenAI API        — Direct API key (gpt-4.1)
+    🌐 OpenRouter        — Multi-provider proxy
+    🔀 LiteLLM           — Not supported with Hermes
+
+  ↑↓ navigate • enter select • ← back
+
+</div>
+</div>
+<div class="step-explain">Hermes supports 4 providers natively. Only LiteLLM is greyed out. User picks from Bedrock, Anthropic, OpenAI, or OpenRouter.</div>
+
+
+<h3>Step 4a: Configure Bedrock — IAM Auth (default) <span class="badge badge-green">Journey 1</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure AWS Bedrock
+
+  Authentication
+  ❯ IAM Instance Profile      — Zero keys, uses EC2 role (recommended)
+    Bedrock API Key (Bearer)   — Long-term token, no IAM/AWS CLI needed
+
+  ✓ No API key needed — uses IAM instance profile
+
+  Provider Region
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> us-east-1 </span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>  <span style="color: #585858">(ARM64 Graviton)</span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">Default Bedrock auth — <strong>IAM instance profile</strong>. Zero keys needed. Auth mode toggle at top shows both options. EC2 role handles SigV4 signing automatically.</div>
+
+<h3>Step 4b: Configure Bedrock — API Key (Bearer Token) <span class="badge badge-blue">Journey 1 alt</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure AWS Bedrock
+
+  Authentication
+    IAM Instance Profile      — Zero keys, uses EC2 role (recommended)
+  ❯ Bedrock API Key (Bearer)   — Long-term token, no IAM/AWS CLI needed
+
+  🔑 Bedrock API Key required
+
+  API Key (Bearer Token)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> ABS-•••••••••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Provider Region
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> us-east-1 </span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>  <span style="color: #585858">(ARM64 Graviton)</span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">Alternative Bedrock auth — <strong>Bedrock API Key</strong> (long-term bearer token). No IAM role, no AWS CLI needed. User generates key in Bedrock Console → API Keys → Long Term. Sets <code>AWS_BEARER_TOKEN_BEDROCK</code>. Ideal for personal laptops, non-EC2 environments, or quick setup without IAM.</div>
+<h3>Step 4: Configure Anthropic API (direct key) <span class="badge badge-blue">Journey 2,3</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure Anthropic API
+  🔑 API key required
+
+  Authentication
+  ❯ Direct API Key
+
+  API Key
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> sk-ant-api03-•••••••••••••••••••• </span> <span style="color: #87d787">✓</span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>
+
+  ▸ Advanced (model overrides, storage, networking)
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">API key flow. Direct API key input via <code>gum input</code>. Masked input with format validation (sk-ant- prefix → green ✓).</div>
+
+
+<h3>Step 4: Advanced — Model Override <span class="badge badge-blue">Journey 7</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure AWS Bedrock
+  ✓ No API key needed
+
+  Provider Region
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> us-east-1 </span>
+
+  Instance Type
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> t4g.xlarge </span>
+
+  ▾ Advanced
+
+  Primary Model Override
+  (default: global.anthropic.claude-opus-4-6-v1)
+  <span style="background: #303030"></span><span style="color: #eeeeee; background: #303030"> global.anthropic.claude-sonnet-4-6 </span>
+
+  Fallback Model Override
+  (leave empty for provider default)
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                    </span>
+
+  tab to cycle fields • enter confirm • ← back
+
+</div>
+</div>
+<div class="step-explain">Power user expands Advanced. Model override with provider default shown as placeholder. Empty = use provider default.</div>
+
+
+<h3>Step 5: Review & Deploy (Bedrock) <span class="badge badge-blue">Journey 1</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🚀 Deploy Agent — Step 5 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Review &amp; Deploy
+
+  <span style="font-weight: bold; color: #F5F1DE">Agent Pack     </span> <span style="color: #5fafff">🦞 OpenClaw</span>
+  <span style="font-weight: bold; color: #F5F1DE">Profile        </span> <span style="color: #5fafff">builder</span> <span style="color: #585858">(AdministratorAccess)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Provider       </span> <span style="color: #5fafff">☁️  AWS Bedrock</span>
+  <span style="font-weight: bold; color: #F5F1DE">Region         </span> <span style="color: #5fafff">us-east-1</span>
+  <span style="font-weight: bold; color: #F5F1DE">Primary Model  </span> <span style="color: #87d787">Claude Opus 4.6</span> <span style="color: #585858">global.anthropic.claude-opus-4-6-v1</span>
+  <span style="font-weight: bold; color: #F5F1DE">Fallback Model </span> <span style="color: #87d787">Claude Sonnet 4.6</span> <span style="color: #585858">global.anthropic.claude-sonnet-4-6</span>
+  <span style="font-weight: bold; color: #F5F1DE">Instance       </span> <span style="color: #5fafff">t4g.xlarge</span> <span style="color: #585858">(ARM64 Graviton)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Auth           </span> <span style="color: #87d787">IAM instance profile (no keys)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Dependencies   </span> <span style="color: #5fafff">bedrockify</span>
+
+  <span style="color: #585858">──────────────────────────────────────────</span>
+  <span style="color: #87d787">  ✓ Pack + provider compatible</span>
+  <span style="color: #87d787">  ✓ No API keys required</span>
+  <span style="color: #87d787">  ✓ All validations passed</span>
+
+  <span style="color: #585858">Estimated cost: ~$0.15/hr (instance) + model usage</span>
+
+  ← back to edit                                    🚀 Deploy
+
+</div>
+</div>
+<div class="step-explain">Summary card with all selections. Validation checkmarks. Shows bedrockify as auto-dependency for OpenClaw+Bedrock.</div>
+
+
+<h3>Step 5: Review & Deploy (Hermes + Anthropic) <span class="badge badge-blue">Journey 3</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔═════════════════════════════════╗ 
+ ║  🚀 Deploy Agent — Step 5 of 5  ║ 
+ ╚═════════════════════════════════╝ 
+
+  Review &amp; Deploy
+
+  <span style="font-weight: bold; color: #F5F1DE">Agent Pack     </span> <span style="color: #5fafff">🏛️ Hermes</span>
+  <span style="font-weight: bold; color: #F5F1DE">Profile        </span> <span style="color: #5fafff">builder</span>
+  <span style="font-weight: bold; color: #F5F1DE">Provider       </span> <span style="color: #5fafff">🔑 Anthropic API</span>
+  <span style="font-weight: bold; color: #F5F1DE">Primary Model  </span> <span style="color: #87d787">claude-sonnet-4-6</span>
+  <span style="font-weight: bold; color: #F5F1DE">Instance       </span> <span style="color: #5fafff">t4g.xlarge</span>
+  <span style="font-weight: bold; color: #F5F1DE">Auth           </span> <span style="color: #ffaf00">API Key (sk-ant-•••)</span>
+  <span style="font-weight: bold; color: #F5F1DE">Dependencies   </span> <span style="color: #585858">none (native Anthropic support)</span>
+
+  <span style="color: #585858">──────────────────────────────────────────</span>
+  <span style="color: #87d787">  ✓ Pack + provider compatible</span>
+  <span style="color: #87d787">  ✓ API key format valid</span>
+  <span style="color: #87d787">  ✓ No bedrockify needed (direct provider)</span>
+
+  ← back to edit                                    🚀 Deploy
+
+</div>
+</div>
+<div class="step-explain">Hermes with Anthropic API. Note: <strong>no bedrockify dependency</strong> — Hermes talks to Anthropic natively. API key shown masked.</div>
+
+
+<h3>Error: Missing API Key <span class="badge badge-blue">Journey 6</span></h3>
+<div style="background:#0c0c0c; border:2px solid #333; border-radius:10px; padding:0; margin:16px 0; overflow:hidden;">
+  <div style="background:#1a1a2e; padding:6px 14px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+    <span style="color:#7fdbca; font-size:12px; font-family:monospace;">loki-agent installer</span>
+    <span style="display:flex; gap:6px;">
+      <span style="width:12px;height:12px;border-radius:50%;background:#ff5f57;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#febc2e;display:inline-block;"></span>
+      <span style="width:12px;height:12px;border-radius:50%;background:#28c840;display:inline-block;"></span>
+    </span>
+  </div>
+  <div style="padding:8px 12px; font-family:'SFMono-Regular',Consolas,monospace; font-size:13px; line-height:1.6; color:#d4d4d4; background:#0c0c0c; white-space:pre-wrap;">
+ ╔══════════════════════════════════╗ 
+ ║  ⚙️  Deploy Agent — Step 4 of 5  ║ 
+ ╚══════════════════════════════════╝ 
+
+  Configure Anthropic API
+
+  Authentication
+  ❯ Direct API Key
+
+  API Key
+  <span style="background: #303030"></span><span style="color: #585858; background: #303030">                                    </span> <span style="color: #ff0000">✗ Required</span>
+
+  ⚠ Anthropic API requires an API key to proceed.
+
+  enter a valid API key to continue     Next → (blocked)
+
+</div>
+</div>
+<div class="step-explain">Missing required field. Red ✗ on empty input. Error message with actionable fix (enter a valid API key to proceed). Next button blocked.</div>
+
+
+<h2>Implementation Order</h2>
+
+<div class="mermaid-wrap">
+<pre class="mermaid">
+gantt
+  title Implementation Phases
+  dateFormat YYYY-MM-DD
+  axisFormat %b %d
+
+  section Prototype
+    claude-code + bedrock      :active, p1, 2026-04-15, 3d
+    hermes + bedrock           :p2, after p1, 3d
+
+  section Infrastructure
+    Provider manifests + resolve.py  :p3, after p2, 4d
+    Pack registry update             :p4, after p3, 2d
+
+  section Convert Packs
+    OpenClaw conversion        :p5, after p4, 5d
+    Other packs (pi, ironclaw) :p6, after p5, 3d
+
+  section Non-Bedrock
+    anthropic-api + openai-api :p7, after p6, 4d
+    litellm                    :p8, after p7, 2d
+
+  section CFN + Wizard
+    CFN template update        :p9, after p8, 3d
+    Deploy wizard UI update    :p10, after p9, 4d
+    
+  section Tests
+    Test suite                 :crit, p11, after p10, 4d
+</pre>
+</div>
+
+<div class="callout-good callout">
+<strong>Prototype first:</strong> Start with <code>claude-code + bedrock</code> (direct) and <code>hermes + bedrock</code> (proxy). Simplest packs prove both transport paths. Do NOT start with OpenClaw.
+</div>
+
+
+<h2>Silent CLI Deploys (Non-Interactive)</h2>
+
+<p>Every wizard scenario must also work as a fully autonomous, silent CLI command for automation, CI/CD, and StackSet deployments. The <code>--non-interactive</code> flag (or <code>-y</code>) accepts all defaults.</p>
+
+<h3>Command Format</h3>
+<pre><code>curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh | bash -s -- \
+  --non-interactive \
+  --pack &lt;pack&gt; \
+  --profile &lt;profile&gt; \
+  --provider &lt;provider&gt; \
+  [--provider-auth &lt;iam|bearer&gt;] \
+  [--provider-key &lt;key&gt;] \
+
+  [--provider-base-url &lt;url&gt;] \
+  [--model &lt;override&gt;] \
+  [--region &lt;region&gt;]</code></pre>
+
+<h3>Scenario Commands</h3>
+
+<table>
+<tr><th>Scenario</th><th>Command</th></tr>
+
+<tr><td><strong>Bedrock default</strong><br><span class="badge badge-green">simplest</span></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>Anthropic API</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider anthropic-api \
+  --provider-key "$ANTHROPIC_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>OpenAI API</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider openai-api \
+  --provider-key "$OPENAI_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>OpenRouter</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider openrouter \
+  --provider-key "$OPENROUTER_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>LiteLLM proxy</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider litellm \
+  --provider-base-url "http://proxy:4000" \
+  --provider-key "$LITELLM_KEY"</code></pre></td></tr>
+
+
+
+<tr><td><strong>Hermes + Anthropic</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack hermes \
+  --profile builder \
+  --provider anthropic-api \
+  --provider-key "$ANTHROPIC_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>Hermes + OpenRouter</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack hermes \
+  --profile builder \
+  --provider openrouter \
+  --provider-key "$OPENROUTER_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>Claude Code + Bedrock</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack claude-code \
+  --profile builder \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>Claude Code + Anthropic</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack claude-code \
+  --profile builder \
+  --provider anthropic-api \
+  --provider-key "$ANTHROPIC_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>Pi + OpenRouter</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack pi \
+  --profile builder \
+  --provider openrouter \
+  --provider-key "$OPENROUTER_API_KEY"</code></pre></td></tr>
+
+
+<tr><td><strong>Hermes + Bedrock</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack hermes \
+  --profile builder \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>Hermes + OpenAI</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack hermes \
+  --profile builder \
+  --provider openai-api \
+  --provider-key "$OPENAI_API_KEY"</code></pre></td></tr>
+
+<tr><td><strong>Pi + Bedrock</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack pi \
+  --profile builder \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>Pi + LiteLLM</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack pi \
+  --profile builder \
+  --provider litellm \
+  --provider-base-url "http://proxy:4000"</code></pre></td></tr>
+
+<tr><td><strong>IronClaw + Bedrock</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack ironclaw \
+  --profile builder \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>NemoClaw + Bedrock</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack nemoclaw \
+  --profile personal_assistant \
+  --provider bedrock \
+  --region us-east-1</code></pre></td></tr>
+
+<tr><td><strong>Kiro CLI</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack kiro-cli \
+  --profile builder</code></pre>
+<span class="badge badge-yellow">requires interactive post-install: kiro-cli login --use-device-flow</span></td></tr>
+<tr><td><strong>Model override</strong></td>
+<td><pre><code>bash install.sh -y \
+  --pack openclaw \
+  --profile builder \
+  --provider bedrock \
+  --model global.anthropic.claude-sonnet-4-6</code></pre></td></tr>
+
+<tr><td><strong>Minimal (all defaults)</strong><br><span class="badge badge-green">one-liner</span></td>
+<td><pre><code>bash install.sh -y</code></pre>
+<span class="badge badge-yellow">defaults: openclaw + builder + bedrock + us-east-1</span></td></tr>
+</table>
+
+<h3>CloudFormation UserData</h3>
+<p>For CFN/StackSet deploys, the same flags are passed via UserData:</p>
+<pre><code>UserData:
+  Fn::Base64: !Sub |
+    #!/bin/bash
+    set -euo pipefail
+    git clone --depth 1 https://github.com/inceptionstack/loki-agent.git /tmp/loki-agent
+    bash /tmp/loki-agent/install.sh -y \
+      --pack "${PackName}" \
+      --profile "${ProfileName}" \
+      --provider "${ProviderName}" \
+      --provider-auth "${ProviderAuthType}" \
+      --region "${ProviderRegion}" \
+      --provider-key "${ProviderApiKey}" \
+      --provider-base-url "${ProviderBaseUrl}" \
+      --model "${PrimaryModelOverride}"</code></pre>
+
+<div class="callout">
+<strong>Non-interactive validation:</strong> All the same validation rules apply. Missing required fields (API key for anthropic-api, base URL for litellm) cause immediate failure with clear error messages. Invalid pack+provider combos fail before any installation begins.
+</div>
+
+<h3>Exit Codes</h3>
+<table>
+<tr><th>Code</th><th>Meaning</th></tr>
+<tr><td><code>0</code></td><td>Success — agent deployed and running</td></tr>
+<tr><td><code>1</code></td><td>General failure (check /tmp/loki-install.log)</td></tr>
+<tr><td><code>2</code></td><td>Invalid arguments (bad pack, provider, or combo)</td></tr>
+<tr><td><code>3</code></td><td>Missing required credentials</td></tr>
+<tr><td><code>4</code></td><td>Provider resolution failed</td></tr>
+<tr><td><code>5</code></td><td>Pack installation failed</td></tr>
+<tr><td><code>130</code></td><td>Interrupted (Ctrl+C)</td></tr>
+</table>
+
+<hr class="separator">
+
+<div class="callout-warn callout">
+<strong>Existing features not yet in provider-packs design (will be added in implementation):</strong>
+<ul>
+<li><strong>CFN/TF params:</strong> EnvironmentName, OpenClawGatewayPort, LokiWatermark, RepoBranch, VpcCidr, PublicSubnetCidr, SSHAllowedCidr, KeyPairName, ExistingVpcId, ExistingSubnetId</li>
+<li><strong>Security toggles:</strong> EnableSecurityHub, EnableGuardDuty, EnableInspector, EnableAccessAnalyzer, EnableConfigRecorder (all default true)</li>
+<li><strong>Bedrock onboarding:</strong> RequestQuotaIncreases, EnableBedrockForm</li>
+<li><strong>Instance families:</strong> c7g (compute-optimized) — current design shows t4g + m7g only</li>
+<li><strong>Pack-specific params:</strong> Claude Code <code>--haiku-model</code>, bedrockify <code>--embed-model</code>, NemoClaw <code>--sandbox-name</code> / <code>--telegram-token</code> / <code>--allowed-chat-ids</code></li>
+<li><strong>NemoClaw restrictions:</strong> <code>compatible_profiles: [personal_assistant]</code> only, requires Docker, t4g.xlarge minimum</li>
+<li><strong>Kiro CLI:</strong> Own cloud inference (no Bedrock/provider needed), requires post-install interactive login (<code>kiro-cli login --use-device-flow</code>)</li>
+<li><strong>bootstrap.sh params:</strong> <code>--gw-port</code>, <code>--model-mode</code>, <code>--bedrockify-port</code>, <code>--hermes-model</code> (all forwarded to pack config JSON)</li>
+</ul>
+<p>These are existing <code>install.sh</code> / <code>template.yaml</code> / <code>variables.tf</code> features that the provider-packs redesign must preserve or migrate. The new <code>--provider</code> flag replaces <code>--model-mode</code>, but all other params remain.</p>
+</div>
+
+<h2>Open Questions</h2>
+<ol>
+<li>Should bedrockify support non-Bedrock upstreams eventually?</li>
+<li>Which packs need non-Bedrock beyond OpenClaw initially?</li>
+<li>Should costs be in provider manifests? <em>(Recommend: optional)</em></li>
+<li><code>gpt-4.1</code> vs <code>o3</code> as OpenAI default? <em>(Recommend: gpt-4.1)</em></li>
+<li>Persist resolved config to <code>~/.openclaw/state/</code> for debugging? <em>(Yes, strip secrets)</em></li>
+
+</ol>
+
+<h2>Key Design Decisions</h2>
+<table>
+<tr><th>Decision</th><th>Choice</th><th>Reason</th></tr>
+<tr><td>Compatibility ownership</td><td>Pack registry only</td><td>Single source of truth, no drift</td></tr>
+<tr><td>Provider manifests</td><td>Describe providers only</td><td>No pack-specific hints</td></tr>
+<tr><td>Resolved config shape</td><td>Provider roles (chat/embeddings)</td><td>Future-proof for dual-provider</td></tr>
+<tr><td>resolve.py scope</td><td>Pure resolution</td><td>No secrets, no rendering</td></tr>
+<tr><td>Secret handling</td><td>Direct API key (NoEcho in CFN) or Bedrock bearer token</td><td>Secrets Manager deferred to future feature</td></tr>
+<tr><td>Config writes</td><td>Atomic + versioned</td><td>No partial/stale config</td></tr>
+<tr><td>Pack rendering</td><td>Pack-local renderers</td><td>Each pack owns translation</td></tr>
+<tr><td>Defaults in bootstrap</td><td>None (hard fail)</td><td>No silent fallback</td></tr>
+<tr><td>Prototype order</td><td>claude-code + hermes first</td><td>Simple packs prove patterns</td></tr>
+<tr><td>ProviderRegion</td><td>Generic name</td><td>Providers may add region support</td></tr>
+</table>
+
+<p class="tag" style="margin-top: 48px; text-align: center;">Provider Packs Design v3 · April 2026 · Designed with Codex CLI</p>
+
+</div>
+</body>
+</html>
