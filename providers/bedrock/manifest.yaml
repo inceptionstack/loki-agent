@@ -44,13 +44,3 @@ models:
     inputTypes:
       - text
       - image
-
-compatibility:
-  packs:
-    - openclaw
-    - hermes
-    - pi
-    - ironclaw
-    - nemoclaw
-    - claude-code
-    - kiro-cli

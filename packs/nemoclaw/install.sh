@@ -22,7 +22,7 @@ source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_MODEL="$(pack_config_get provider.model_roles.primary "$(pack_config_get model "us.anthropic.claude-sonnet-4-6")")"
+PACK_ARG_MODEL="$(pack_provider_primary_model "us.anthropic.claude-sonnet-4-6")"
 PACK_ARG_BEDROCKIFY_PORT="$(pack_config_get bedrockify_port "8090")"
 PACK_ARG_SANDBOX_NAME="$(pack_config_get sandbox_name "loki-assistant")"
 PACK_ARG_TELEGRAM_TOKEN="$(pack_config_get telegram_token "")"

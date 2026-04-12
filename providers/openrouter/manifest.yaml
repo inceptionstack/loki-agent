@@ -44,6 +44,3 @@ models:
     inputTypes:
       - text
       - image
-
-compatibility:
-  packs: []

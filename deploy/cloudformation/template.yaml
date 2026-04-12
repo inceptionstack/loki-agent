@@ -222,7 +222,7 @@ Parameters:
 
   DefaultModel:
     Type: String
-    Default: 'us.anthropic.claude-opus-4-6-v1'
+    Default: 'global.anthropic.claude-opus-4-6-v1'
     Description: "Override the primary AI model. Leave empty to use the selected provider default."
 
   ProviderName:
@@ -232,6 +232,7 @@ Parameters:
       - bedrock
       - anthropic-api
       - openai-api
+      - openrouter
       - litellm
     Description: "LLM provider. Bedrock is recommended because it uses IAM auth and does not require API keys."
 
@@ -241,6 +242,7 @@ Parameters:
     AllowedValues:
       - iam
       - bearer
+      - api-key
     Description: "Provider authentication mode. For Bedrock, use 'iam' unless you intentionally want bearer-token auth."
 
   ModelMode:

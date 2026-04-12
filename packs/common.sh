@@ -73,6 +73,20 @@ pack_config_get() {
   echo "$default"
 }
 
+
+# pack_provider_primary_model DEFAULT
+# Get the primary model from resolved provider config, falling back to legacy config then DEFAULT.
+pack_provider_primary_model() {
+  local default="${1:-}"
+  local resolved
+  resolved="$(pack_config_get provider.model_roles.primary "")"
+  if [[ -n "${resolved}" ]]; then
+    echo "${resolved}"
+  else
+    pack_config_get model "${default}"
+  fi
+}
+
 # check_bedrockify_health PORT
 # Verify bedrockify is running and healthy on the given port.
 # Fails with a clear message if not reachable.

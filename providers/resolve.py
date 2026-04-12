@@ -121,6 +121,13 @@ def main() -> int:
     }
     base_url = render_base_url(connection.get("baseUrlTemplate"), base_url_values)
 
+    # H2: Validate required API key for non-IAM providers
+    auth_method = auth.get("method", "")
+    if auth_mode in ("api-key", "bearer") and not args.provider_key:
+        if auth_method == "api-key" or (auth_mode == "bearer"):
+            print(f"ERROR: Provider '{args.provider}' with auth_mode '{auth_mode}' requires --provider-key", file=sys.stderr)
+            sys.exit(1)
+
     provider_block = {
         "schemaVersion": str(manifest.get("schemaVersion") or "v1"),
         "resolvedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -142,7 +149,7 @@ def main() -> int:
     }
 
     if not connection.get("regionRequired"):
-        provider_block["region"] = region
+        provider_block["region"] = ""
 
     existing["provider"] = provider_block
     if args.pack:

@@ -137,7 +137,7 @@ if provider_name == "bedrock":
         "models": provider_models,
     }
     if provider.get("auth_mode") == "bearer" and provider_key:
-        bedrock["apiKey"] = provider_key
+        bedrock["apiKey"] = "$env:PROVIDER_KEY_ENV"  # resolved at runtime, never written to disk
     cfg["models"]["providers"]["amazon-bedrock"] = bedrock
     cfg["plugins"]["entries"]["amazon-bedrock"] = {
         "config": {"discovery": {"enabled": True, "region": region, "providerFilter": ["anthropic"]}}
@@ -152,7 +152,7 @@ elif provider_name == "litellm":
     model_id = primary_model or data.get("litellm_model") or "claude-opus-4-6"
     cfg["models"]["providers"]["litellm"] = {
         "baseUrl": base_url,
-        "apiKey": litellm_key,
+        "apiKey": "$env:LITELLM_KEY_ENV",  # resolved at runtime
         "api": provider.get("api") or "openai-completions",
         "models": provider_models,
     }
@@ -163,7 +163,7 @@ elif provider_name == "litellm":
     cfg["agents"]["defaults"]["heartbeat"]["model"] = normalize_provider_model("litellm", heartbeat_model)
 elif provider_name == "anthropic-api":
     cfg["models"]["providers"]["anthropic"] = {
-        "apiKey": provider_key,
+        "apiKey": "$env:PROVIDER_KEY_ENV",  # resolved at runtime
         "models": provider_models,
     }
     cfg["agents"]["defaults"]["model"] = {

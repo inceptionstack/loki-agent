@@ -39,6 +39,7 @@ packs:
       - bedrock
       - anthropic-api
       - openai-api
+      - openrouter
       - litellm
     instance_type: t4g.xlarge
     root_volume_gb: 40

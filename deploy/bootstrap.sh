@@ -380,6 +380,12 @@ fi
 
 ok "Pack '${PACK_NAME}' found in registry"
 
+# ── Ensure PyYAML is available for resolve.py ─────────────────────────────────
+if ! python3 -c "import yaml" 2>/dev/null; then
+  info "Installing PyYAML for provider resolver..."
+  pip3 install -q pyyaml 2>/dev/null || python3 -m pip install -q pyyaml 2>/dev/null || true
+fi
+
 # ── Resolve provider block ────────────────────────────────────────────────────
 step "Provider Resolution"
 PROVIDER_RESOLVER="${REPO_DIR}/providers/resolve.py"
