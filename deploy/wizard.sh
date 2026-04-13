@@ -621,28 +621,179 @@ advanced_instance() {
 
 simple_vpc_mode() {
   wizard_ui_set_step 5 7
-  local choice
-  choice="$(wizard_choose "VPC Mode" "Deploy into a new VPC or reuse an existing one?" "${WIZARD_STATE[vpcMode]}" new existing BACK)"
-  case "${choice}" in
-    BACK) return 1 ;;
-    new)
-      WIZARD_STATE[vpcMode]="new"
-      WIZARD_STATE[existingVpcId]=""
-      WIZARD_STATE[existingSubnetId]=""
-      ;;
-    existing)
-      WIZARD_STATE[vpcMode]="existing"
-      local vpc_id subnet_id
-      vpc_id="$(wizard_input "Existing VPC ID" "Enter the VPC ID to deploy into." "${WIZARD_STATE[existingVpcId]}" "vpc-..." false)" || { return 1; }
-      subnet_id="$(wizard_input "Existing Subnet ID" "Enter a public subnet ID in the VPC." "${WIZARD_STATE[existingSubnetId]}" "subnet-..." false)" || { return 1; }
-      [[ -n "${vpc_id}" && -n "${subnet_id}" ]] || {
-        wizard_error "Existing VPC mode requires both VPC ID and subnet ID."
-        return 1
-      }
-      WIZARD_STATE[existingVpcId]="${vpc_id}"
-      WIZARD_STATE[existingSubnetId]="${subnet_id}"
-      ;;
-  esac
+  local region vpcs count line reuse_vpc chosen_vpc subnet_id
+  local gum_ready=false
+  local -a vpc_rows=()
+  local -a vpc_ids=()
+
+  region="${WIZARD_STATE[providerRegion]:-us-east-1}"
+  if [[ -n "${GUM:-}" ]] && command -v "${GUM}" >/dev/null 2>&1; then
+    gum_ready=true
+  fi
+
+  if [[ "${gum_ready}" == "true" ]] && declare -F wizard_info >/dev/null 2>&1; then
+    wizard_info "Checking for existing Loki VPCs in ${region}..."
+  elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_note >/dev/null 2>&1; then
+    wizard_note "Checking for existing Loki VPCs in ${region}..."
+  else
+    echo "Checking for existing Loki VPCs in ${region}..."
+  fi
+
+  if [[ -n "${CLI_EXISTING_VPC_ID}" || -n "${CLI_EXISTING_SUBNET_ID}" ]]; then
+    WIZARD_STATE[vpcMode]="existing"
+    [[ -n "${CLI_EXISTING_VPC_ID}" ]] && WIZARD_STATE[existingVpcId]="${CLI_EXISTING_VPC_ID}"
+    [[ -n "${CLI_EXISTING_SUBNET_ID}" ]] && WIZARD_STATE[existingSubnetId]="${CLI_EXISTING_SUBNET_ID}"
+    if [[ "${gum_ready}" == "true" ]] && declare -F wizard_ok >/dev/null 2>&1; then
+      wizard_ok "Using CLI-provided VPC settings"
+    elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_success >/dev/null 2>&1; then
+      wizard_success "Using CLI-provided VPC settings"
+    else
+      echo "Using CLI-provided VPC settings"
+    fi
+    return 0
+  fi
+
+  if ! command -v aws >/dev/null 2>&1; then
+    if [[ "${gum_ready}" == "true" ]] && declare -F wizard_warn >/dev/null 2>&1; then
+      wizard_warn "aws CLI not found; proceeding with a new VPC"
+    elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_warning >/dev/null 2>&1; then
+      wizard_warning "aws CLI not found; proceeding with a new VPC"
+    else
+      echo "aws CLI not found; proceeding with a new VPC"
+    fi
+    WIZARD_STATE[vpcMode]="new"
+    WIZARD_STATE[existingVpcId]=""
+    WIZARD_STATE[existingSubnetId]=""
+    return 0
+  fi
+
+  while IFS=$'\t' read -r vpc_id watermark method name; do
+    [[ -z "${vpc_id:-}" || "${vpc_id}" == "None" ]] && continue
+    vpc_rows+=("${vpc_id}"$'\t'"${watermark:-n/a}"$'\t'"${method:-n/a}"$'\t'"${name:-n/a}")
+    vpc_ids+=("${vpc_id}")
+  done < <(
+    aws ec2 describe-vpcs \
+      --filters "Name=tag:loki:managed,Values=true" \
+      --region "${region}" \
+      --query 'Vpcs[*].[VpcId, Tags[?Key==`loki:watermark`].Value|[0], Tags[?Key==`loki:deploy-method`].Value|[0], Tags[?Key==`Name`].Value|[0]]' \
+      --output text 2>/dev/null || true
+  )
+
+  if [[ ${#vpc_ids[@]} -eq 0 ]]; then
+    WIZARD_STATE[vpcMode]="new"
+    WIZARD_STATE[existingVpcId]=""
+    WIZARD_STATE[existingSubnetId]=""
+    return 0
+  fi
+
+  count="${#vpc_ids[@]}"
+  if [[ "${gum_ready}" == "true" ]] && declare -F wizard_warn >/dev/null 2>&1; then
+    wizard_warn "Found ${count} existing Loki deployment(s) in ${region}:"
+  elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_warning >/dev/null 2>&1; then
+    wizard_warning "Found ${count} existing Loki deployment(s) in ${region}:"
+  else
+    echo "Found ${count} existing Loki deployment(s) in ${region}:"
+  fi
+  for line in "${vpc_rows[@]}"; do
+    IFS=$'\t' read -r vpc_id watermark method name <<<"${line}"
+    echo "  ${vpc_id}  watermark=${watermark:-n/a}  method=${method:-n/a}  name=${name:-n/a}"
+  done
+
+  reuse_vpc=true
+  if [[ "${NON_INTERACTIVE}" != "true" ]]; then
+    if ! wizard_confirm "Reuse Existing VPC" "A managed Loki VPC was found in ${region}." "Reuse an existing VPC?" true; then
+      reuse_vpc=false
+    fi
+  fi
+
+  if [[ "${reuse_vpc}" != "true" ]]; then
+    WIZARD_STATE[vpcMode]="new"
+    WIZARD_STATE[existingVpcId]=""
+    WIZARD_STATE[existingSubnetId]=""
+    return 0
+  fi
+
+  if [[ ${#vpc_ids[@]} -eq 1 || "${NON_INTERACTIVE}" == "true" ]]; then
+    chosen_vpc="${vpc_ids[0]}"
+  else
+    chosen_vpc="$(printf '%s\n' "${vpc_ids[@]}" | "${GUM}" choose --header "Select a VPC to reuse" < /dev/tty)"
+  fi
+
+  subnet_id=""
+
+  local candidate candidate_subnets rtb_id has_igw
+  candidate_subnets="$(
+    aws ec2 describe-subnets \
+      --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=tag:Name,Values=*public*" \
+      --query 'Subnets[*].SubnetId' \
+      --output text \
+      --region "${region}" 2>/dev/null || true
+  )"
+  if [[ -z "${candidate_subnets}" || "${candidate_subnets}" == "None" ]]; then
+    candidate_subnets="$(
+      aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=mapPublicIpOnLaunch,Values=true" \
+        --query 'Subnets[*].SubnetId' \
+        --output text \
+        --region "${region}" 2>/dev/null || true
+    )"
+  fi
+
+  for candidate in ${candidate_subnets}; do
+    [[ -z "${candidate}" || "${candidate}" == "None" ]] && continue
+    rtb_id="$(
+      aws ec2 describe-route-tables \
+        --filters "Name=association.subnet-id,Values=${candidate}" \
+        --query 'RouteTables[0].RouteTableId' \
+        --output text \
+        --region "${region}" 2>/dev/null || true
+    )"
+    if [[ -z "${rtb_id}" || "${rtb_id}" == "None" ]]; then
+      rtb_id="$(
+        aws ec2 describe-route-tables \
+          --filters "Name=vpc-id,Values=${chosen_vpc}" "Name=association.main,Values=true" \
+          --query 'RouteTables[0].RouteTableId' \
+          --output text \
+          --region "${region}" 2>/dev/null || true
+      )"
+    fi
+    [[ -z "${rtb_id}" || "${rtb_id}" == "None" ]] && continue
+    has_igw="$(
+      aws ec2 describe-route-tables \
+        --route-table-ids "${rtb_id}" \
+        --query 'RouteTables[0].Routes[?DestinationCidrBlock==`0.0.0.0/0`].GatewayId' \
+        --output text \
+        --region "${region}" 2>/dev/null || true
+    )"
+    if [[ "${has_igw}" == igw-* ]]; then
+      subnet_id="${candidate}"
+      break
+    fi
+  done
+
+  if [[ -n "${subnet_id}" && "${subnet_id}" != "None" ]]; then
+    WIZARD_STATE[vpcMode]="existing"
+    WIZARD_STATE[existingVpcId]="${chosen_vpc}"
+    WIZARD_STATE[existingSubnetId]="${subnet_id}"
+    if [[ "${gum_ready}" == "true" ]] && declare -F wizard_ok >/dev/null 2>&1; then
+      wizard_ok "Reusing VPC ${chosen_vpc} with subnet ${subnet_id}"
+    elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_success >/dev/null 2>&1; then
+      wizard_success "Reusing VPC ${chosen_vpc} with subnet ${subnet_id}"
+    else
+      echo "Reusing VPC ${chosen_vpc} with subnet ${subnet_id}"
+    fi
+  else
+    WIZARD_STATE[vpcMode]="new"
+    WIZARD_STATE[existingVpcId]=""
+    WIZARD_STATE[existingSubnetId]=""
+    if [[ "${gum_ready}" == "true" ]] && declare -F wizard_warn >/dev/null 2>&1; then
+      wizard_warn "Could not find a public subnet in ${chosen_vpc}; proceeding with a new VPC"
+    elif [[ "${gum_ready}" == "true" ]] && declare -F wizard_warning >/dev/null 2>&1; then
+      wizard_warning "Could not find a public subnet in ${chosen_vpc}; proceeding with a new VPC"
+    else
+      echo "Could not find a public subnet in ${chosen_vpc}; proceeding with a new VPC"
+    fi
+  fi
 }
 
 advanced_networking() {
@@ -1115,6 +1266,7 @@ main() {
     WIZARD_STATE[environmentName]="${WIZARD_STATE[environmentName]:-${WIZARD_STATE[pack]}}"
     WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
     WIZARD_STATE[deployMethod]="cfn-cli"
+    simple_vpc_mode
     WIZARD_STATE[generatedCfnParams]="$(build_cfn_params WIZARD_STATE | jq -c .)"
     WIZARD_STATE[generatedTerraformVars]="$(build_terraform_vars WIZARD_STATE | jq -c .)"
     WIZARD_STATE[generatedBootstrapCommand]="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
