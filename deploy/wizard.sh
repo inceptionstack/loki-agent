@@ -10,6 +10,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+REPO_URL="https://github.com/inceptionstack/loki-agent.git"
+WIZARD_BRANCH="${WIZARD_BRANCH:-feat/provider-packs}"
+
+# Auto-clone repo if running as a standalone downloaded script (lib files missing)
+if [[ ! -f "${SCRIPT_DIR}/lib/wizard-ui.sh" ]]; then
+  CLONE_DIR="/tmp/loki-agent-wizard-$$"
+  echo "Wizard lib files not found — cloning loki-agent (branch: ${WIZARD_BRANCH})..."
+  rm -rf "${CLONE_DIR}" 2>/dev/null || true
+  git clone --depth 1 -b "${WIZARD_BRANCH}" "${REPO_URL}" "${CLONE_DIR}" 2>&1 | tail -1
+  echo "Repository cloned to ${CLONE_DIR}"
+  # Re-exec from the cloned repo, passing all original args
+  exec bash "${CLONE_DIR}/deploy/wizard.sh" "$@"
+fi
+
 export AWS_PAGER=""
 export PAGER=""
 
