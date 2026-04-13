@@ -62,7 +62,6 @@ build_cfn_params() {
     --arg ProviderAuthType "${state_ref[providerAuthType]}" \
     --arg ProviderApiKey "${state_ref[providerKey]}" \
     --arg ProviderApiKeySecretArn "${state_ref[providerKeySecretId]}" \
-    --arg ProviderBaseUrl "${state_ref[providerBaseUrl]}" \
     --arg LiteLLMBaseUrl "${state_ref[providerBaseUrl]}" \
     --arg ExistingVpcId "${state_ref[existingVpcId]}" \
     --arg ExistingSubnetId "${state_ref[existingSubnetId]}" \
@@ -91,7 +90,6 @@ build_cfn_params() {
       ProviderAuthType: $ProviderAuthType,
       ProviderApiKey: $ProviderApiKey,
       ProviderApiKeySecretArn: $ProviderApiKeySecretArn,
-      ProviderBaseUrl: $ProviderBaseUrl,
       LiteLLMBaseUrl: $LiteLLMBaseUrl,
       ExistingVpcId: $ExistingVpcId,
       ExistingSubnetId: $ExistingSubnetId,

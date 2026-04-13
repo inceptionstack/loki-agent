@@ -263,35 +263,37 @@ detect_platform() {
 }
 
 ensure_gum() {
-  local version current os arch url tmpdir
+  # Already installed system-wide?
   if command -v gum >/dev/null 2>&1; then
-    current="$(gum --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
-    if [[ "${current}" == "${GUM_VERSION_REQUIRED}" ]]; then
-      GUM="gum"
-      return 0
-    fi
+    GUM="gum"
+    return 0
   fi
-
-  tmpdir="/tmp/loki-gum-${GUM_VERSION_REQUIRED}"
-  if [[ -x "${tmpdir}/gum" ]]; then
-    current="$("${tmpdir}/gum" --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
-    if [[ "${current}" == "${GUM_VERSION_REQUIRED}" ]]; then
-      GUM="${tmpdir}/gum"
-      return 0
-    fi
+  # Already installed to /tmp?
+  local gum_bin="/tmp/gum-bin/gum"
+  if [[ -x "${gum_bin}" ]]; then
+    GUM="${gum_bin}"
+    return 0
   fi
 
   require_tool curl
   require_tool tar
   read -r os arch < <(detect_platform)
-  url="https://github.com/charmbracelet/gum/releases/download/v${GUM_VERSION_REQUIRED}/gum_${GUM_VERSION_REQUIRED}_${os}_${arch}.tar.gz"
-  mkdir -p "${tmpdir}"
-  echo "Installing gum v${GUM_VERSION_REQUIRED}..."
-  curl -fsSL "${url}" | tar -xz -C "${tmpdir}" --strip-components=1
-  chmod +x "${tmpdir}/gum"
-  version="$("${tmpdir}/gum" --version 2>/dev/null | awk '{print $3}' | sed 's/^v//')"
-  [[ "${version}" == "${GUM_VERSION_REQUIRED}" ]] || die "Failed to install gum v${GUM_VERSION_REQUIRED}"
-  GUM="${tmpdir}/gum"
+
+  # Try latest from GitHub API, fall back to known good version
+  local version
+  version="$(curl -sf https://api.github.com/repos/charmbracelet/gum/releases/latest 2>/dev/null \
+    | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/' || echo "")"
+  [[ -z "${version}" ]] && version="${GUM_VERSION_REQUIRED}"
+
+  local url="https://github.com/charmbracelet/gum/releases/download/v${version}/gum_${version}_${os}_${arch}.tar.gz"
+  mkdir -p /tmp/gum-bin
+  echo "Installing gum v${version}..."
+  if curl -sfL "${url}" | tar xz --strip-components=1 -C /tmp/gum-bin 2>/dev/null; then
+    chmod +x "${gum_bin}"
+    GUM="${gum_bin}"
+  else
+    die "Could not install gum. Check network connectivity and try again."
+  fi
 }
 
 parse_args() {
