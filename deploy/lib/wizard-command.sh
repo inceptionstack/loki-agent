@@ -35,6 +35,8 @@ build_bootstrap_command() {
   [[ -n "${state_ref[gwPort]}" ]] && cmd+=(--gw-port "$(wizard_shell_quote "${state_ref[gwPort]}")")
   [[ -n "${state_ref[bedrockifyPort]}" ]] && cmd+=(--bedrockify-port "$(wizard_shell_quote "${state_ref[bedrockifyPort]}")")
   [[ -n "${state_ref[hermesModel]}" ]] && cmd+=(--hermes-model "$(wizard_shell_quote "${state_ref[hermesModel]}")")
+  [[ -n "${state_ref[existingVpcId]}" ]] && cmd+=(--existing-vpc-id "$(wizard_shell_quote "${state_ref[existingVpcId]}")")
+  [[ -n "${state_ref[existingSubnetId]}" ]] && cmd+=(--existing-subnet-id "$(wizard_shell_quote "${state_ref[existingSubnetId]}")")
   local out=""
   local part
   for part in "${cmd[@]}"; do

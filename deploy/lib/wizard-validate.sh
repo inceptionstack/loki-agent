@@ -176,7 +176,7 @@ wizard_validate_environment_name() {
 
 wizard_validate_review_state() {
   local state_json="$1"
-  local pack profile provider auth region key base_url env_name gw_port
+  local pack profile provider auth region key base_url env_name gw_port vpc_mode existing_vpc_id existing_subnet_id
   pack="$(jq -r '.pack // ""' <<<"${state_json}")"
   profile="$(jq -r '.profile // ""' <<<"${state_json}")"
   provider="$(jq -r '.provider // ""' <<<"${state_json}")"
@@ -186,9 +186,18 @@ wizard_validate_review_state() {
   base_url="$(jq -r '.providerBaseUrl // ""' <<<"${state_json}")"
   env_name="$(jq -r '.environmentName // ""' <<<"${state_json}")"
   gw_port="$(jq -r '.gwPort // ""' <<<"${state_json}")"
+  vpc_mode="$(jq -r '.vpcMode // ""' <<<"${state_json}")"
+  existing_vpc_id="$(jq -r '.existingVpcId // ""' <<<"${state_json}")"
+  existing_subnet_id="$(jq -r '.existingSubnetId // ""' <<<"${state_json}")"
 
   wizard_validate_environment_name "${env_name}" || return 1
   wizard_validate_positive_int "${gw_port}" "Gateway port" || return 1
+  if [[ "${vpc_mode}" == "existing" ]]; then
+    [[ -n "${existing_vpc_id}" && -n "${existing_subnet_id}" ]] || {
+      printf 'Existing VPC mode requires both Existing VPC ID and Existing Subnet ID.\n' >&2
+      return 1
+    }
+  fi
   wizard_validate_pack_profile "${pack}" "${profile}" || return 1
   if [[ "${provider}" != "own-cloud" ]]; then
     wizard_validate_pack_provider "${pack}" "${provider}" || return 1
