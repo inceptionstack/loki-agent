@@ -392,16 +392,16 @@ All 19 scenarios must pass `--dry-run --non-interactive --scenario N`:
 
 | Category | Total | Passed | Failed | Skipped |
 |----------|-------|--------|--------|---------|
-| CLI Infrastructure | 16 | | | |
-| Simple TUI Flows | 35 | | | |
-| Advanced TUI Flows | 18 | | | |
-| Non-Interactive Flows | 6 | | | |
-| Deploy Flows | 8 | | | |
+| CLI Infrastructure | 19 | 16 | | | |
+| Simple TUI Flows | 64 | 35 | | | |
+| Advanced TUI Flows | 24 | 18 | | | |
+| Non-Interactive Flows | 9 | 6 | | | |
+| Deploy Flows | 14 | 8 | | | |
 | Scenario Sweep | 19 | | | |
-| E2E Deploy Tests | 16 | | | |
-| Validation & Errors | 14 | | | |
+| E2E Deploy Tests | 40 | 16 | | | |
+| Validation & Errors | 18 | 14 | | | |
 | Regression | 8 | | | |
-| **TOTAL** | **140** | | | |
+| **TOTAL** | **249** | | | |
 
 ---
 
@@ -412,3 +412,62 @@ All 19 scenarios must pass `--dry-run --non-interactive --scenario N`:
 - LiteLLM tests require a running LiteLLM proxy endpoint.
 - Bedrock bearer tests require a Bedrock API key (see `bedrock-api-keys` skill).
 - Test on both arm64 (primary target) and x86_64 if possible.
+
+---
+
+## 10. Review Findings (from Codex Code Review)
+
+The following gaps were identified by automated code review and should be addressed:
+
+### 10.1 Provider Selection Behavior (Correction)
+The wizard does NOT hide unsupported providers — it shows all 5 and marks unsupported ones as disabled/greyed out. kiro-cli skips provider selection entirely and hard-sets `own-cloud`.
+- [ ] Unsupported providers appear disabled (not hidden) for each pack
+- [ ] kiro-cli skips provider step entirely (no chooser shown)
+
+### 10.2 Provider Auth Corrections
+- [ ] OpenRouter keys: validated by length only (≥10 chars), NO `sk-or-` prefix check
+- [ ] Bedrock bearer tokens: validated with `ABS-` prefix (not generic API key)
+- [ ] Anthropic keys: `sk-ant-` prefix validated
+- [ ] OpenAI keys: length-only validation (no `sk-` prefix enforcement in wizard)
+
+### 10.3 Missing Simple-Mode Sub-Flows
+- [ ] Primary Model Override field present in simple-mode provider config (all providers)
+- [ ] LiteLLM optional API key input field (separate from base URL)
+
+### 10.4 Missing Advanced-Mode Sub-Flows
+- [ ] Context Window override field
+- [ ] Max Output Tokens override field
+- [ ] Hermes Model override field (hermes pack only)
+
+### 10.5 NemoClaw Profile Restriction
+- [ ] NemoClaw only allows `personal_assistant` profile — others rejected
+- [ ] personal_assistant profile disables security service defaults
+
+### 10.6 kiro-cli Special Behavior
+- [ ] kiro-cli skips provider selection, sets provider=own-cloud
+- [ ] kiro-cli post-install review note shown in review screen
+
+### 10.7 CFN Template Parameters Not Covered
+- [ ] `ModelMode` param correctly set (bedrock/api-key/litellm) based on provider
+- [ ] `LiteLLMApiKey` param set when LiteLLM API key provided
+- [ ] `LiteLLMModel` param set when LiteLLM model override provided
+- [ ] `ProviderApiKeySecretArn` path tested (secret ARN instead of plaintext key)
+
+### 10.8 Missing Edge Cases
+- [ ] `--existing-vpc-id` without `--existing-subnet-id` → should error or warn
+- [ ] `--existing-subnet-id` without `--existing-vpc-id` → should error or warn
+- [ ] Environment name > 24 chars → CFN rejects (AllowedPattern + MaxLength)
+- [ ] Environment name with uppercase → CFN rejects (AllowedPattern: `[a-z0-9-]+`)
+- [ ] Non-interactive path skips review validation — verify CFN template Rules catch issues
+- [ ] SSH Access = keypair with blank key pair name
+- [ ] Scenario invocation by name (not just number): `--scenario simple-bedrock-iam`
+
+### 10.9 Main Branch install.sh Regression
+- [ ] `install.sh -y` still works (non-interactive)
+- [ ] `install.sh --pack openclaw` still works
+- [ ] `install.sh --method cfn` still works
+- [ ] `install.sh --profile builder` still works
+- [ ] `install.sh --simple` still works
+- [ ] `install.sh --advanced` still works
+- [ ] `install.sh --debug-in-repo` still works
+- [ ] VPC auto-detection in install.sh unchanged by wizard changes
