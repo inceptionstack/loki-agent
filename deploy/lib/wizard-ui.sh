@@ -56,19 +56,19 @@ wizard_header() {
 }
 
 wizard_note() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "$1"
+  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "$1" >/dev/tty
 }
 
 wizard_success() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_GREEN}" "✓ $1"
+  "${GUM}" style --foreground "${WIZARD_COLOR_GREEN}" "✓ $1" >/dev/tty
 }
 
 wizard_warning() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_YELLOW}" "⚠ $1"
+  "${GUM}" style --foreground "${WIZARD_COLOR_YELLOW}" "⚠ $1" >/dev/tty
 }
 
 wizard_error() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_RED}" --bold "✗ $1"
+  "${GUM}" style --foreground "${WIZARD_COLOR_RED}" --bold "✗ $1" >/dev/tty
 }
 
 wizard_choose() {
@@ -76,7 +76,7 @@ wizard_choose() {
   local subtitle="$2"
   local selected="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}"
+  wizard_header "${title}" "${subtitle}" >/dev/tty
   if [[ -n "${selected}" ]]; then
     "${GUM}" choose --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected}" "$@" < /dev/tty
   else
@@ -89,7 +89,7 @@ wizard_choose_multi() {
   local subtitle="$2"
   local selected_csv="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}"
+  wizard_header "${title}" "${subtitle}" >/dev/tty
   "${GUM}" choose --no-limit --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected_csv}" "$@" < /dev/tty
 }
 
@@ -99,7 +99,7 @@ wizard_input() {
   local value="$3"
   local placeholder="$4"
   local mask="${5:-false}"
-  wizard_header "${title}" "${subtitle}"
+  wizard_header "${title}" "${subtitle}" >/dev/tty
   if [[ "${mask}" == "true" ]]; then
     "${GUM}" input --password --value "${value}" --placeholder "${placeholder}" < /dev/tty
   else
@@ -112,7 +112,7 @@ wizard_confirm() {
   local subtitle="$2"
   local prompt="$3"
   local default_yes="${4:-false}"
-  wizard_header "${title}" "${subtitle}"
+  wizard_header "${title}" "${subtitle}" >/dev/tty
   if [[ "${default_yes}" == "true" ]]; then
     "${GUM}" confirm --default=yes "${prompt}" < /dev/tty
   else
