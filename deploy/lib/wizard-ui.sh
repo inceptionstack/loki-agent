@@ -12,14 +12,10 @@ else
   WIZARD_DISPLAY="/dev/stderr"
 fi
 
-WIZARD_COLOR_BG="0"
-WIZARD_COLOR_CARD="236"
 WIZARD_COLOR_BLUE="75"
 WIZARD_COLOR_GREEN="42"
 WIZARD_COLOR_YELLOW="178"
 WIZARD_COLOR_RED="203"
-WIZARD_COLOR_TEXT="252"
-WIZARD_COLOR_MUTED="246"
 WIZARD_TOTAL_STEPS="${WIZARD_TOTAL_STEPS:-6}"
 WIZARD_STEP_INDEX="${WIZARD_STEP_INDEX:-0}"
 WIZARD_HEADER_ICON="${WIZARD_HEADER_ICON:-🔧}"
@@ -37,45 +33,32 @@ wizard_ui_set_step() {
   WIZARD_TOTAL_STEPS="$2"
 }
 
-wizard_divider() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "──────────────────────────────────────────"
-}
-
-wizard_header() {
+# Build a plain-text header for gum --header flag (no gum style, no OSC queries)
+_wizard_header_text() {
   local title="$1"
   local subtitle="${2:-}"
-  wizard_ui_require || return 1
-
-  local heading
-  heading="$("${GUM}" style \
-    --border rounded \
-    --border-foreground "${WIZARD_COLOR_BLUE}" \
-    --foreground "${WIZARD_COLOR_TEXT}" \
-    --padding "0 2" \
-    --bold \
-    "${WIZARD_HEADER_ICON} Deploy Agent — Step ${WIZARD_STEP_INDEX} of ${WIZARD_TOTAL_STEPS}")"
-  printf '%s\n\n' "${heading}"
-  "${GUM}" style --foreground "${WIZARD_COLOR_TEXT}" --bold "${title}"
+  local header="${WIZARD_HEADER_ICON} Step ${WIZARD_STEP_INDEX}/${WIZARD_TOTAL_STEPS} — ${title}"
   if [[ -n "${subtitle}" ]]; then
-    "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "${subtitle}"
+    header="${header}
+  ${subtitle}"
   fi
-  printf '\n'
+  printf '%s' "${header}"
 }
 
 wizard_note() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "$1" >"${WIZARD_DISPLAY}"
+  printf '  %s\n' "$1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_success() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_GREEN}" "✓ $1" >"${WIZARD_DISPLAY}"
+  printf '  ✓ %s\n' "$1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_warning() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_YELLOW}" "⚠ $1" >"${WIZARD_DISPLAY}"
+  printf '  ⚠ %s\n' "$1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_error() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_RED}" --bold "✗ $1" >"${WIZARD_DISPLAY}"
+  printf '  ✗ %s\n' "$1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_choose() {
@@ -83,11 +66,12 @@ wizard_choose() {
   local subtitle="$2"
   local selected="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
+  local header
+  header="$(_wizard_header_text "${title}" "${subtitle}")"
   if [[ -n "${selected}" ]]; then
-    "${GUM}" choose --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected}" "$@" < /dev/tty
+    "${GUM}" choose --header "${header}" --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected}" "$@" < /dev/tty
   else
-    "${GUM}" choose --cursor.foreground "${WIZARD_COLOR_BLUE}" "$@" < /dev/tty
+    "${GUM}" choose --header "${header}" --cursor.foreground "${WIZARD_COLOR_BLUE}" "$@" < /dev/tty
   fi
 }
 
@@ -96,8 +80,9 @@ wizard_choose_multi() {
   local subtitle="$2"
   local selected_csv="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
-  "${GUM}" choose --no-limit --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected_csv}" "$@" < /dev/tty
+  local header
+  header="$(_wizard_header_text "${title}" "${subtitle}")"
+  "${GUM}" choose --header "${header}" --no-limit --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected_csv}" "$@" < /dev/tty
 }
 
 wizard_input() {
@@ -106,11 +91,12 @@ wizard_input() {
   local value="$3"
   local placeholder="$4"
   local mask="${5:-false}"
-  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
+  local header
+  header="$(_wizard_header_text "${title}" "${subtitle}")"
   if [[ "${mask}" == "true" ]]; then
-    "${GUM}" input --password --value "${value}" --placeholder "${placeholder}" < /dev/tty
+    "${GUM}" input --header "${header}" --password --value "${value}" --placeholder "${placeholder}" < /dev/tty
   else
-    "${GUM}" input --value "${value}" --placeholder "${placeholder}" < /dev/tty
+    "${GUM}" input --header "${header}" --value "${value}" --placeholder "${placeholder}" < /dev/tty
   fi
 }
 
@@ -119,7 +105,9 @@ wizard_confirm() {
   local subtitle="$2"
   local prompt="$3"
   local default_yes="${4:-false}"
-  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
+  local header
+  header="$(_wizard_header_text "${title}" "${subtitle}")"
+  printf '%s\n' "${header}" >"${WIZARD_DISPLAY}"
   if [[ "${default_yes}" == "true" ]]; then
     "${GUM}" confirm --default=yes "${prompt}" < /dev/tty
   else
@@ -132,7 +120,6 @@ wizard_summary() {
   "${GUM}" style \
     --border rounded \
     --border-foreground "${WIZARD_COLOR_GREEN}" \
-    --foreground "${WIZARD_COLOR_TEXT}" \
     --padding "1 2" \
     "${content}"
 }
