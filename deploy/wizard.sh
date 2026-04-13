@@ -1080,6 +1080,18 @@ main() {
     return 0
   fi
 
+  # Fast path: non-interactive without scenario — skip TUI, go straight to deploy
+  if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+    WIZARD_STATE[environmentName]="${WIZARD_STATE[environmentName]:-${WIZARD_STATE[pack]}}"
+    WIZARD_STATE[lokiWatermark]="${WIZARD_STATE[environmentName]}"
+    WIZARD_STATE[deployMethod]="cfn-cli"
+    WIZARD_STATE[generatedCfnParams]="$(build_cfn_params WIZARD_STATE | jq -c .)"
+    WIZARD_STATE[generatedTerraformVars]="$(build_terraform_vars WIZARD_STATE | jq -c .)"
+    WIZARD_STATE[generatedBootstrapCommand]="$(build_bootstrap_command WIZARD_STATE | tr -d '\n')"
+    deploy_screen
+    return 0
+  fi
+
   ensure_gum
   main_flow
 }
