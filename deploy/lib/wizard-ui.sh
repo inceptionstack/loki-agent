@@ -5,6 +5,13 @@ if [[ -n "${_LOKI_WIZARD_UI_SH:-}" ]]; then
 fi
 _LOKI_WIZARD_UI_SH=1
 
+# Display output target: /dev/tty if available, otherwise stderr
+if [[ -w /dev/tty ]] 2>/dev/null; then
+  WIZARD_DISPLAY="/dev/tty"
+else
+  WIZARD_DISPLAY="/dev/stderr"
+fi
+
 WIZARD_COLOR_BG="0"
 WIZARD_COLOR_CARD="236"
 WIZARD_COLOR_BLUE="75"
@@ -56,19 +63,19 @@ wizard_header() {
 }
 
 wizard_note() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "$1" >/dev/tty
+  "${GUM}" style --foreground "${WIZARD_COLOR_MUTED}" "$1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_success() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_GREEN}" "✓ $1" >/dev/tty
+  "${GUM}" style --foreground "${WIZARD_COLOR_GREEN}" "✓ $1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_warning() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_YELLOW}" "⚠ $1" >/dev/tty
+  "${GUM}" style --foreground "${WIZARD_COLOR_YELLOW}" "⚠ $1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_error() {
-  "${GUM}" style --foreground "${WIZARD_COLOR_RED}" --bold "✗ $1" >/dev/tty
+  "${GUM}" style --foreground "${WIZARD_COLOR_RED}" --bold "✗ $1" >"${WIZARD_DISPLAY}"
 }
 
 wizard_choose() {
@@ -76,7 +83,7 @@ wizard_choose() {
   local subtitle="$2"
   local selected="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}" >/dev/tty
+  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
   if [[ -n "${selected}" ]]; then
     "${GUM}" choose --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected}" "$@" < /dev/tty
   else
@@ -89,7 +96,7 @@ wizard_choose_multi() {
   local subtitle="$2"
   local selected_csv="${3:-}"
   shift 3
-  wizard_header "${title}" "${subtitle}" >/dev/tty
+  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
   "${GUM}" choose --no-limit --cursor.foreground "${WIZARD_COLOR_BLUE}" --selected "${selected_csv}" "$@" < /dev/tty
 }
 
@@ -99,7 +106,7 @@ wizard_input() {
   local value="$3"
   local placeholder="$4"
   local mask="${5:-false}"
-  wizard_header "${title}" "${subtitle}" >/dev/tty
+  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
   if [[ "${mask}" == "true" ]]; then
     "${GUM}" input --password --value "${value}" --placeholder "${placeholder}" < /dev/tty
   else
@@ -112,7 +119,7 @@ wizard_confirm() {
   local subtitle="$2"
   local prompt="$3"
   local default_yes="${4:-false}"
-  wizard_header "${title}" "${subtitle}" >/dev/tty
+  wizard_header "${title}" "${subtitle}" >"${WIZARD_DISPLAY}"
   if [[ "${default_yes}" == "true" ]]; then
     "${GUM}" confirm --default=yes "${prompt}" < /dev/tty
   else
