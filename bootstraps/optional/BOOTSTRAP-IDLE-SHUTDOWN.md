@@ -586,55 +586,6 @@ cat /tmp/loki-idle-check.log
 
 ---
 
-## Step 5 — Create Wake IAM User (Optional CLI Fallback)
-
-For waking the instance from a CLI without the web link. Use an AWS CLI profile — never hardcode credentials in scripts.
-
-```bash
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-INSTANCE_ID="YOUR_INSTANCE_ID"
-
-aws iam create-policy --policy-name loki-wakeup-policy --policy-document "{
-  \"Version\": \"2012-10-17\",
-  \"Statement\": [{
-    \"Effect\": \"Allow\",
-    \"Action\": [\"ec2:StartInstances\"],
-    \"Resource\": \"arn:aws:ec2:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}\"
-  },{
-    \"Effect\": \"Allow\",
-    \"Action\": \"ec2:DescribeInstances\",
-    \"Resource\": \"*\"
-  }]
-}"
-
-aws iam create-user --user-name loki-wakeup
-aws iam attach-user-policy --user-name loki-wakeup \
-  --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/loki-wakeup-policy"
-aws iam create-access-key --user-name loki-wakeup
-```
-
-Configure a named profile on your local machine:
-
-```bash
-aws configure --profile loki-wake
-# Enter the access key and secret from above
-```
-
-Then wake with:
-
-```bash
-aws ec2 start-instances --instance-ids YOUR_INSTANCE_ID --profile loki-wake --region us-east-1
-```
-
-Store credentials in Secrets Manager for reference:
-```bash
-aws secretsmanager create-secret \
-  --name "openclaw/loki-wakeup-credentials" \
-  --secret-string '{"access_key_id":"...","secret_access_key":"...","instance_id":"...","region":"us-east-1"}'
-```
-
----
-
 ## Security
 
 **Wake link security layers:**
