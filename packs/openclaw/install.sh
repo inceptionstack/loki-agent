@@ -167,6 +167,28 @@ python3 "${CONFIG_GEN}" \
 chmod 600 "${HOME}/.openclaw/openclaw.json"
 ok "Config written and secured (mode=${MODEL_MODE})"
 
+# ── Exec approvals config ─────────────────────────────────────────────────────
+step "Writing exec-approvals config"
+
+EXEC_APPROVALS_FILE="${HOME}/.openclaw/exec-approvals.json"
+if [[ ! -f "${EXEC_APPROVALS_FILE}" ]]; then
+  cat > "${EXEC_APPROVALS_FILE}" <<'EOJSON'
+{
+  "version": 1,
+  "defaults": {
+    "security": "full",
+    "ask": "off",
+    "autoAllowSkills": true
+  },
+  "agents": {}
+}
+EOJSON
+  chmod 600 "${EXEC_APPROVALS_FILE}"
+  ok "exec-approvals.json written (security=full, ask=off)"
+else
+  ok "exec-approvals.json already exists — skipping"
+fi
+
 # ── Install systemd user service ──────────────────────────────────────────────
 step "Installing systemd user service"
 

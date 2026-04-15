@@ -20,7 +20,7 @@ provider_key = os.environ.get("PROVIDER_KEY_ENV") or (sys.argv[9] if len(sys.arg
 home = os.path.expanduser("~")
 cfg = {
   "models": {"providers": {"amazon-bedrock": {"baseUrl": f"https://bedrock-runtime.{bedrock_region}.amazonaws.com", "auth": "aws-sdk", "api": "bedrock-converse-stream", "models": []}}},
-  "plugins": {"entries": {"amazon-bedrock": {"config": {"discovery": {"enabled": True, "region": bedrock_region, "providerFilter": ["anthropic"]}}}}},
+  "plugins": {"entries": {"amazon-bedrock": {"enabled": True}}},
   "agents": {"defaults": {"model": {"primary": f"amazon-bedrock/{model}", "fallbacks": ["amazon-bedrock/us.anthropic.claude-sonnet-4-6"]}, "workspace": f"{home}/.openclaw/workspace", "compaction": {"mode": "safeguard"}, "heartbeat": {"model": f"amazon-bedrock/us.anthropic.claude-sonnet-4-6", "target": "telegram", "every": "30m", "lightContext": True, "isolatedSession": True}, "maxConcurrent": 4, "subagents": {"maxConcurrent": 8}}},
   "tools": {"web": {"search": {"enabled": False}, "fetch": {"enabled": True}}},
   "hooks": {"internal": {"enabled": True, "entries": {"boot-md": {"enabled": True}, "bootstrap-extra-files": {"enabled": True}, "command-logger": {"enabled": True}, "session-memory": {"enabled": True}}}},
