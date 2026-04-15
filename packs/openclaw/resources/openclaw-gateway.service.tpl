@@ -11,6 +11,7 @@ KillMode=process
 Environment="HOME=${USER_HOME}"
 Environment="PATH=${USER_HOME}/.local/bin:${USER_HOME}/.local/share/mise/installs/node/current/bin:${NODE_PREFIX}/bin:/usr/local/bin:/usr/bin:/bin"
 Environment=AWS_PROFILE=default
+Environment=AWS_REGION=${AWS_DEFAULT_REGION}
 Environment=AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
 Environment=OPENCLAW_GATEWAY_PORT=${GW_PORT}
 Environment=OPENCLAW_GATEWAY_TOKEN=${GW_TOKEN}
