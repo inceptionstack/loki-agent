@@ -8,7 +8,7 @@
 > **TL;DR — deploy Loki:**
 >
 > ```sh
-> curl -sfL loki.run | bash
+> curl -sfL install.loki.run | bash
 > ```
 >
 > Works in **bash**, **zsh**, and **AWS CloudShell**. The installer walks you through pack, profile, and deploy method interactively.
@@ -18,19 +18,19 @@
 > **One-liner examples (non-interactive):**
 > ```sh
 > # Full builder agent (can create/modify/delete AWS resources)
-> curl -sfL loki.run | bash -s -- -y --pack openclaw --profile builder
+> curl -sfL install.loki.run | bash -s -- -y --pack openclaw --profile builder
 >
 > # Read-only advisor (can see everything, change nothing)
-> curl -sfL loki.run | bash -s -- -y --pack openclaw --profile account_assistant
+> curl -sfL install.loki.run | bash -s -- -y --pack openclaw --profile account_assistant
 >
 > # Personal assistant (Bedrock only, no AWS access)
-> curl -sfL loki.run | bash -s -- -y --pack claude-code --profile personal_assistant
+> curl -sfL install.loki.run | bash -s -- -y --pack claude-code --profile personal_assistant
 >
 > # Sandboxed personal assistant (NemoClaw — isolated in OpenShell sandbox)
-> curl -sfL loki.run | bash -s -- -y --pack nemoclaw --profile personal_assistant
+> curl -sfL install.loki.run | bash -s -- -y --pack nemoclaw --profile personal_assistant
 >
 > # Kiro CLI agent (AWS agentic IDE — requires interactive login after deploy)
-> curl -sfL loki.run | bash -s -- -y --pack kiro-cli --profile builder
+> curl -sfL install.loki.run | bash -s -- -y --pack kiro-cli --profile builder
 > ```
 >
 > Requires: AWS CLI + admin access on a **dedicated sandbox account**.
@@ -45,7 +45,7 @@
 
 ### Step 1: Install Loki
 
-Run `curl -sfL loki.run | bash` — the installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
+Run `curl -sfL install.loki.run | bash` — the installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
 
 **CLI flags for non-interactive deploys:**
 
