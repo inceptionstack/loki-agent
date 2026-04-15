@@ -2,6 +2,25 @@
 
 > **Purpose:** Automatically shut down the EC2 instance when the user has been idle for over 1 hour. Sends a Telegram warning with a **one-tap wake link** before shutdown. Fully independent of the OpenClaw gateway — runs via systemd timer.
 
+```mermaid
+flowchart LR
+    subgraph EC2["EC2 Instance"]
+        Timer["systemd timer\n(every 5 min)"] --> Script["idle-check.sh"]
+        Script -->|"idle > 1h"| SSM_PUT["SSM: store\none-time token"]
+        SSM_PUT --> TG_ALERT["Telegram:\nalert + wake link"]
+        Script -->|"still idle\n5 min later"| SHUTDOWN["shutdown -h now"]
+    end
+
+    subgraph AWS["AWS (works while EC2 is off)"]
+        APIGW["API Gateway"] --> Lambda
+        Lambda -->|"validate token"| SSM_GET["SSM Parameter\nStore"]
+        Lambda -->|"notify"| TG_WAKE["Telegram:\nstarting up"]
+        Lambda -->|"start"| EC2_START["ec2:StartInstances"]
+    end
+
+    User["👤 User taps\nwake link"] --> APIGW
+```
+
 ---
 
 ## How It Works
