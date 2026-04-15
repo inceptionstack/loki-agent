@@ -529,6 +529,18 @@ chmod 700 "${OC_HOME}/.openclaw/workspace"
 chown ec2-user:ec2-user "${OC_HOME}/.openclaw/workspace"
 ok "Workspace ready"
 
+# ---- AWS CLI default profile (so SDK finds region without needing IMDS) ----
+step "AWS CLI Config"
+mkdir -p "${OC_HOME}/.aws"
+cat > "${OC_HOME}/.aws/config" <<AWSCFG
+[default]
+region = ${REGION}
+output = json
+AWSCFG
+chmod 600 "${OC_HOME}/.aws/config"
+chown -R ec2-user:ec2-user "${OC_HOME}/.aws"
+ok "AWS CLI default profile set (region=${REGION})"
+
 # ---- Enable linger for ec2-user (allows user systemd services to survive logout) ----
 step "Enable Linger"
 loginctl enable-linger ec2-user
