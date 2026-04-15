@@ -624,6 +624,97 @@ cat /tmp/loki-idle-check.log
 
 ---
 
+## Smoke Tests
+
+Run these 5 tests after installation to verify the full system works end-to-end.
+
+```bash
+#!/bin/bash
+# smoke-test-idle-shutdown.sh — Run all 5 checks, report pass/fail
+set -uo pipefail
+REGION="us-east-1"
+PASS=0; FAIL=0
+result() { if [ "$1" -eq 0 ]; then echo "  ✅ PASS"; ((PASS++)); else echo "  ❌ FAIL"; ((FAIL++)); fi; }
+
+echo "=== Idle Shutdown Smoke Tests ==="
+echo ""
+
+# 1. Python helper finds user messages in session JSONL
+echo "1. Python helper — latest user timestamp"
+TS=$(python3 ~/.openclaw/workspace/idle-check.py --latest-ts ~/.openclaw/agents/main/sessions 2>/dev/null)
+if [[ "$TS" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T ]]; then
+  echo "  Last user message: $TS"
+  result 0
+else
+  echo "  Got: '$TS'"
+  result 1
+fi
+
+# 2. SSM token round-trip — write, read, delete
+echo "2. SSM token round-trip"
+TEST_TOKEN="smoke-test-$(date +%s)"
+aws ssm put-parameter --name "/openclaw/wake-token" --value "$TEST_TOKEN" \
+  --type String --overwrite --region "$REGION" > /dev/null 2>&1
+READ_BACK=$(aws ssm get-parameter --name "/openclaw/wake-token" --region "$REGION" \
+  --query Parameter.Value --output text 2>/dev/null)
+aws ssm delete-parameter --name "/openclaw/wake-token" --region "$REGION" > /dev/null 2>&1
+if [[ "$READ_BACK" == "$TEST_TOKEN" ]]; then
+  echo "  Write→Read→Delete: matched"
+  result 0
+else
+  echo "  Expected '$TEST_TOKEN', got '$READ_BACK'"
+  result 1
+fi
+
+# 3. Telegram credentials fetchable from SSM
+echo "3. Telegram credentials from SSM"
+TG_TOKEN=$(aws ssm get-parameter --name "/openclaw/wake-config/telegram-bot-token" \
+  --with-decryption --region "$REGION" --query Parameter.Value --output text 2>/dev/null)
+TG_CHAT=$(aws ssm get-parameter --name "/openclaw/wake-config/telegram-chat-id" \
+  --region "$REGION" --query Parameter.Value --output text 2>/dev/null)
+if [[ -n "$TG_TOKEN" && -n "$TG_CHAT" ]]; then
+  echo "  Bot token: ${TG_TOKEN:0:8}... Chat ID: $TG_CHAT"
+  result 0
+else
+  echo "  Missing: token=${TG_TOKEN:+set} chat=${TG_CHAT:+set}"
+  result 1
+fi
+
+# 4. Wake Lambda responds via API Gateway
+echo "4. Wake Lambda via API Gateway"
+WAKE_URL=$(grep 'WAKE_LAMBDA_URL=' ~/.openclaw/workspace/loki-idle-check.sh \
+  | head -1 | sed 's/.*="//;s/"//')
+RESP=$(curl -sf "${WAKE_URL}?token=smoke-test-invalid" 2>/dev/null \
+  | grep -oP '<h2>\K[^<]+')
+if [[ "$RESP" == "Invalid Token" ]]; then
+  echo "  Response: '$RESP' (correct rejection)"
+  result 0
+else
+  echo "  Expected 'Invalid Token', got: '$RESP'"
+  result 1
+fi
+
+# 5. Full idle-check script runs without error
+echo "5. Full idle-check script execution"
+LINES_BEFORE=$(wc -l < /tmp/loki-idle-check.log 2>/dev/null || echo 0)
+bash ~/.openclaw/workspace/loki-idle-check.sh 2>/dev/null
+LINES_AFTER=$(wc -l < /tmp/loki-idle-check.log 2>/dev/null || echo 0)
+NEW_LINE=$(tail -1 /tmp/loki-idle-check.log 2>/dev/null)
+if [[ "$LINES_AFTER" -gt "$LINES_BEFORE" && "$NEW_LINE" =~ idle= ]]; then
+  echo "  $NEW_LINE"
+  result 0
+else
+  echo "  No new log entry written"
+  result 1
+fi
+
+echo ""
+echo "=== Results: $PASS passed, $FAIL failed ==="
+[[ $FAIL -eq 0 ]] && echo "🐺 All smoke tests passed!" || echo "⚠️  Some tests failed — review above."
+```
+
+---
+
 ## Notes
 
 - The timer is **completely independent of OpenClaw** — if the gateway crashes, idle shutdown still works
