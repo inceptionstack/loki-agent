@@ -686,11 +686,11 @@ WAKE_URL=$(grep 'WAKE_LAMBDA_URL=' ~/.openclaw/workspace/loki-idle-check.sh \
   | head -1 | sed 's/.*="//;s/"//')
 RESP=$(curl -sf "${WAKE_URL}?token=smoke-test-invalid" 2>/dev/null \
   | grep -oP '<h2>\K[^<]+')
-if [[ "$RESP" == "Invalid Token" ]]; then
+if [[ "$RESP" == "Invalid Token" || "$RESP" == "Expired" ]]; then
   echo "  Response: '$RESP' (correct rejection)"
   result 0
 else
-  echo "  Expected 'Invalid Token', got: '$RESP'"
+  echo "  Expected 'Invalid Token' or 'Expired', got: '$RESP'"
   result 1
 fi
 
