@@ -170,7 +170,9 @@ ok "Config written and secured (mode=${MODEL_MODE})"
 # ── Exec approvals config ─────────────────────────────────────────────────────
 step "Writing exec-approvals config"
 
-EXEC_APPROVALS_FILE="${HOME}/.openclaw/exec-approvals.json"
+# Resolve real path to avoid symlink traversal issues with exec sandbox
+EXEC_APPROVALS_DIR="$(readlink -f "${HOME}/.openclaw" 2>/dev/null || echo "${HOME}/.openclaw")"
+EXEC_APPROVALS_FILE="${EXEC_APPROVALS_DIR}/exec-approvals.json"
 if [[ ! -f "${EXEC_APPROVALS_FILE}" ]]; then
   cat > "${EXEC_APPROVALS_FILE}" <<'EOJSON'
 {
