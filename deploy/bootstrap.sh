@@ -494,36 +494,39 @@ fi
 # Use bind mount instead of symlink: OpenClaw's exec sandbox refuses to
 # traverse symlinks in the state dir path, breaking all exec tool calls.
 step "Data Volume Mount"
+OC_HOME="/home/ec2-user"
 if [ -d /mnt/ebs-data ]; then
   mkdir -p /mnt/ebs-data/.openclaw
   # If .openclaw is already a symlink from a previous install, remove it
-  if [ -L "${HOME}/.openclaw" ]; then
-    rm -f "${HOME}/.openclaw"
+  if [ -L "${OC_HOME}/.openclaw" ]; then
+    rm -f "${OC_HOME}/.openclaw"
   fi
   # If .openclaw is a real dir with content, migrate to data volume
-  if [ -d "${HOME}/.openclaw" ]; then
-    cp -a "${HOME}/.openclaw/"* /mnt/ebs-data/.openclaw/ 2>/dev/null || true
-    rm -rf "${HOME}/.openclaw"
+  if [ -d "${OC_HOME}/.openclaw" ]; then
+    cp -a "${OC_HOME}/.openclaw/"* /mnt/ebs-data/.openclaw/ 2>/dev/null || true
+    rm -rf "${OC_HOME}/.openclaw"
   fi
-  mkdir -p "${HOME}/.openclaw"
+  mkdir -p "${OC_HOME}/.openclaw"
   # Bind mount so .openclaw is a real directory, not a symlink
-  if ! mountpoint -q "${HOME}/.openclaw"; then
-    mount --bind /mnt/ebs-data/.openclaw "${HOME}/.openclaw"
+  if ! mountpoint -q "${OC_HOME}/.openclaw"; then
+    mount --bind /mnt/ebs-data/.openclaw "${OC_HOME}/.openclaw"
   fi
   # Persist in fstab for reboots
   if ! grep -q "ebs-data/.openclaw" /etc/fstab; then
-    echo "/mnt/ebs-data/.openclaw ${HOME}/.openclaw none bind 0 0" >> /etc/fstab
+    echo "/mnt/ebs-data/.openclaw ${OC_HOME}/.openclaw none bind 0 0" >> /etc/fstab
   fi
-  chmod 700 "${HOME}/.openclaw"
-  chown ec2-user:ec2-user "${HOME}/.openclaw"
+  chmod 700 "${OC_HOME}/.openclaw"
+  chown ec2-user:ec2-user "${OC_HOME}/.openclaw"
   ok "Bind-mounted .openclaw -> /mnt/ebs-data/.openclaw"
 else
-  mkdir -p "${HOME}/.openclaw"
-  chmod 700 "${HOME}/.openclaw"
-  chown ec2-user:ec2-user "${HOME}/.openclaw"
+  mkdir -p "${OC_HOME}/.openclaw"
+  chmod 700 "${OC_HOME}/.openclaw"
+  chown ec2-user:ec2-user "${OC_HOME}/.openclaw"
   info "No data volume — using local .openclaw"
 fi
-sudo -u ec2-user bash -c 'mkdir -p "${HOME}/.openclaw/workspace" && chmod 700 "${HOME}/.openclaw/workspace"'
+mkdir -p "${OC_HOME}/.openclaw/workspace"
+chmod 700 "${OC_HOME}/.openclaw/workspace"
+chown ec2-user:ec2-user "${OC_HOME}/.openclaw/workspace"
 ok "Workspace ready"
 
 # ---- Enable linger for ec2-user (allows user systemd services to survive logout) ----
