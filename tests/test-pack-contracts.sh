@@ -208,6 +208,22 @@ for pack in "${PACKS[@]}"; do
   fi
 done
 
+# ── Contract 5b: registry.json is in sync with registry.yaml ─────────────────
+# The YAML is the source of truth; the JSON is generated. Run scripts/sync-registry
+# to regenerate. This contract catches manual edits to registry.json that drift
+# from the YAML (and catches missing per-pack fields).
+header "Contract: registry.json is in sync with registry.yaml"
+
+if [[ -x "${SCRIPT_DIR}/scripts/sync-registry" ]]; then
+  if bash "${SCRIPT_DIR}/scripts/sync-registry" --check >/dev/null 2>&1; then
+    pass "registry.json matches registry.yaml (run: bash scripts/sync-registry)"
+  else
+    fail "registry.json is OUT OF SYNC with registry.yaml — run: bash scripts/sync-registry"
+  fi
+else
+  skip "scripts/sync-registry not found"
+fi
+
 # ── Contract 6: health_check in manifest (warning only) ─────────────────────
 header "Contract: health_check defined (recommended)"
 

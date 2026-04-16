@@ -55,6 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install test prereqs
+        run: python3 -m pip install --quiet pyyaml
+
       - name: Run ${{ matrix.test }}
         run: |
           chmod +x "${{ matrix.test }}"

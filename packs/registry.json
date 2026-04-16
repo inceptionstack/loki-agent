@@ -15,9 +15,22 @@
       "description": "OpenAI-compatible Bedrock proxy (systemd daemon on localhost)",
       "order": 0
     },
+    "claude-code": {
+      "type": "agent",
+      "description": "Claude Code — Anthropic's coding agent with native Bedrock support",
+      "deps": [],
+      "instance_type": "t4g.large",
+      "root_volume_gb": 40,
+      "data_volume_gb": 0,
+      "default_model": "us.anthropic.claude-sonnet-4-6",
+      "ports": {},
+      "brain": false,
+      "claude_code": false,
+      "experimental": false
+    },
     "openclaw": {
       "type": "agent",
-      "description": "OpenClaw -- stateful AI agent with persistent gateway",
+      "description": "OpenClaw — stateful AI agent with persistent gateway",
       "deps": [
         "bedrockify"
       ],
@@ -34,7 +47,7 @@
     },
     "hermes": {
       "type": "agent",
-      "description": "Hermes -- NousResearch CLI agent via bedrockify (experimental)",
+      "description": "Hermes — NousResearch CLI agent via bedrockify (experimental)",
       "deps": [
         "bedrockify"
       ],
@@ -49,7 +62,7 @@
     },
     "pi": {
       "type": "agent",
-      "description": "Pi -- minimal terminal coding harness (experimental)",
+      "description": "Pi — minimal terminal coding harness (experimental)",
       "deps": [
         "bedrockify"
       ],
@@ -64,7 +77,7 @@
     },
     "ironclaw": {
       "type": "agent",
-      "description": "IronClaw -- Rust-based AI agent by NEAR AI (experimental)",
+      "description": "IronClaw — Rust-based AI agent by NEAR AI (experimental)",
       "deps": [
         "bedrockify"
       ],
@@ -79,7 +92,7 @@
     },
     "nemoclaw": {
       "type": "agent",
-      "description": "NemoClaw -- OpenClaw in sandboxed OpenShell with Bedrock inference",
+      "description": "NemoClaw — OpenClaw in sandboxed OpenShell with Bedrock inference",
       "deps": [
         "bedrockify"
       ],
@@ -98,7 +111,7 @@
     },
     "kiro-cli": {
       "type": "agent",
-      "description": "Kiro CLI -- AWS agentic IDE terminal client with MCP server support (experimental)",
+      "description": "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)",
       "deps": [],
       "instance_type": "t4g.medium",
       "root_volume_gb": 40,
@@ -108,18 +121,19 @@
       "claude_code": false,
       "experimental": true
     },
-    "claude-code": {
+    "codex-cli": {
       "type": "agent",
-      "description": "Claude Code — Anthropic's coding agent with native Bedrock support",
+      "description": "Codex CLI — OpenAI's coding agent (builder profile, authenticate post-deploy)",
       "deps": [],
-      "instance_type": "t4g.large",
+      "instance_type": "t4g.medium",
       "root_volume_gb": 40,
       "data_volume_gb": 0,
-      "default_model": "us.anthropic.claude-sonnet-4-6",
+      "default_model": "gpt-5.4",
       "ports": {},
       "brain": false,
       "claude_code": false,
-      "experimental": false
+      "experimental": true,
+      "requires_openai_key": true
     }
   }
 }

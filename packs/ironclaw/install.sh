@@ -161,15 +161,10 @@ fi
 # Configure pg_hba.conf for local peer authentication (ec2-user can connect)
 PG_HBA="${PG_DATA}/pg_hba.conf"
 if ! sudo grep -q "^local.*${IC_DB_NAME}.*${IC_DB_USER}" "${PG_HBA}" 2>/dev/null; then
-  log "Configuring pg_hba.conf for local peer + TCP trust auth..."
+  log "Configuring pg_hba.conf for local peer auth..."
   # Add before the first 'local' line: allow ec2-user to connect to ironclaw db
   sudo sed -i "/^local/i local   ${IC_DB_NAME}   ${IC_DB_USER}                              peer" "${PG_HBA}" 2>/dev/null \
     || echo "local   ${IC_DB_NAME}   ${IC_DB_USER}                              peer" | sudo tee -a "${PG_HBA}" >/dev/null
-  # IronClaw connects via TCP (DATABASE_URL=postgresql://...@localhost) — need trust for 127.0.0.1
-  if ! sudo grep -q "^host.*${IC_DB_NAME}.*${IC_DB_USER}.*trust" "${PG_HBA}" 2>/dev/null; then
-    sudo sed -i "/^host.*all.*all.*127.0.0.1/i host    ${IC_DB_NAME}   ${IC_DB_USER}   127.0.0.1/32                    trust" "${PG_HBA}" 2>/dev/null \
-      || echo "host    ${IC_DB_NAME}   ${IC_DB_USER}   127.0.0.1/32                    trust" | sudo tee -a "${PG_HBA}" >/dev/null
-  fi
 fi
 
 # Start PostgreSQL
