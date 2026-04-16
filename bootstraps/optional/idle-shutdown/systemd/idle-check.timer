@@ -1,0 +1,11 @@
+[Unit]
+Description=Agent idle check timer — every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

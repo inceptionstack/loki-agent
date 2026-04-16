@@ -1,0 +1,8 @@
+[Unit]
+Description=Agent idle check — shutdown if user is away for over 30 min
+
+[Service]
+Type=oneshot
+User=ec2-user
+ExecStart=/bin/bash /home/ec2-user/.openclaw/workspace/idle-check.sh
+TimeoutSec=30
