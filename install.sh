@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Loki Agent — One-Shot Installer
+# Lowkey Agent — One-Shot Installer
 # Usage: curl -sfL https://raw.githubusercontent.com/inceptionstack/loki-agent/main/install.sh -o /tmp/loki-install.sh && bash /tmp/loki-install.sh
 # Flags: --non-interactive / -y  Accept all defaults, minimal prompts
 #        --pack <name>           Pre-select agent pack (e.g. --pack claude-code, --pack openclaw)
@@ -419,7 +419,7 @@ run_or_fail() {
 ssm_connect_cmd() {
   local target="${1:-\$INSTANCE_ID}"
   local cmd="aws ssm start-session --target ${target}"
-  local doc_name="${SSM_DOC_NAME:-Loki-Session-${PACK_NAME:-openclaw}}"
+  local doc_name="${SSM_DOC_NAME:-Lowkey-Session-${PACK_NAME:-openclaw}}"
   if [[ -n "$doc_name" ]] && aws ssm describe-document --name "$doc_name" --region "$DEPLOY_REGION" &>/dev/null 2>&1; then
     cmd+=" --document-name ${doc_name}"
   fi
@@ -443,11 +443,12 @@ show_banner() {
 
   echo ""
   echo ""
-  echo -e "  ${CYAN}    __          __    _ ${NC}"
-  echo -e "  ${CYAN}   / /   ____  / /__ (_)${NC}"
-  echo -e "  ${BLUE}  / /   / __ \\/ //_// / ${NC}"
-  echo -e "  ${BLUE} / /___/ /_/ / ,< / /  ${NC}"
-  echo -e "  ${MAGENTA}/_____/\\____/_/|_/_/   ${NC}"
+  echo -e "  ${CYAN}    __                    __              ${NC}"
+  echo -e "  ${CYAN}   / /   ____  _      __ / /__ ___   __  __${NC}"
+  echo -e "  ${BLUE}  / /   / __ \\| | /| / // //_// _ \\ / / / /${NC}"
+  echo -e "  ${BLUE} / /___/ /_/ /| |/ |/ // ,<  /  __// /_/ / ${NC}"
+  echo -e "  ${MAGENTA}/_____/\\____/ |__/|__//_/|_| \\___/ \\__, /  ${NC}"
+  echo -e "  ${MAGENTA}                                   /____/   ${NC}"
   echo ""
   echo -e "  ${DIM}AWS Agent Installer  ${version_line}${NC}"
   echo ""
@@ -492,7 +493,7 @@ preflight_checks() {
   echo ""
 
   if [[ "$INSTALL_MODE" != "simple" ]]; then
-    warn "Loki will get AdministratorAccess on this ENTIRE account."
+    warn "Lowkey will get AdministratorAccess on this ENTIRE account."
     warn "Use a dedicated sandbox account — never deploy in production."
     echo ""
     confirm_or_abort "Deploy to account ${ACCOUNT_ID} in ${REGION}?" "default_yes"
@@ -521,7 +522,7 @@ check_vpc_quota() {
   if [[ $remaining -le 0 ]]; then
     echo ""
     echo -e "  ${RED}VPC quota reached: ${vpc_count}/${vpc_limit} VPCs in ${check_region}${NC}"
-    echo "  Loki needs 1 VPC. You have none remaining."
+    echo "  Lowkey needs 1 VPC. You have none remaining."
     echo ""
     if confirm "Request a VPC quota increase (+5) now?" "default_yes"; then
       local request_id
@@ -545,7 +546,7 @@ check_vpc_quota() {
     fi
   elif [[ $remaining -le 1 ]]; then
     warn "VPC quota is tight: ${vpc_count}/${vpc_limit} VPCs in ${check_region} (${remaining} remaining)"
-    echo "  Loki needs 1 VPC."
+    echo "  Lowkey needs 1 VPC."
     if confirm "Request a quota increase (+5) as a precaution?" ; then
       aws service-quotas request-service-quota-increase \
         --service-code vpc --quota-code L-F678F1CE \
@@ -576,7 +577,7 @@ check_permissions() {
 check_existing_deployments() {
   local check_region="${DEPLOY_REGION:-$REGION}"
   echo ""
-  info "Checking for existing Loki deployments in ${check_region}..."
+  info "Checking for existing Lowkey deployments in ${check_region}..."
   local vpcs
   vpcs=$(aws ec2 describe-vpcs \
     --filters "Name=tag:loki:managed,Values=true" \
@@ -586,7 +587,7 @@ check_existing_deployments() {
 
   if [[ -n "$vpcs" ]]; then
     local count; count=$(echo "$vpcs" | wc -l | tr -d ' ')
-    warn "Found ${count} existing Loki deployment(s) in this account/region:"
+    warn "Found ${count} existing Lowkey deployment(s) in this account/region:"
     echo ""
     local -a vpc_ids=()
     while IFS=$'\t' read -r vpc_id watermark method name; do
@@ -669,7 +670,7 @@ check_existing_deployments() {
       confirm_or_abort "Continue with a new deployment (new VPC)?"
     fi
   else
-    ok "No existing Loki deployments found"
+    ok "No existing Lowkey deployments found"
   fi
 }
 
@@ -1511,7 +1512,7 @@ ensure_terraform_available() {
     warn "Terraform is not installed on this system."
   fi
   echo ""
-  echo "  Loki can install Terraform locally now (no root/sudo required)."
+  echo "  Lowkey can install Terraform locally now (no root/sudo required)."
   echo "  This works in AWS CloudShell, EC2, macOS, and most Linux environments."
   echo ""
   if confirm "Install Terraform locally?" "default_yes"; then
@@ -1679,10 +1680,10 @@ terraform_apply() {
 }
 
 # ============================================================================
-# Ensure Loki-Session SSM document exists (instance-scoped, not account-wide)
+# Ensure Lowkey-Session SSM document exists (instance-scoped, not account-wide)
 ensure_ssm_session_document() {
   # Build pack-specific document name to avoid collisions between different agents
-  SSM_DOC_NAME="Loki-Session-${PACK_NAME}"
+  SSM_DOC_NAME="Lowkey-Session-${PACK_NAME}"
 
   # Source pack profile to get the correct TUI command for this agent
   local pack_profile="${CLONE_DIR}/packs/${PACK_NAME}/resources/shell-profile.sh"
@@ -1735,7 +1736,7 @@ ensure_ssm_session_document() {
 # ============================================================================
 wait_for_bootstrap() {
   step "Bootstrap"
-  info "Waiting for Loki to bootstrap..."
+  info "Waiting for Lowkey to bootstrap..."
   echo -e "  ${DIM}Instance: ${INSTANCE_ID}  |  IP: ${PUBLIC_IP}${NC}"
   echo ""
 
@@ -1835,14 +1836,14 @@ wait_for_bootstrap() {
         if [[ -n "$current_step" ]]; then
           echo -e "  ${GREEN}✓${NC} ${current_step}  ${DIM}[${boot_elapsed_str}]${NC}"
         fi
-        ok "Loki is ready! ${DIM}(${boot_elapsed_str})${NC}"
+        ok "Lowkey is ready! ${DIM}(${boot_elapsed_str})${NC}"
         return
       fi
     fi
 
     sleep 10
   done
-  warn "Bootstrap check timed out — Loki may still be starting up"
+  warn "Bootstrap check timed out — Lowkey may still be starting up"
 }
 
 show_complete() {
