@@ -1104,9 +1104,25 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType DefaultModel ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type default_model model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch)
 PARAM_VALUES=()  # populated by build_deploy_params()
+
+# Per-pack default model (passed to CFN DefaultModel / bootstrap.sh --model).
+# Packs that use AWS Bedrock get Bedrock model IDs; packs that use provider
+# APIs (OpenAI, etc.) get provider-native model IDs. Without this mapping
+# every pack inherits the template's Bedrock default, which breaks codex-cli
+# (OpenAI rejects Bedrock ids with HTTP 400).
+pack_default_model() {
+  case "$1" in
+    codex-cli)                     echo "gpt-5.4" ;;
+    openclaw|claude-code|kiro-cli) echo "us.anthropic.claude-opus-4-6-v1" ;;
+    nemoclaw)                      echo "us.anthropic.claude-opus-4-6-v1" ;;
+    hermes)                        echo "NousResearch/Hermes-3-Llama-3.1-8B" ;;
+    pi|ironclaw)                   echo "us.anthropic.claude-opus-4-6-v1" ;;
+    *)                             echo "us.anthropic.claude-opus-4-6-v1" ;;
+  esac
+}
 
 # Populate PARAM_VALUES from user config (call after collect_config)
 build_deploy_params() {
@@ -1115,6 +1131,7 @@ build_deploy_params() {
     "$PACK_NAME"
     "$PROFILE_NAME"
     "$INSTANCE_TYPE"
+    "${DEFAULT_MODEL:-$(pack_default_model "$PACK_NAME")}"
     "bedrock"
     "$DEPLOY_REGION"
     "$LOKI_WATERMARK"
