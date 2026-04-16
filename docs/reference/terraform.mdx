@@ -18,6 +18,18 @@ deploy/terraform/
 
 ## Quick deploy
 
+The lowkey installer runs Terraform for you when you pick "Terraform" as the deploy method:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack openclaw --profile builder \
+  --method terraform
+```
+
+The installer calls `terraform init` → `validate` → `apply -auto-approve` under `deploy/terraform/`. If you want to review the plan before it runs, use the direct path below instead.
+
+### Running Terraform directly
+
 ```bash
 git clone https://github.com/inceptionstack/lowkey.git
 cd lowkey/deploy/terraform
@@ -29,15 +41,15 @@ terraform apply \
   -var="environment_name=my-openclaw"
 ```
 
-Or use the top-level installer and select Terraform as the deploy method — it builds the `terraform apply` command for you and prints it; you run it yourself so you can review the plan.
+This gives you the usual `plan` → inspect → `apply` loop with no auto-approve.
 
 ## Key variables
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `pack_name` | string | `openclaw` | Which pack to install |
-| `profile_name` | string | `builder` | Which IAM profile |
-| `environment_name` | string | required | Prefix for all resources |
+| `profile_name` | string | *(required)* | Which IAM profile. No default — **must be set**. Valid: `builder` / `account_assistant` / `personal_assistant`. |
+| `environment_name` | string | *(required)* | Prefix for all resources |
 | `instance_type` | string | `t4g.xlarge` | EC2 type (arm64) |
 | `default_model` | string | per-pack | Default model ID |
 | `model_mode` | string | `bedrock` | `bedrock` / `litellm` / `api-key` |

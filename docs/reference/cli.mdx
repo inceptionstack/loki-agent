@@ -63,7 +63,7 @@ curl -sfL install.lowkey.run | bash -s -- -y \
   --method terraform
 ```
 
-The installer prints `terraform init` / `apply` commands for you — it doesn't run Terraform itself (assumes you want to review state + plan).
+The installer runs Terraform for you under `deploy/terraform/` — `init` → `validate` → `apply -auto-approve`. If you want a review-first flow, use Terraform directly (see [Deploy with Terraform](/reference/terraform)).
 
 ## Advanced mode flags
 

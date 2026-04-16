@@ -111,6 +111,35 @@ while [[ $# -gt 0 ]]; do
       fi
       KIRO_FROM_SECRET="$2"; shift 2 ;;
     --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
+    --help|-h)
+      cat <<'USAGE'
+Usage: install.sh [OPTIONS]
+
+Deploy a self-hosted AI coding agent to your AWS account.
+
+Options:
+  -y, --non-interactive, --yes   Accept defaults; skip prompts
+  --simple                       Force simple install mode
+  --advanced                     Force advanced install mode
+  --pack <name>                  Agent pack (openclaw, claude-code, codex-cli,
+                                 kiro-cli, nemoclaw, hermes, pi, ironclaw)
+  --profile <name>               Permission profile (builder,
+                                 account_assistant, personal_assistant)
+  --method <cfn|terraform|tf>    Deploy method (default: cfn)
+  --kiro-from-secret <id|arn>    Secrets Manager id/arn for Kiro API key
+                                 (kiro-cli headless mode)
+  --debug-in-repo                Dev-only: run installer from cwd
+  -h, --help                     Show this help and exit
+
+Examples:
+  curl -sfL install.lowkey.run | bash
+  curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile builder
+  curl -sfL install.lowkey.run | bash -s -- -y --pack kiro-cli --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+
+Docs: https://github.com/inceptionstack/lowkey/tree/main/docs
+USAGE
+      exit 0 ;;
     *) shift ;;
   esac
 done
@@ -1128,7 +1157,10 @@ pack_default_model() {
     kiro-cli)                 echo "kiro-cloud" ;;  # Kiro uses its own inference; value is informational only
     openclaw|claude-code)     echo "us.anthropic.claude-opus-4-6-v1" ;;
     nemoclaw)                 echo "us.anthropic.claude-opus-4-6-v1" ;;
-    hermes)                   echo "NousResearch/Hermes-3-Llama-3.1-8B" ;;
+    # hermes depends on bedrockify; 'model' is the Bedrock id bedrockify
+    # proxies to (NOT the Hermes-specific model ID, which is a separate
+    # 'hermes-model' param on the pack).
+    hermes)                   echo "us.anthropic.claude-opus-4-6-v1" ;;
     pi|ironclaw)              echo "us.anthropic.claude-opus-4-6-v1" ;;
     *)                        echo "us.anthropic.claude-opus-4-6-v1" ;;
   esac
