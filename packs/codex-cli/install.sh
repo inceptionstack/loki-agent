@@ -22,8 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../common.sh
 source "${SCRIPT_DIR}/../common.sh"
 
-# Pin version for reproducible installs
-CODEX_CLI_VERSION="latest"
+# Codex CLI npm version — defaults to "latest" (opt-in auto-upgrade on re-run).
+# Override with env CODEX_CLI_VERSION="1.2.3" for reproducible / pinned installs.
+CODEX_CLI_VERSION="${CODEX_CLI_VERSION:-latest}"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
@@ -62,9 +63,11 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)   usage; exit 0 ;;
-    --region)    PACK_ARG_REGION="$2"; shift 2 ;;
-    --model)     PACK_ARG_MODEL="$2";  shift 2 ;;
-    *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
+    --region)    PACK_ARG_REGION="${2:?--region requires a value}"; shift 2 ;;
+    --model)     PACK_ARG_MODEL="${2:?--model requires a value}";  shift 2 ;;
+    --)          shift; break ;;
+    -*)          echo "error: unknown option: $1" >&2; usage >&2; exit 2 ;;
+    *)           echo "error: unexpected positional argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -115,6 +118,31 @@ import os, sys, re
 path = sys.argv[1]
 model = os.environ.get("PACK_MODEL", "gpt-5.4")
 
+# TOML-escape the model value (basic-string rules):
+#   https://toml.io/en/v1.0.0#string
+# Newlines/CR are not legal in basic strings — reject up front instead of
+# silently emitting invalid TOML.
+if "\n" in model or "\r" in model:
+    sys.stderr.write(f"error: model value contains newline: {model!r}\n")
+    sys.exit(2)
+
+def toml_escape(s: str) -> str:
+    out = []
+    for ch in s:
+        code = ord(ch)
+        if ch == "\\":   out.append("\\\\")
+        elif ch == '"':  out.append('\\"')
+        elif ch == "\t": out.append("\\t")
+        elif ch == "\b": out.append("\\b")
+        elif ch == "\f": out.append("\\f")
+        elif code < 0x20 or code == 0x7f:
+            out.append(f"\\u{code:04X}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+model_escaped = toml_escape(model)
+
 # Managed block sentinels — preserve user edits outside this block.
 # Block is placed at TOP of file (before any [tables]) so bare keys stay
 # at the top-level scope and aren't accidentally scoped into a table.
@@ -125,7 +153,7 @@ MANAGED_KEYS = ("model", "approval_policy", "sandbox_mode")
 managed = f"""{START}
 # Keys below are managed by packs/codex-cli/install.sh (builder agent).
 # Edits inside this block will be overwritten on pack re-run.
-model = "{model}"
+model = "{model_escaped}"
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
 {END}
@@ -136,9 +164,15 @@ if os.path.exists(path):
     with open(path) as f:
         existing = f.read()
 
-# Strip any previous managed block
-managed_re = re.compile(re.escape(START) + r".*?" + re.escape(END) + r"\n?", re.DOTALL)
-without_managed = managed_re.sub("", existing)
+# Strip any previous managed block. The inner pattern `(?:(?!START).)*?`
+# refuses to cross a second START sentinel, so a stray sentinel in user
+# content can't collapse a large region, and we only remove the FIRST
+# well-formed block.
+managed_re = re.compile(
+    re.escape(START) + r"(?:(?!" + re.escape(START) + r").)*?" + re.escape(END) + r"\n?",
+    re.DOTALL,
+)
+without_managed = managed_re.sub("", existing, count=1)
 
 # Strip top-level assignments of managed keys from user content (before first [table]).
 lines = without_managed.splitlines()
