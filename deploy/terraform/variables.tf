@@ -163,6 +163,12 @@ variable "provider_api_key" {
   description = "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
 }
 
+variable "kiro_from_secret" {
+  type        = string
+  default     = ""
+  description = "AWS Secrets Manager secret id/arn whose SecretString is the Kiro API key (kiro-cli pack, headless mode). The raw key is NOT stored in Terraform state — the instance resolves the secret at install time via its IAM role."
+}
+
 variable "request_quota_increases" {
   type        = string
   default     = "false"

@@ -10,6 +10,7 @@ export LITELLM_BASE_URL="${litellm_base_url}"
 export LITELLM_API_KEY="${litellm_api_key}"
 export LITELLM_MODEL="${litellm_model}"
 export PROVIDER_API_KEY="${provider_api_key}"
+export KIRO_FROM_SECRET="${kiro_from_secret}"
 export PACK_NAME="${pack_name}"
 export PROFILE_NAME="${profile_name}"
 
@@ -45,4 +46,5 @@ bash /tmp/loki-agent/deploy/bootstrap.sh \
   --litellm-base-url "$LITELLM_BASE_URL" \
   --litellm-api-key "$LITELLM_API_KEY" \
   --litellm-model "$LITELLM_MODEL" \
-  --provider-api-key "$PROVIDER_API_KEY"
+  --provider-api-key "$PROVIDER_API_KEY" \
+  --kiro-from-secret "$KIRO_FROM_SECRET"

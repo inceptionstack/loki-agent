@@ -101,6 +101,15 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       PRESELECT_PROFILE="$2"; shift 2 ;;
+    --kiro-from-secret)
+      # Secrets Manager id/arn whose SecretString is the Kiro API key.
+      # Only the secret *reference* passes through CFN/TF state; the raw key
+      # is resolved on the instance at install time via its IAM role.
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --kiro-from-secret requires a Secrets Manager id or arn" >&2
+        exit 1
+      fi
+      KIRO_FROM_SECRET="$2"; shift 2 ;;
     --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
     *) shift ;;
   esac
@@ -1104,8 +1113,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType DefaultModel ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type default_model model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType DefaultModel ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch KiroFromSecret)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type default_model model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch kiro_from_secret)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Per-pack default model (passed to CFN DefaultModel / bootstrap.sh --model).
@@ -1145,6 +1154,7 @@ build_deploy_params() {
     "${EXISTING_VPC_ID:-}"
     "${EXISTING_SUBNET_ID:-}"
     "$REPO_BRANCH"
+    "${KIRO_FROM_SECRET:-}"
   )
   # Validate parallel arrays are in sync
   [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \

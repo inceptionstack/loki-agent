@@ -18,11 +18,8 @@ params:
   - name: region
     description: "AWS region (informational; Kiro CLI uses its own cloud inference)"
     default: us-east-1
-  - name: kiro-api-key
-    description: "Kiro API key for headless mode (v2+). Skips browser login. Get one at https://app.kiro.dev. Prefer --from-secret for production."
-    default: ""
   - name: from-secret
-    description: "AWS Secrets Manager secret id/arn whose value is the Kiro API key (alternative to --kiro-api-key)"
+    description: "AWS Secrets Manager secret id/arn whose SecretString is the Kiro API key (v2 headless mode). The raw key is NEVER stored in deploy state — the instance resolves the secret at install time via its IAM role. Get a key at https://app.kiro.dev."
     default: ""
 
 health_check:

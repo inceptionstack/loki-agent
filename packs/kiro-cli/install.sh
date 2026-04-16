@@ -3,17 +3,18 @@
 #
 # Usage:
 #   ./install.sh [--region us-east-1]
-#                [--kiro-api-key KEY | --from-secret SECRET_ID]
+#                [--from-secret SECRET_ID_OR_ARN]
 #
 # Kiro CLI v2 supports two auth modes:
-#   1. Headless (preferred for automation): set KIRO_API_KEY env var.
+#   1. Headless (no browser): set KIRO_API_KEY env var. This pack can
+#      resolve a Secrets Manager secret for you via --from-secret.
 #      Get a key at https://app.kiro.dev (account settings).
 #   2. Interactive (browser-based SSO):
 #      kiro-cli login --use-device-flow
 #
-# If you pass --kiro-api-key (or --from-secret pointing at a Secrets Manager
-# secret containing the key), this pack will wire KIRO_API_KEY into the
-# ec2-user environment so Kiro CLI picks it up automatically on login.
+# We deliberately do NOT document a --kiro-api-key flag that takes the
+# key inline on argv — that leaks to shell history and /proc/<pid>/cmdline.
+# Use --from-secret (preferred) or set KIRO_API_KEY in ~/.kiro/env yourself.
 #
 # Idempotent: safe to re-run.
 
@@ -26,8 +27,9 @@ source "${SCRIPT_DIR}/../common.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PACK_ARG_REGION="$(pack_config_get region "us-east-1")"
-PACK_ARG_API_KEY="$(pack_config_get kiro-api-key "")"
 PACK_ARG_FROM_SECRET="$(pack_config_get from-secret "")"
+# Hidden legacy flag: accepted but discouraged (argv-leak risk).
+PACK_ARG_API_KEY="$(pack_config_get kiro-api-key "")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -42,13 +44,12 @@ Kiro CLI v2 can run in two modes:
   2. Interactive (browser-based SSO)        — uses 'kiro-cli login --use-device-flow'
 
 Options:
-  --region          AWS region (informational only; Kiro uses its own inference)
-                    (default: us-east-1)
-  --kiro-api-key    API key for headless mode. Written to ~/.kiro/env and
-                    /etc/profile.d/kiro-cli.sh so Kiro CLI picks it up.
-  --from-secret     AWS Secrets Manager secret id/arn whose value is the
-                    Kiro API key (alternative to --kiro-api-key).
-  --help            Show this help message
+  --region         AWS region (informational only; Kiro uses its own inference)
+                   (default: us-east-1)
+  --from-secret    AWS Secrets Manager secret id/arn whose SecretString is the
+                   Kiro API key. The pack writes it to ~/.kiro/env (0600) so
+                   Kiro CLI picks it up automatically. Preferred for automation.
+  --help           Show this help message
 
 Post-install authentication:
   Without API key:  kiro-cli login --use-device-flow   # browser SSO
@@ -57,8 +58,13 @@ Post-install authentication:
 Examples:
   ./install.sh
   ./install.sh --region eu-west-1
-  ./install.sh --kiro-api-key kro_xxxxx
   ./install.sh --from-secret /faststart/kiro-api-key
+
+SECURITY NOTE:
+  Don't pass raw API keys on the command line. Store your key in AWS
+  Secrets Manager and pass --from-secret SECRET_ID. If a key does end
+  up on argv (e.g. via the hidden --kiro-api-key flag, still accepted
+  for back-compat), this script warns about the leak path.
 EOF
 }
 
@@ -71,7 +77,13 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 && "$2" != -* ]] || { echo "error: --region requires a value" >&2; exit 2; }
       PACK_ARG_REGION="$2"; shift 2 ;;
     --kiro-api-key)
+      # Hidden legacy flag. Accept but warn: passing secrets on argv leaks
+      # them into shell history and /proc/<pid>/cmdline. Prefer --from-secret.
       [[ $# -ge 2 ]] || { echo "error: --kiro-api-key requires a value" >&2; exit 2; }
+      # Refuse values that look like another flag — catches typos like
+      # '--kiro-api-key --from-secret foo' which would otherwise set the
+      # key to the literal string '--from-secret'.
+      case "$2" in -*) echo "error: --kiro-api-key value must not start with '-' (got: $2)" >&2; exit 2 ;; esac
       PACK_ARG_API_KEY="$2"; shift 2 ;;
     --from-secret)
       [[ $# -ge 2 && "$2" != -* ]] || { echo "error: --from-secret requires a value" >&2; exit 2; }
@@ -79,16 +91,13 @@ while [[ $# -gt 0 ]]; do
     --model)
       # Kiro CLI uses its own cloud inference — models are selected inside
       # the CLI via /model. Any --model passed in from the generic bootstrap
-      # path is safely ignored. 'kiro-cloud' is our sentinel from install.sh
-      # for clarity; real Bedrock ids are also tolerated for back-compat.
-      if [[ $# -ge 2 && "$2" != -* ]]; then
-        if [[ "$2" != "kiro-cloud" ]]; then
-          log "ignoring --model '$2' — Kiro CLI uses its own cloud inference (select via /model inside the CLI)"
-        fi
-        shift 2
-      else
-        shift
-      fi ;;
+      # path is safely ignored. 'kiro-cloud' is the sentinel from install.sh
+      # for clarity; real model ids are tolerated with an informational log.
+      [[ $# -ge 2 && "$2" != -* ]] || { echo "error: --model requires a value" >&2; exit 2; }
+      if [[ "$2" != "kiro-cloud" ]]; then
+        log "ignoring --model '$2' — Kiro CLI uses its own cloud inference (select via /model inside the CLI)"
+      fi
+      shift 2 ;;
     --)
       shift; break ;;
     -*)
@@ -100,19 +109,37 @@ done
 
 REGION="${PACK_ARG_REGION}"
 
+# Mutex: can't use both auth paths — treat as bad-args (exit 2) to match
+# the style of the rest of the parser.
+if [[ -n "${PACK_ARG_API_KEY}" && -n "${PACK_ARG_FROM_SECRET}" ]]; then
+  echo "error: --kiro-api-key and --from-secret are mutually exclusive" >&2
+  exit 2
+fi
+
+# Warn when a secret came in via argv — there's nothing we can do about
+# the leak that already happened, but the operator should know and rotate.
+if [[ -n "${PACK_ARG_API_KEY}" ]]; then
+  warn "KIRO_API_KEY received via --kiro-api-key (argv). This value is"
+  warn "likely visible in the invoking shell's history and was briefly in"
+  warn "/proc/<pid>/cmdline. Consider rotating and switching to --from-secret."
+fi
+
 # Resolve --from-secret → KIRO_API_KEY
 if [[ -n "${PACK_ARG_FROM_SECRET}" ]]; then
-  if [[ -n "${PACK_ARG_API_KEY}" ]]; then
-    fail "cannot use --kiro-api-key and --from-secret together"
-  fi
   log "Resolving Kiro API key from Secrets Manager: ${PACK_ARG_FROM_SECRET}"
-  if ! PACK_ARG_API_KEY="$(aws secretsmanager get-secret-value \
+  # Use JSON output rather than --output text: an empty SecretString with
+  # --output text returns the literal string 'None', which would pass a
+  # naive non-empty check and get written as the "key".
+  SECRET_JSON="$(aws secretsmanager get-secret-value \
         --secret-id "${PACK_ARG_FROM_SECRET}" \
         --region "${REGION}" \
-        --query SecretString --output text 2>/dev/null)"; then
-    fail "failed to read secret ${PACK_ARG_FROM_SECRET} in ${REGION}. Check IAM perms and secret id."
+        --output json 2>&1)" || {
+    fail "failed to read secret ${PACK_ARG_FROM_SECRET} in ${REGION}. Check IAM perms and secret id. AWS said: ${SECRET_JSON}"
+  }
+  PACK_ARG_API_KEY="$(printf '%s' "${SECRET_JSON}" | jq -r 'if (.SecretString // "") == "" then empty else .SecretString end')"
+  if [[ -z "${PACK_ARG_API_KEY}" ]]; then
+    fail "secret ${PACK_ARG_FROM_SECRET} has no SecretString payload (binary secret? empty value?). Refusing to proceed."
   fi
-  [[ -n "${PACK_ARG_API_KEY}" ]] || fail "secret ${PACK_ARG_FROM_SECRET} is empty"
 fi
 
 pack_banner "kiro-cli"
@@ -126,6 +153,10 @@ fi
 # ── Prerequisites ─────────────────────────────────────────────────────────────
 step "Checking prerequisites"
 require_cmd curl python3
+# jq is needed for --from-secret path but not for interactive mode.
+if [[ -n "${PACK_ARG_FROM_SECRET}" ]]; then
+  require_cmd jq
+fi
 
 # ── Step 1: Install Kiro CLI ──────────────────────────────────────────────────
 step "Installing Kiro CLI via upstream installer (stable channel → latest)"
@@ -149,11 +180,16 @@ fi
 KIROCLI_VERSION="$(kiro-cli --version 2>/dev/null || echo unknown)"
 ok "Kiro CLI installed: ${KIROCLI_VERSION}"
 
-# Verify v2+ (required for --no-interactive / KIRO_API_KEY headless mode)
+# Verify v2+ (required for --no-interactive / KIRO_API_KEY headless mode).
 # Version strings look like: "kiro-cli 2.0.0" — tolerate any whitespace/prefix.
+# Warn explicitly on both too-old and too-new: this pack is tested against v2.
 KIROCLI_MAJOR="$(printf '%s' "${KIROCLI_VERSION}" | grep -oE '[0-9]+\.[0-9]+' | head -1 | cut -d. -f1)"
-if [[ -n "${KIROCLI_MAJOR}" && "${KIROCLI_MAJOR}" -lt 2 ]]; then
-  warn "Kiro CLI v${KIROCLI_MAJOR} detected — this pack is designed for v2+. Headless mode may not work."
+if [[ -n "${KIROCLI_MAJOR}" ]]; then
+  if (( KIROCLI_MAJOR < 2 )); then
+    warn "Kiro CLI v${KIROCLI_MAJOR} detected — this pack is designed for v2+. Headless mode may not work."
+  elif (( KIROCLI_MAJOR > 2 )); then
+    warn "Kiro CLI v${KIROCLI_MAJOR} detected — this pack has been tested against v2. Auth/env semantics may have changed; verify before trusting in production."
+  fi
 fi
 
 # ── Step 2: Install MCP server prerequisites ──────────────────────────────────
@@ -221,24 +257,30 @@ if [[ -n "${PACK_ARG_API_KEY}" ]]; then
   KIRO_USER_HOME="$(getent passwd "${KIRO_USER}" | cut -d: -f6 2>/dev/null || echo "/home/${KIRO_USER}")"
   KIRO_ENV_FILE="${KIRO_USER_HOME}/.kiro/env"
 
-  mkdir -p "$(dirname "${KIRO_ENV_FILE}")"
-
-  # Write key to a dedicated env file, 0600. Prefer this over /etc/environment
-  # so the secret isn't readable by other users.
-  umask 077
-  printf 'export KIRO_API_KEY=%q\n' "${PACK_ARG_API_KEY}" > "${KIRO_ENV_FILE}"
-  umask 022
+  # Create with restrictive umask so the intermediate directory never
+  # briefly exposes the key path as world-readable before chmod runs.
+  ( umask 077
+    mkdir -p "$(dirname "${KIRO_ENV_FILE}")"
+    # Write key to a dedicated env file. Use %q so shell metachars, newlines,
+    # quotes etc. in the key cannot break the source step.
+    printf 'export KIRO_API_KEY=%q\n' "${PACK_ARG_API_KEY}" > "${KIRO_ENV_FILE}"
+  )
   chmod 600 "${KIRO_ENV_FILE}"
   chown -R "${KIRO_USER}:${KIRO_USER}" "$(dirname "${KIRO_ENV_FILE}")" 2>/dev/null || true
 
-  # Source it from ec2-user's .bash_profile so interactive + non-interactive
-  # SSH / SSM sessions both see it. Idempotent — only appended once.
+  # Source it from ec2-user's .bash_profile so interactive + SSM-shell
+  # sessions both see it. Idempotent: only appended once, matched by an
+  # exact marker comment + source line so re-runs don't stack duplicates.
   KIRO_PROFILE="${KIRO_USER_HOME}/.bash_profile"
+  KIRO_SRC_MARKER='# lowkey-kiro-cli-env-source'
   KIRO_SRC_LINE='[[ -f ~/.kiro/env ]] && source ~/.kiro/env'
-  if ! grep -qxF "${KIRO_SRC_LINE}" "${KIRO_PROFILE}" 2>/dev/null; then
-    echo "" >> "${KIRO_PROFILE}"
-    echo "# Load KIRO_API_KEY (headless mode) — managed by lowkey kiro-cli pack" >> "${KIRO_PROFILE}"
-    echo "${KIRO_SRC_LINE}" >> "${KIRO_PROFILE}"
+  if ! grep -qxF "${KIRO_SRC_MARKER}" "${KIRO_PROFILE}" 2>/dev/null; then
+    {
+      echo ""
+      echo "${KIRO_SRC_MARKER}"
+      echo "# Load KIRO_API_KEY (headless mode) — managed by lowkey kiro-cli pack"
+      echo "${KIRO_SRC_LINE}"
+    } >> "${KIRO_PROFILE}"
     chown "${KIRO_USER}:${KIRO_USER}" "${KIRO_PROFILE}" 2>/dev/null || true
   fi
 
@@ -265,8 +307,9 @@ if [[ -n "${PACK_ARG_API_KEY}" ]]; then
     /model                                 # Select model (inside CLI)
     /tools                                 # List MCP tools (inside CLI)
 
-  Key storage: ~/.kiro/env (0600)
-  Rotate via: --from-secret /your/secret OR edit ~/.kiro/env
+  Key storage: ~/.kiro/env (0600, ec2-user:ec2-user)
+  Rotate via:  re-run the pack with --from-secret /your/secret
+               OR edit ~/.kiro/env manually
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 NOTICE
@@ -285,10 +328,13 @@ else
 
   ─ HEADLESS (no browser) ─
     Get an API key from https://app.kiro.dev (account settings),
-    then re-run this pack with --kiro-api-key KEY (or --from-secret
-    /path/in/secrets-manager), OR set KIRO_API_KEY yourself:
-      export KIRO_API_KEY="kro_xxx..."
-      echo 'export KIRO_API_KEY="kro_xxx..."' >> ~/.kiro/env
+    store it in AWS Secrets Manager, then re-run this pack with
+    --from-secret /path/in/secrets-manager.
+
+    To set it manually without re-running the pack:
+      mkdir -p ~/.kiro && chmod 700 ~/.kiro
+      ( umask 077; printf 'export KIRO_API_KEY=%q\n' "<key>" > ~/.kiro/env )
+      echo '[[ -f ~/.kiro/env ]] && source ~/.kiro/env' >> ~/.bash_profile
 
   Usage after auth:
     kiro-cli                              # Interactive TUI
@@ -303,7 +349,9 @@ else
 NOTICE
 fi
 
-# Install shell profile (aliases + banner)
+# Install shell profile (aliases + banner). The shipped profile no longer
+# hardcodes "interactive login required" — it branches on whether
+# ~/.kiro/env exists so the banner matches the actual auth mode.
 SHELL_PROFILE="${SCRIPT_DIR}/resources/shell-profile.sh"
 if [[ -f "${SHELL_PROFILE}" && -d /etc/profile.d ]]; then
   sudo cp "${SHELL_PROFILE}" /etc/profile.d/kiro-cli.sh 2>/dev/null && \

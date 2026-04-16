@@ -248,6 +248,11 @@ Parameters:
     NoEcho: true
     Description: "Direct API key from your AI provider (e.g. Anthropic). Only needed when Model Access Mode is 'api-key'."
 
+  KiroFromSecret:
+    Type: String
+    Default: ''
+    Description: "AWS Secrets Manager secret id/arn whose SecretString is the Kiro API key (kiro-cli pack only, headless mode). The raw key is NOT stored in this template — the instance resolves the secret at install time via its IAM role."
+
   EnableBedrockForm:
     Type: String
     Default: 'false'
@@ -1174,6 +1179,7 @@ Resources:
           export LITELLM_API_KEY="${LiteLLMApiKey}"
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
+          export KIRO_FROM_SECRET="${KiroFromSecret}"
           export PACK_NAME="${PackName}"
           export PROFILE_NAME="${ProfileName}"
           # Publish failure to SSM and signal CFN on any error
@@ -1214,7 +1220,8 @@ Resources:
             --litellm-base-url "$LITELLM_BASE_URL" \
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
-            --provider-api-key "$PROVIDER_API_KEY"
+            --provider-api-key "$PROVIDER_API_KEY" \
+            --kiro-from-secret "$KIRO_FROM_SECRET"
           # Signal CFN success — defense-in-depth: bootstrap.sh also signals,
           # but this catches edge cases where bootstrap.sh signal fails silently.
           # CFN ignores duplicate signals, so double-fire is safe.
