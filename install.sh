@@ -1115,12 +1115,13 @@ PARAM_VALUES=()  # populated by build_deploy_params()
 # (OpenAI rejects Bedrock ids with HTTP 400).
 pack_default_model() {
   case "$1" in
-    codex-cli)                     echo "gpt-5.4" ;;
-    openclaw|claude-code|kiro-cli) echo "us.anthropic.claude-opus-4-6-v1" ;;
-    nemoclaw)                      echo "us.anthropic.claude-opus-4-6-v1" ;;
-    hermes)                        echo "NousResearch/Hermes-3-Llama-3.1-8B" ;;
-    pi|ironclaw)                   echo "us.anthropic.claude-opus-4-6-v1" ;;
-    *)                             echo "us.anthropic.claude-opus-4-6-v1" ;;
+    codex-cli)                echo "gpt-5.4" ;;
+    kiro-cli)                 echo "kiro-cloud" ;;  # Kiro uses its own inference; value is informational only
+    openclaw|claude-code)     echo "us.anthropic.claude-opus-4-6-v1" ;;
+    nemoclaw)                 echo "us.anthropic.claude-opus-4-6-v1" ;;
+    hermes)                   echo "NousResearch/Hermes-3-Llama-3.1-8B" ;;
+    pi|ironclaw)              echo "us.anthropic.claude-opus-4-6-v1" ;;
+    *)                        echo "us.anthropic.claude-opus-4-6-v1" ;;
   esac
 }
 

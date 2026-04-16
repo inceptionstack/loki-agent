@@ -1,7 +1,7 @@
 name: kiro-cli
-version: "1.0.0"
+version: "2.0.0"
 type: agent
-description: "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)"
+description: "Kiro CLI v2 — AWS agentic IDE terminal client with MCP server support (experimental)"
 
 deps: []
 
@@ -18,6 +18,12 @@ params:
   - name: region
     description: "AWS region (informational; Kiro CLI uses its own cloud inference)"
     default: us-east-1
+  - name: kiro-api-key
+    description: "Kiro API key for headless mode (v2+). Skips browser login. Get one at https://app.kiro.dev. Prefer --from-secret for production."
+    default: ""
+  - name: from-secret
+    description: "AWS Secrets Manager secret id/arn whose value is the Kiro API key (alternative to --kiro-api-key)"
+    default: ""
 
 health_check:
   command: "kiro-cli --version"
