@@ -111,7 +111,7 @@
     },
     "kiro-cli": {
       "type": "agent",
-      "description": "Kiro CLI — AWS agentic IDE terminal client with MCP server support (experimental)",
+      "description": "Kiro CLI v2 — AWS agentic IDE terminal client with MCP server support (experimental, headless mode available via --kiro-api-key)",
       "deps": [],
       "instance_type": "t4g.medium",
       "root_volume_gb": 40,
