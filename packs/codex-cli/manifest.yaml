@@ -1,7 +1,7 @@
 name: codex-cli
 version: "1.0.0"
 type: agent
-description: "Codex CLI — OpenAI's coding agent (requires OpenAI API key)"
+description: "Codex CLI — OpenAI's coding agent (builder profile, authenticate post-deploy)"
 
 deps: []
 
@@ -16,17 +16,11 @@ requirements:
 
 params:
   - name: region
-    description: "AWS region (informational — Codex CLI uses OpenAI's API)"
+    description: "AWS region (informational — Codex CLI uses OpenAI's API, not Bedrock)"
     default: us-east-1
   - name: model
-    description: "Default model for Codex CLI"
+    description: "Default model for Codex CLI (see https://platform.openai.com/docs/models)"
     default: "gpt-5.4"
-  - name: openai-api-key
-    description: "OpenAI API key (required — get from platform.openai.com/api-keys)"
-    required: true
-  - name: sandbox
-    description: "Default sandbox mode: workspace-write or workspace-read"
-    default: "workspace-write"
 
 health_check:
   command: "codex --version"

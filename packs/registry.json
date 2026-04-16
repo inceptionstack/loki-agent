@@ -110,7 +110,7 @@
     },
     "claude-code": {
       "type": "agent",
-      "description": "Claude Code — Anthropic's coding agent with native Bedrock support",
+      "description": "Claude Code \u2014 Anthropic's coding agent with native Bedrock support",
       "deps": [],
       "instance_type": "t4g.large",
       "root_volume_gb": 40,
@@ -120,6 +120,18 @@
       "brain": false,
       "claude_code": false,
       "experimental": false
+    },
+    "codex-cli": {
+      "type": "agent",
+      "description": "Codex CLI -- OpenAI's coding agent (builder profile, experimental)",
+      "deps": [],
+      "instance_type": "t4g.medium",
+      "root_volume_gb": 40,
+      "data_volume_gb": 0,
+      "ports": {},
+      "brain": false,
+      "claude_code": false,
+      "experimental": true
     }
   }
 }

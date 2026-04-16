@@ -116,7 +116,7 @@ packs:
 
   codex-cli:
     type: agent
-    description: "Codex CLI — OpenAI's coding agent (requires OpenAI API key, experimental)"
+    description: "Codex CLI — OpenAI's coding agent (builder profile, authenticate post-deploy)"
     deps: []
     instance_type: t4g.medium
     root_volume_gb: 40
