@@ -93,7 +93,32 @@ if command -v codex &>/dev/null; then
   log "codex already installed (${CODEX_EXISTING}) — upgrading"
 fi
 
-npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
+# Resolve npm install strategy:
+#   1. If mise manages Node.js, activate it — npm prefix becomes user-owned.
+#   2. If npm prefix is already user-writable, install directly.
+#   3. Otherwise (system npm with root-owned prefix), fall back to sudo.
+NPM_PREFIX="$(npm prefix -g 2>/dev/null || echo /usr/local)"
+
+if [[ -x "${HOME}/.local/bin/mise" ]] && [[ ! -w "${NPM_PREFIX}" ]]; then
+  log "Activating mise to get a user-owned Node.js"
+  eval "$(${HOME}/.local/bin/mise activate bash 2>/dev/null)" || true
+  NPM_PREFIX="$(npm prefix -g 2>/dev/null || echo /usr/local)"
+fi
+
+if [[ -w "${NPM_PREFIX}" ]]; then
+  log "npm prefix is user-writable: ${NPM_PREFIX}"
+  npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
+else
+  # System npm with root-owned prefix. Fallback for standalone pack runs
+  # on hosts without mise. Use sudo and preserve PATH so sudo's npm
+  # resolves the same binary as ours.
+  warn "npm prefix ${NPM_PREFIX} is not user-writable — falling back to sudo"
+  warn "(install mise for rootless Node.js: curl -fsSL https://mise.run | sh)"
+  if ! sudo -n true 2>/dev/null; then
+    fail "npm install -g requires sudo but sudo is unavailable. Install mise and retry, or run this script as root."
+  fi
+  sudo --preserve-env=PATH npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
+fi
 
 # Add npm global bin to PATH for current session
 NPM_BIN="$(npm prefix -g)/bin"
