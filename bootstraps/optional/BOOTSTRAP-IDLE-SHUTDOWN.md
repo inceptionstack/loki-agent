@@ -1,21 +1,25 @@
-# BOOTSTRAP-IDLE-SHUTDOWN.md — Idle Shutdown for EC2 Agents
+# BOOTSTRAP-IDLE-SHUTDOWN.md — Idle Shutdown & Wake for EC2 Agents
 
-> **Purpose:** Automatically shut down the EC2 instance when the user has been idle for over 1 hour. Sends a Telegram warning with a **one-tap wake link** before shutdown. Fully independent of the OpenClaw gateway — runs via systemd timer.
+> **Purpose:** Automatically shut down the EC2 instance after 30 minutes of user inactivity. Sends a Telegram alert with a **one-tap wake link** before shutdown. EventBridge notifies you when the instance starts or stops, and auto-generates a fresh wake link on shutdown.
 
 ```mermaid
 flowchart LR
     subgraph EC2["EC2 Instance"]
         Timer["systemd timer\n(every 5 min)"] --> Script["idle-check.sh"]
-        Script -->|"idle > 1h"| SSM_PUT["SSM: store\none-time token"]
+        Script -->|"idle > 30m"| SSM_PUT["SSM: store\none-time token"]
         SSM_PUT --> TG_ALERT["Telegram:\nalert + wake link"]
-        Script -->|"still idle\n5 min later"| SHUTDOWN["shutdown -h now"]
+        Script -->|"still idle\n5 min later"| SHUTDOWN["ec2 stop-instances"]
     end
 
     subgraph AWS["AWS (works while EC2 is off)"]
-        APIGW["API Gateway"] --> Lambda
-        Lambda -->|"validate token"| SSM_GET["SSM Parameter\nStore"]
-        Lambda -->|"notify"| TG_WAKE["Telegram:\nstarting up"]
-        Lambda -->|"start"| EC2_START["ec2:StartInstances"]
+        EB["EventBridge"] -->|"stopped"| NotifyLambda["notify-lambda"]
+        EB -->|"running"| NotifyLambda
+        NotifyLambda -->|"🟢 / 🔴"| TG_NOTIFY["Telegram\nnotification"]
+        NotifyLambda -->|"if token used"| SSM_REGEN["SSM: regen\nwake token"]
+        APIGW["API Gateway"] --> WakeLambda["wake-lambda"]
+        WakeLambda -->|"validate token"| SSM_GET["SSM Parameter\nStore"]
+        WakeLambda -->|"notify"| TG_WAKE["Telegram:\nstarting up"]
+        WakeLambda -->|"start"| EC2_START["ec2:StartInstances"]
     end
 
     User["👤 User taps\nwake link"] --> APIGW
@@ -25,167 +29,49 @@ flowchart LR
 
 ## How It Works
 
-1. A systemd timer fires every 5 minutes
-2. It runs a bash script that reads the OpenClaw session JSONL files to find the last user message timestamp
-3. If idle > 1 hour: generates a one-time wake token, stores it in SSM Parameter Store, and sends a Telegram alert with a clickable wake link
-4. On the next run (5 min later), if still idle: `sudo shutdown -h now`
-5. If the instance was recently booted (< 15 min), shutdown is skipped — prevents the wake-then-immediately-re-shutdown race condition
-6. State is tracked in `memory/heartbeat-state.json` (`idleShutdownAlertSent` flag)
+### Idle Detection (on-instance)
 
-### Wake Link Flow
+1. A **systemd timer** fires every 5 minutes
+2. A bash script reads OpenClaw session JSONL files to find the last **real** user message
+3. Only messages with Telegram `sender_id` metadata count — heartbeat polls, system notifications, and memory flushes are excluded
+4. If idle > 30 min: generates a one-time UUID wake token, stores it in SSM, sends Telegram alert with wake link
+5. On the next run (5 min later), if still idle: shuts down via `aws ec2 stop-instances`
+6. If recently booted (< 15 min): shutdown is skipped to prevent the wake → immediate re-shutdown race
 
-```
-Idle script → generates UUID token → stores in SSM → sends Telegram with link
-User taps link → API Gateway → Lambda → validates token → sends Telegram "starting up" → starts EC2
-```
+### Wake Link (serverless, works while EC2 is off)
 
-- The wake link is **one-time use** — token is deleted after first use
-- If the instance is already running, the Lambda detects it and responds accordingly
-- Expired/invalid tokens show a friendly error page
+1. User taps wake link in Telegram → API Gateway → Wake Lambda
+2. Lambda validates the one-time token from SSM → deletes it → starts instance
+3. Guards against invalid states: rejects if instance is `running`, `stopping`, or `pending`
+4. Shows a styled HTML status page in the browser
+
+### EventBridge Notifications (serverless)
+
+1. **Instance starts** → Telegram notification: 🟢 Machine is up
+2. **Instance stops** → Telegram notification: 🔴 Machine is shut down + wake link
+3. On stop: if the wake token was already used, **auto-generates a fresh one** so you always have a valid wake link
 
 ---
 
 ## Prerequisites
 
-- EC2 instance with `sudo` access and an instance profile with `ssm:PutParameter` permission for `/openclaw/wake-token`
-- OpenClaw installed and configured with Telegram channel
-- Telegram bot token and your Telegram chat ID (numeric)
-- Python 3 available (`/usr/bin/python3`)
-- Deployment-time IAM permissions for creating Lambda, API Gateway, IAM roles, and SSM parameters
+- EC2 instance with an instance profile that has `ssm:PutParameter` permission
+- OpenClaw installed and configured with Telegram
+- Telegram bot token and your numeric chat ID
+- Python 3 on the instance
+- IAM permissions for creating Lambdas, API Gateway, EventBridge rules, and SSM parameters
 
 ---
 
-## Step 1 — Create the Python Helper
+## Step 1 — Store Configuration in SSM
 
-Save to `~/.openclaw/workspace/idle-check.py`:
-
-```python
-#!/usr/bin/env python3
-"""Helper for idle-check scripts — timestamp parsing, idle detection, state management."""
-import sys, json, os
-from datetime import datetime, timezone
-
-def parse_ts(ts):
-    """Parse ISO 8601 timestamps with or without fractional seconds."""
-    for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ'):
-        try:
-            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    return None
-
-def latest_user_ts(sessions_dir):
-    """Find the most recent user message timestamp across all session JSONL files."""
-    latest = None
-    for fname in os.listdir(sessions_dir):
-        if not fname.endswith('.jsonl') or '.checkpoint.' in fname:
-            continue
-        path = os.path.join(sessions_dir, fname)
-        try:
-            with open(path) as f:
-                for line in f:
-                    try:
-                        obj = json.loads(line)
-                        # Support both flat format (role at top level)
-                        # and nested format (role inside message object)
-                        role = obj.get('role') or (
-                            obj.get('message', {}).get('role')
-                            if isinstance(obj.get('message'), dict) else None
-                        )
-                        if role != 'user':
-                            continue
-                        ts = (obj.get('createdAt') or obj.get('timestamp')
-                              or obj.get('ts'))
-                        if ts and (latest is None or ts > latest):
-                            latest = ts
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-        except OSError:
-            pass
-    return latest
-
-def hours_idle(ts_str):
-    """Calculate hours between a timestamp and now."""
-    dt = parse_ts(ts_str)
-    if dt is None:
-        return None
-    return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-
-def get_state(state_file, key):
-    """Read a key from the JSON state file."""
-    try:
-        with open(state_file) as f:
-            return json.load(f).get(key, False)
-    except (OSError, json.JSONDecodeError):
-        return False
-
-def set_state(state_file, key, value):
-    """Write a key to the JSON state file."""
-    try:
-        with open(state_file) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    data[key] = value
-    with open(state_file, 'w') as f:
-        json.dump(data, f, indent=2)
-
-def get_uptime_hours():
-    """Get system uptime in hours from /proc/uptime."""
-    try:
-        with open('/proc/uptime') as f:
-            return float(f.read().split()[0]) / 3600
-    except (OSError, ValueError):
-        return 999  # assume long uptime if unreadable
-
-# --- CLI interface ---
-if __name__ == '__main__':
-    cmd = sys.argv[1]
-
-    if cmd == '--latest-ts':
-        sessions_dir = sys.argv[2]
-        ts = latest_user_ts(sessions_dir)
-        print(ts or '')
-
-    elif cmd == '--hours-idle':
-        h = hours_idle(sys.argv[2])
-        if h is None:
-            print('PARSE_ERROR')
-            sys.exit(1)
-        print(f'{h:.4f}')
-
-    elif cmd == '--should-shutdown':
-        idle_h = float(sys.argv[2])
-        threshold_h = float(sys.argv[3])
-        print('yes' if idle_h > threshold_h else 'no')
-
-    elif cmd == '--uptime-hours':
-        print(f'{get_uptime_hours():.4f}')
-
-    elif cmd == '--get-state':
-        print(str(get_state(sys.argv[2], sys.argv[3])).lower())
-
-    elif cmd == '--set-state':
-        val = sys.argv[4]
-        parsed = True if val == 'true' else False if val == 'false' else val
-        set_state(sys.argv[2], sys.argv[3], parsed)
-```
-
----
-
-## Step 2 — Deploy the Wake Lambda + API Gateway
-
-The wake link is powered by a Lambda behind an HTTP API Gateway. The Lambda validates the one-time token, notifies you on Telegram, and starts the instance.
-
-### 2.1 — Store Configuration in SSM
-
-All configuration is stored in SSM Parameter Store — nothing is hardcoded in the Lambda or the idle script:
+All config lives in SSM Parameter Store — nothing hardcoded in scripts or Lambda code.
 
 ```bash
-REGION="us-east-1"  # Set once, use everywhere
-INSTANCE_ID="YOUR_INSTANCE_ID"
-TELEGRAM_CHAT_ID="YOUR_NUMERIC_CHAT_ID"
-TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
+REGION="us-east-1"
+INSTANCE_ID="<your-instance-id>"
+TELEGRAM_CHAT_ID="<your-numeric-chat-id>"
+TELEGRAM_BOT_TOKEN="<your-bot-token>"
 
 aws ssm put-parameter --name "/openclaw/wake-config/instance-id" \
   --value "$INSTANCE_ID" --type String --overwrite --region "$REGION"
@@ -197,13 +83,349 @@ aws ssm put-parameter --name "/openclaw/wake-config/telegram-bot-token" \
   --value "$TELEGRAM_BOT_TOKEN" --type SecureString --overwrite --region "$REGION"
 ```
 
-### 2.2 — Create the Lambda IAM Role
+---
+
+## Step 2 — Python Helper
+
+Save to `~/.openclaw/workspace/idle-check.py`:
+
+```python
+#!/usr/bin/env python3
+"""idle-check.py — Timestamp parsing, idle detection, state management.
+
+Only counts REAL human messages (with Telegram sender metadata) as activity.
+Heartbeat polls, system notifications, and memory flushes are excluded.
+"""
+import sys, json, os
+from datetime import datetime, timezone
+
+
+def parse_ts(ts):
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ'):
+        try:
+            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
+
+
+_AUTOMATED_PREFIXES = (
+    'Read HEARTBEAT.md',
+    'System:',
+    'Pre-compaction memory flush',
+)
+
+def _is_real_user_message(text):
+    """Return True only for genuine human messages."""
+    if not text:
+        return False
+    if '"sender_id"' in text:
+        return True
+    for prefix in _AUTOMATED_PREFIXES:
+        if text.startswith(prefix):
+            return False
+    return False
+
+
+def _extract_text(obj):
+    msg = obj.get('message', {})
+    content = msg.get('content', []) if isinstance(msg, dict) else []
+    if isinstance(content, list) and content:
+        first = content[0]
+        return first.get('text', '') if isinstance(first, dict) else str(first)
+    elif isinstance(content, str):
+        return content
+    return ''
+
+
+def latest_user_ts(sessions_dir):
+    """Find the most recent real user message timestamp across session JSONL files."""
+    latest = None
+    for fname in os.listdir(sessions_dir):
+        if not fname.endswith('.jsonl') or '.checkpoint.' in fname:
+            continue
+        path = os.path.join(sessions_dir, fname)
+        try:
+            with open(path) as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                        msg = obj.get('message', {})
+                        role = msg.get('role') if isinstance(msg, dict) else obj.get('role')
+                        if role != 'user':
+                            continue
+                        text = _extract_text(obj)
+                        if not _is_real_user_message(text):
+                            continue
+                        ts = obj.get('createdAt') or obj.get('timestamp') or obj.get('ts')
+                        if ts and (latest is None or ts > latest):
+                            latest = ts
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+        except OSError:
+            pass
+    return latest
+
+
+def hours_idle(ts_str):
+    dt = parse_ts(ts_str)
+    if dt is None:
+        return None
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 3600
+
+
+def get_state(state_file, key):
+    try:
+        with open(state_file) as f:
+            return json.load(f).get(key, False)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def set_state(state_file, key, value):
+    """Atomic-ish write via tmp + rename."""
+    try:
+        with open(state_file) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        data = {}
+    data[key] = value
+    tmp = state_file + '.tmp'
+    with open(tmp, 'w') as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, state_file)
+
+
+def get_uptime_hours():
+    try:
+        with open('/proc/uptime') as f:
+            return float(f.read().split()[0]) / 3600
+    except (OSError, ValueError):
+        return 999
+
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: idle-check.py <command> [args...]", file=sys.stderr)
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd == '--latest-ts':
+        ts = latest_user_ts(sys.argv[2])
+        print(ts or '')
+    elif cmd == '--hours-idle':
+        h = hours_idle(sys.argv[2])
+        if h is None:
+            print('PARSE_ERROR')
+            sys.exit(1)
+        print(f'{h:.4f}')
+    elif cmd == '--should-shutdown':
+        print('yes' if float(sys.argv[2]) > float(sys.argv[3]) else 'no')
+    elif cmd == '--uptime-hours':
+        print(f'{get_uptime_hours():.4f}')
+    elif cmd == '--get-state':
+        print(str(get_state(sys.argv[2], sys.argv[3])).lower())
+    elif cmd == '--set-state':
+        val = sys.argv[4]
+        parsed = True if val == 'true' else False if val == 'false' else val
+        set_state(sys.argv[2], sys.argv[3], parsed)
+    else:
+        print(f"Unknown command: {cmd}", file=sys.stderr)
+        sys.exit(1)
+```
+
+---
+
+## Step 3 — Idle Check Script
+
+Save to `~/.openclaw/workspace/idle-check.sh`:
+
+```bash
+#!/bin/bash
+# idle-check.sh — Idle monitor (systemd timer, every 5 min)
+# Shuts down after 30 min of no real user messages.
+# Sends Telegram alert with one-time wake link before shutdown.
+#
+# Usage:
+#   ./idle-check.sh              # normal mode
+#   ./idle-check.sh --dry-run    # log what would happen, don't shutdown or alert
+set -euo pipefail
+
+# --- Config ---
+REGION="us-east-1"
+IDLE_THRESHOLD_HOURS=0.5       # 30 minutes
+MIN_UPTIME_HOURS=0.25          # skip if booted < 15 min ago
+LOG_MAX_LINES=500
+SSM_TOKEN_PARAM="/openclaw/wake-token"
+SSM_BOT_TOKEN_PARAM="/openclaw/wake-config/telegram-bot-token"
+SSM_CHAT_ID_PARAM="/openclaw/wake-config/telegram-chat-id"
+WAKE_LAMBDA_URL="<your-api-gateway-url>/wake"  # from Step 5
+
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+STATE_FILE="$HOME/.openclaw/workspace/memory/heartbeat-state.json"
+SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
+PY="$SCRIPT_DIR/idle-check.py"
+LOG="/tmp/idle-check.log"
+
+DRY_RUN=false
+[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
+
+# --- Helpers ---
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+
+truncate_log() {
+  if [[ -f "$LOG" ]] && (( $(wc -l < "$LOG") > LOG_MAX_LINES )); then
+    tail -n "$LOG_MAX_LINES" "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
+  fi
+}
+
+fetch_ssm() {
+  local param="$1"
+  local decrypt="${2:-false}"
+  if [[ "$decrypt" == "true" ]]; then
+    aws ssm get-parameter --name "$param" --region "$REGION" \
+      --query Parameter.Value --output text --with-decryption 2>/dev/null
+  else
+    aws ssm get-parameter --name "$param" --region "$REGION" \
+      --query Parameter.Value --output text 2>/dev/null
+  fi
+}
+
+send_telegram() {
+  local token="$1" chat_id="$2" text="$3"
+  python3 -c "
+import json, urllib.request
+data = json.dumps({'chat_id': '$chat_id', 'text': '''$text''', 'disable_web_page_preview': True}).encode()
+req = urllib.request.Request('https://api.telegram.org/bot$token/sendMessage', data=data, headers={'Content-Type': 'application/json'})
+urllib.request.urlopen(req)
+" >> "$LOG" 2>&1
+}
+
+# --- Main ---
+truncate_log
+
+if $DRY_RUN; then log "=== DRY RUN ==="; fi
+
+LATEST_TS=$(python3 "$PY" --latest-ts "$SESSIONS_DIR")
+if [[ -z "$LATEST_TS" ]]; then
+  log "ERROR: No user messages found in session logs."
+  exit 1
+fi
+
+HOURS_IDLE=$(python3 "$PY" --hours-idle "$LATEST_TS")
+if [[ "$HOURS_IDLE" == "PARSE_ERROR" ]]; then
+  log "ERROR: Could not parse timestamp: $LATEST_TS"
+  exit 1
+fi
+
+log "idle=${HOURS_IDLE}h last_msg=${LATEST_TS}"
+
+SHOULD_SHUTDOWN=$(python3 "$PY" --should-shutdown "$HOURS_IDLE" "$IDLE_THRESHOLD_HOURS")
+if [[ "$SHOULD_SHUTDOWN" != "yes" ]]; then
+  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent false
+  exit 0
+fi
+
+# Guard: skip if recently booted
+UPTIME_H=$(python3 "$PY" --uptime-hours)
+if (( $(echo "$UPTIME_H < $MIN_UPTIME_HOURS" | bc -l) )); then
+  log "SKIP: uptime=${UPTIME_H}h < ${MIN_UPTIME_HOURS}h — recently booted"
+  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent false
+  exit 0
+fi
+
+ALERT_SENT=$(python3 "$PY" --get-state "$STATE_FILE" idleShutdownAlertSent)
+
+if [[ "$ALERT_SENT" == "false" ]]; then
+  log "IDLE >${IDLE_THRESHOLD_HOURS}h — generating wake token"
+
+  if $DRY_RUN; then
+    log "DRY RUN: Would generate wake token, store in SSM, send Telegram alert"
+    exit 0
+  fi
+
+  WAKE_TOKEN=$(python3 -c "import uuid; print(uuid.uuid4())")
+  if ! aws ssm put-parameter --name "$SSM_TOKEN_PARAM" --value "$WAKE_TOKEN" \
+       --type String --overwrite --region "$REGION" > /dev/null 2>&1; then
+    log "ERROR: Failed to store wake token in SSM"
+    exit 1
+  fi
+
+  TG_TOKEN=$(fetch_ssm "$SSM_BOT_TOKEN_PARAM" true)
+  TG_CHAT=$(fetch_ssm "$SSM_CHAT_ID_PARAM")
+  if [[ -z "$TG_TOKEN" || -z "$TG_CHAT" ]]; then
+    log "ERROR: Failed to fetch Telegram credentials from SSM"
+    exit 1
+  fi
+
+  WAKE_LINK="${WAKE_LAMBDA_URL}?token=${WAKE_TOKEN}"
+  send_telegram "$TG_TOKEN" "$TG_CHAT" \
+    "🐺 Idle for over 30 min. Shutting down in ~5 min.\n\n👉 Tap to wake: ${WAKE_LINK}"
+
+  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent true
+  log "Alert sent. Will shutdown on next run."
+else
+  if $DRY_RUN; then
+    log "DRY RUN: Would shutdown NOW"
+    exit 0
+  fi
+
+  log "SHUTTING DOWN"
+  # Use instance metadata to get own instance ID
+  INSTANCE_ID=$(curl -sf -H "X-aws-ec2-metadata-token: $(curl -sf -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')" \
+    http://169.254.169.254/latest/meta-data/instance-id)
+  aws ec2 stop-instances --instance-ids "$INSTANCE_ID" --region "$REGION"
+fi
+```
+
+---
+
+## Step 4 — Systemd Timer
+
+```bash
+sudo tee /etc/systemd/system/idle-check.service << 'EOF'
+[Unit]
+Description=Agent idle check — shutdown if user is away for over 30 min
+
+[Service]
+Type=oneshot
+User=ec2-user
+ExecStart=/bin/bash /home/ec2-user/.openclaw/workspace/idle-check.sh
+TimeoutSec=30
+EOF
+
+sudo tee /etc/systemd/system/idle-check.timer << 'EOF'
+[Unit]
+Description=Agent idle check timer — every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now idle-check.timer
+```
+
+Verify: `sudo systemctl status idle-check.timer`
+
+---
+
+## Step 5 — Wake Lambda
+
+### 5.1 — IAM Role
 
 ```bash
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 
 aws iam create-role \
-  --role-name loki-wake-lambda-role \
+  --role-name wake-lambda-role \
   --assume-role-policy-document '{
     "Version": "2012-10-17",
     "Statement": [{
@@ -214,19 +436,19 @@ aws iam create-role \
   }'
 
 aws iam put-role-policy \
-  --role-name loki-wake-lambda-role \
+  --role-name wake-lambda-role \
   --policy-name wake-permissions \
   --policy-document "{
     \"Version\": \"2012-10-17\",
     \"Statement\": [
       {
         \"Effect\": \"Allow\",
-        \"Action\": [\"ec2:StartInstances\"],
-        \"Resource\": \"arn:aws:ec2:${REGION}:${ACCOUNT_ID}:instance/${INSTANCE_ID}\"
+        \"Action\": \"ec2:StartInstances\",
+        \"Resource\": \"arn:aws:ec2:${REGION}:${ACCOUNT_ID}:instance/<your-instance-id>\"
       },
       {
         \"Effect\": \"Allow\",
-        \"Action\": [\"ec2:DescribeInstanceStatus\"],
+        \"Action\": \"ec2:DescribeInstanceStatus\",
         \"Resource\": \"*\"
       },
       {
@@ -245,13 +467,12 @@ aws iam put-role-policy \
     ]
   }"
 
-# Wait for IAM propagation
-sleep 10
+sleep 10  # IAM propagation
 ```
 
-### 2.3 — Create the Lambda Function
+### 5.2 — Lambda Code
 
-Create a directory (e.g., `/tmp/wake-lambda/`) and save as `index.mjs`:
+Save as `index.mjs`:
 
 ```javascript
 import { SSMClient, GetParameterCommand, DeleteParameterCommand } from "@aws-sdk/client-ssm";
@@ -289,27 +510,26 @@ export const handler = async (event) => {
   const token = event.queryStringParameters?.token;
   if (!token) return html("Missing Token", "No wake token provided.", "❌");
 
-  // Validate token
   let stored;
   try {
     stored = await getParam(TOKEN_PARAM);
   } catch (e) {
-    if (e.name === "ParameterNotFound") return html("Expired", "This wake link has already been used or expired.", "⏰");
+    if (e.name === "ParameterNotFound")
+      return html("Expired", "This wake link has already been used or expired.", "⏰");
     throw e;
   }
   if (token !== stored) return html("Invalid Token", "This wake link is not valid.", "🚫");
 
-  // Token valid — consume it (one-time use)
+  // Consume the one-time token
   await ssm.send(new DeleteParameterCommand({ Name: TOKEN_PARAM }));
 
-  // Load config from SSM
   const [instanceId, chatId, botToken] = await Promise.all([
     getParam(CONFIG_PREFIX + "instance-id"),
     getParam(CONFIG_PREFIX + "telegram-chat-id"),
     getParam(CONFIG_PREFIX + "telegram-bot-token", true),
   ]);
 
-  // Check if already running
+  // Guard: only start if fully stopped
   try {
     const status = await ec2.send(new DescribeInstanceStatusCommand({
       InstanceIds: [instanceId], IncludeAllInstances: true
@@ -317,410 +537,287 @@ export const handler = async (event) => {
     const state = status.InstanceStatuses?.[0]?.InstanceState?.Name;
     if (state === "running") {
       await sendTelegram(botToken, chatId, "🐺 Already running — no action needed.");
-      return html("Already Running", "Instance is already up and running!", "✅");
+      return html("Already Running", "Instance is already up!", "✅");
     }
-  } catch (e) {
-    // Describe failed — proceed with start attempt anyway
-  }
+    if (state === "stopping") {
+      await sendTelegram(botToken, chatId, "🐺 Still shutting down. Wait a minute and try again.");
+      return html("Still Stopping", "Wait a moment and try the link again.", "⏳");
+    }
+    if (state === "pending") {
+      await sendTelegram(botToken, chatId, "🐺 Already starting up — hang tight.");
+      return html("Starting Up", "Already starting. Give it a minute.", "⏳");
+    }
+  } catch (e) { /* proceed anyway */ }
 
-  // Alert on Telegram first, then start
-  await sendTelegram(botToken, chatId, "🐺 Starting up now — should be ready in about 60 seconds.");
+  await sendTelegram(botToken, chatId, "🐺 Starting up — should be ready in ~60 seconds.");
 
   try {
     await ec2.send(new StartInstancesCommand({ InstanceIds: [instanceId] }));
   } catch (e) {
     if (!e.message?.includes("cannot be started")) throw e;
-    // Already starting/running — that's fine
   }
 
   return html("Waking Up! 🐺", "Instance is starting. Give it about 60 seconds.", "🐺");
 };
 ```
 
-Deploy it:
+Deploy:
 
 ```bash
-cd /tmp/wake-lambda && zip -j /tmp/wake-lambda.zip index.mjs
+cd /tmp/wake-lambda && zip -j wake-lambda.zip index.mjs
 
 aws lambda create-function \
-  --function-name loki-wake \
+  --function-name agent-wake \
   --runtime nodejs22.x \
   --handler index.handler \
-  --role "arn:aws:iam::${ACCOUNT_ID}:role/loki-wake-lambda-role" \
+  --role "arn:aws:iam::${ACCOUNT_ID}:role/wake-lambda-role" \
   --zip-file fileb:///tmp/wake-lambda.zip \
-  --timeout 10 \
-  --memory-size 128 \
-  --architectures arm64 \
+  --timeout 10 --memory-size 128 --architectures arm64 \
   --region "$REGION"
 ```
 
-### 2.4 — Create HTTP API Gateway
+### 5.3 — HTTP API Gateway
 
-Lambda Function URLs may be blocked by Organization SCPs. HTTP API Gateway is the reliable alternative ($1/million requests — effectively free for this use case).
+> Lambda Function URLs may be blocked by AWS Organizations SCPs. HTTP API Gateway is the reliable alternative (~$0/month at this scale).
 
 ```bash
-# Create HTTP API
 API_ID=$(aws apigatewayv2 create-api \
-  --name "loki-wake" \
-  --protocol-type HTTP \
-  --region "$REGION" \
-  --query 'ApiId' --output text)
+  --name "agent-wake" --protocol-type HTTP \
+  --region "$REGION" --query 'ApiId' --output text)
 
-# Create Lambda integration
 INTEGRATION_ID=$(aws apigatewayv2 create-integration \
-  --api-id "$API_ID" \
-  --integration-type AWS_PROXY \
-  --integration-uri "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:loki-wake" \
+  --api-id "$API_ID" --integration-type AWS_PROXY \
+  --integration-uri "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:agent-wake" \
   --payload-format-version "2.0" \
-  --region "$REGION" \
-  --query 'IntegrationId' --output text)
+  --region "$REGION" --query 'IntegrationId' --output text)
 
-# Create route
 aws apigatewayv2 create-route \
-  --api-id "$API_ID" \
-  --route-key "GET /wake" \
-  --target "integrations/$INTEGRATION_ID" \
-  --region "$REGION"
+  --api-id "$API_ID" --route-key "GET /wake" \
+  --target "integrations/$INTEGRATION_ID" --region "$REGION"
 
-# Create auto-deploy stage
 aws apigatewayv2 create-stage \
-  --api-id "$API_ID" \
-  --stage-name '$default' \
-  --auto-deploy \
-  --region "$REGION"
+  --api-id "$API_ID" --stage-name '$default' \
+  --auto-deploy --region "$REGION"
 
-# Grant API Gateway permission to invoke Lambda
 aws lambda add-permission \
-  --function-name loki-wake \
+  --function-name agent-wake \
   --statement-id apigateway-invoke \
   --action lambda:InvokeFunction \
   --principal apigateway.amazonaws.com \
   --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
   --region "$REGION"
 
-# Get the endpoint URL
-WAKE_URL=$(aws apigatewayv2 get-api --api-id "$API_ID" --region "$REGION" --query 'ApiEndpoint' --output text)
+WAKE_URL=$(aws apigatewayv2 get-api --api-id "$API_ID" \
+  --region "$REGION" --query 'ApiEndpoint' --output text)
 echo "Wake URL: ${WAKE_URL}/wake"
-```
-
-Save the wake URL — you'll need it for the idle check script.
-
-### 2.5 — Verify
-
-```bash
-# Should return "Missing Token" page
-curl -s "${WAKE_URL}/wake" | grep -o '<h2>.*</h2>'
-
-# Should return "Invalid Token" page
-curl -s "${WAKE_URL}/wake?token=fake" | grep -o '<h2>.*</h2>'
+# ↑ Put this in idle-check.sh WAKE_LAMBDA_URL
 ```
 
 ---
 
-## Step 3 — Create the Idle Check Script
+## Step 6 — EventBridge Notification Lambda
 
-Save to `~/.openclaw/workspace/loki-idle-check.sh`. **Replace `WAKE_LAMBDA_URL` with your API Gateway URL from Step 2.4.**
+This Lambda fires on instance start/stop. On start it sends 🟢. On stop it sends 🔴 with a wake link (auto-generates a fresh token if the previous one was consumed).
 
-All Telegram credentials are fetched from SSM at runtime — nothing hardcoded in the script.
+### 6.1 — IAM Role
 
 ```bash
-#!/bin/bash
-# loki-idle-check.sh — Standalone idle monitor (systemd timer, every 5 min)
-# Independent of OpenClaw gateway. Sends Telegram alert with one-time wake link.
-set -euo pipefail
+aws iam create-role \
+  --role-name ec2-notify-lambda-role \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {"Service": "lambda.amazonaws.com"},
+      "Action": "sts:AssumeRole"
+    }]
+  }'
 
-# --- Config (single source of truth) ---
-REGION="us-east-1"
-IDLE_THRESHOLD_HOURS=1.0
-MIN_UPTIME_HOURS=0.25  # skip shutdown if booted < 15 min ago
-LOG_MAX_LINES=500
-SSM_TOKEN_PARAM="/openclaw/wake-token"
-SSM_BOT_TOKEN_PARAM="/openclaw/wake-config/telegram-bot-token"
-SSM_CHAT_ID_PARAM="/openclaw/wake-config/telegram-chat-id"
-WAKE_LAMBDA_URL="YOUR_API_GATEWAY_URL/wake"
+aws iam put-role-policy \
+  --role-name ec2-notify-lambda-role \
+  --policy-name notify-permissions \
+  --policy-document "{
+    \"Version\": \"2012-10-17\",
+    \"Statement\": [
+      {
+        \"Effect\": \"Allow\",
+        \"Action\": [\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],
+        \"Resource\": \"arn:aws:logs:${REGION}:${ACCOUNT_ID}:*\"
+      },
+      {
+        \"Effect\": \"Allow\",
+        \"Action\": \"ec2:DescribeInstances\",
+        \"Resource\": \"*\"
+      },
+      {
+        \"Effect\": \"Allow\",
+        \"Action\": [\"ssm:GetParameter\", \"ssm:PutParameter\"],
+        \"Resource\": [
+          \"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-config/*\",
+          \"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-token\"
+        ]
+      }
+    ]
+  }"
 
-SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-STATE_FILE="$HOME/.openclaw/workspace/memory/heartbeat-state.json"
-SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
-PY="$SCRIPT_DIR/idle-check.py"
-LOG="/tmp/loki-idle-check.log"
+sleep 10
+```
 
-# --- Helpers ---
-log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+### 6.2 — Lambda Code
 
-truncate_log() {
-  if [[ -f "$LOG" ]] && (( $(wc -l < "$LOG") > LOG_MAX_LINES )); then
-    tail -n "$LOG_MAX_LINES" "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
-  fi
-}
+Save as `notify.py`:
 
-fetch_ssm() {
-  local param="$1" decrypt="${2:-false}"
-  local flags="--name $param --region $REGION --query Parameter.Value --output text"
-  [[ "$decrypt" == "true" ]] && flags="$flags --with-decryption"
-  aws ssm get-parameter $flags 2>/dev/null
-}
+```python
+import json
+import os
+import uuid
+import urllib.request
+import boto3
 
-send_telegram() {
-  local token="$1" chat_id="$2" text="$3"
-  curl -sf -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-    -H "Content-Type: application/json" \
-    -d "{\"chat_id\":\"${chat_id}\",\"text\":\"${text}\",\"disable_web_page_preview\":true}" \
-    >> "$LOG" 2>&1
-}
+def handler(event, context):
+    instance_id = event['detail']['instance-id']
+    state = event['detail']['state']
 
-# --- Main ---
-truncate_log
+    target_instance = os.environ.get('INSTANCE_ID')
+    if target_instance and instance_id != target_instance:
+        return
 
-# Find latest user message (proper JSON parsing, no fragile grep)
-LATEST_TS=$(python3 "$PY" --latest-ts "$SESSIONS_DIR")
+    ssm = boto3.client('ssm')
+    telegram_token = ssm.get_parameter(
+        Name='/openclaw/wake-config/telegram-bot-token', WithDecryption=True
+    )['Parameter']['Value']
+    chat_id = os.environ['TELEGRAM_CHAT_ID']
+    wake_url = os.environ.get('WAKE_URL')
 
-if [[ -z "$LATEST_TS" ]]; then
-  log "ERROR: No user messages found in session logs."
-  exit 1
-fi
+    if state == 'running':
+        ec2 = boto3.client('ec2')
+        response = ec2.describe_instances(InstanceIds=[instance_id])
+        public_ip = response['Reservations'][0]['Instances'][0].get('PublicIpAddress')
+        if not public_ip:
+            return
+        message = f"🟢 Machine is up and running.\n\nPublic IP: {public_ip}"
 
-HOURS_IDLE=$(python3 "$PY" --hours-idle "$LATEST_TS")
-if [[ "$HOURS_IDLE" == "PARSE_ERROR" ]]; then
-  log "ERROR: Could not parse timestamp: $LATEST_TS"
-  exit 1
-fi
+    elif state == 'stopped':
+        token_param = '/openclaw/wake-token'
+        try:
+            token = ssm.get_parameter(Name=token_param)['Parameter']['Value']
+            token_needed = False
+        except ssm.exceptions.ParameterNotFound:
+            token = str(uuid.uuid4())
+            ssm.put_parameter(Name=token_param, Value=token,
+                              Type='String', Overwrite=True)
+            token_needed = True
 
-log "idle=${HOURS_IDLE}h last_msg=${LATEST_TS}"
+        wake_link = f"{wake_url}?token={token}"
+        status = "⚠️ Wake token was expired — generated a new one." if token_needed \
+            else "✅ Wake token is still valid."
+        message = f"🔴 Machine is shut down.\n\n{status}\n\n👉 Tap to wake:\n{wake_link}"
 
-SHOULD_SHUTDOWN=$(python3 "$PY" --should-shutdown "$HOURS_IDLE" "$IDLE_THRESHOLD_HOURS")
+    else:
+        return
 
-if [[ "$SHOULD_SHUTDOWN" != "yes" ]]; then
-  # Active — reset alert flag
-  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent false
-  exit 0
-fi
+    tg_body = json.dumps({
+        'chat_id': chat_id,
+        'text': message,
+        'parse_mode': 'Markdown',
+        'disable_web_page_preview': True
+    }).encode()
+    urllib.request.urlopen(urllib.request.Request(
+        f"https://api.telegram.org/bot{telegram_token}/sendMessage",
+        data=tg_body, headers={'Content-Type': 'application/json'}
+    ))
 
-# Guard: skip shutdown if instance just booted (prevents wake → immediate re-shutdown)
-UPTIME_H=$(python3 "$PY" --uptime-hours)
-if (( $(echo "$UPTIME_H < $MIN_UPTIME_HOURS" | bc -l) )); then
-  log "SKIP: uptime=${UPTIME_H}h < ${MIN_UPTIME_HOURS}h minimum — recently booted"
-  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent false
-  exit 0
-fi
+    return {'state': state}
+```
 
-ALERT_SENT=$(python3 "$PY" --get-state "$STATE_FILE" idleShutdownAlertSent)
+Deploy:
 
-if [[ "$ALERT_SENT" == "false" ]]; then
-  log "IDLE >${IDLE_THRESHOLD_HOURS}h — generating wake token"
+```bash
+cd /tmp && zip -j notify-lambda.zip notify.py
 
-  # Generate and store one-time wake token (fail-safe: abort if SSM write fails)
-  WAKE_TOKEN=$(python3 -c "import uuid; print(uuid.uuid4())")
-  if ! aws ssm put-parameter --name "$SSM_TOKEN_PARAM" --value "$WAKE_TOKEN" \
-       --type String --overwrite --region "$REGION" > /dev/null 2>&1; then
-    log "ERROR: Failed to store wake token in SSM — aborting alert"
-    exit 1
-  fi
+aws lambda create-function \
+  --function-name ec2-notify \
+  --runtime python3.13 \
+  --handler notify.handler \
+  --role "arn:aws:iam::${ACCOUNT_ID}:role/ec2-notify-lambda-role" \
+  --zip-file fileb:///tmp/notify-lambda.zip \
+  --timeout 15 --memory-size 128 --architectures arm64 \
+  --environment "Variables={INSTANCE_ID=<your-instance-id>,TELEGRAM_CHAT_ID=<your-chat-id>,WAKE_URL=${WAKE_URL}/wake}" \
+  --region "$REGION"
+```
 
-  # Fetch Telegram credentials from SSM at runtime (never hardcoded)
-  TG_TOKEN=$(fetch_ssm "$SSM_BOT_TOKEN_PARAM" true)
-  TG_CHAT=$(fetch_ssm "$SSM_CHAT_ID_PARAM")
+### 6.3 — EventBridge Rule
 
-  if [[ -z "$TG_TOKEN" || -z "$TG_CHAT" ]]; then
-    log "ERROR: Failed to fetch Telegram credentials from SSM"
-    exit 1
-  fi
+```bash
+aws events put-rule \
+  --name ec2-state-notify \
+  --event-pattern "{
+    \"source\": [\"aws.ec2\"],
+    \"detail-type\": [\"EC2 Instance State-change Notification\"],
+    \"detail\": {
+      \"state\": [\"running\", \"stopped\"],
+      \"instance-id\": [\"<your-instance-id>\"]
+    }
+  }" \
+  --description "Telegram notify on instance start/stop" \
+  --region "$REGION"
 
-  WAKE_LINK="${WAKE_LAMBDA_URL}?token=${WAKE_TOKEN}"
-  send_telegram "$TG_TOKEN" "$TG_CHAT" \
-    "🐺 Idle for over an hour. Shutting down in ~5 min to save costs.\n\n👉 Tap to wake me up: ${WAKE_LINK}"
+NOTIFY_ARN=$(aws lambda get-function --function-name ec2-notify \
+  --query 'Configuration.FunctionArn' --output text --region "$REGION")
 
-  python3 "$PY" --set-state "$STATE_FILE" idleShutdownAlertSent true
-  log "Alert sent with wake link. Will shutdown on next run."
+aws events put-targets \
+  --rule ec2-state-notify \
+  --targets "Id=notify-lambda,Arn=$NOTIFY_ARN" \
+  --region "$REGION"
 
-else
-  log "Alert already sent — SHUTTING DOWN NOW"
-  sudo shutdown -h now
-fi
+aws lambda add-permission \
+  --function-name ec2-notify \
+  --statement-id eventbridge-invoke \
+  --action lambda:InvokeFunction \
+  --principal events.amazonaws.com \
+  --source-arn "arn:aws:events:${REGION}:${ACCOUNT_ID}:rule/ec2-state-notify" \
+  --region "$REGION"
 ```
 
 ---
 
-## Step 4 — Create the Systemd Timer
+## Verify
 
 ```bash
-sudo tee /etc/systemd/system/loki-idle-check.service << 'EOF'
-[Unit]
-Description=Loki idle check — shutdown if user is away for over 1 hour
+# Wake Lambda rejects bad tokens
+curl -s "${WAKE_URL}/wake?token=fake" | grep -oP '<h2>\K[^<]+'
+# → "Invalid Token" or "Expired"
 
-[Service]
-Type=oneshot
-User=ec2-user
-ExecStart=/bin/bash /home/ec2-user/.openclaw/workspace/loki-idle-check.sh
-TimeoutSec=30
-EOF
+# Idle check runs cleanly
+sudo systemctl start idle-check.service
+cat /tmp/idle-check.log | tail -3
 
-sudo tee /etc/systemd/system/loki-idle-check.timer << 'EOF'
-[Unit]
-Description=Loki idle check timer — every 5 minutes
-
-[Timer]
-OnBootSec=5min
-OnUnitActiveSec=5min
-AccuracySec=10s
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now loki-idle-check.timer
-```
-
-Verify:
-```bash
-sudo systemctl status loki-idle-check.timer
-```
-
-Test immediately:
-```bash
-sudo systemctl start loki-idle-check.service
-cat /tmp/loki-idle-check.log
+# Timer is active
+sudo systemctl status idle-check.timer
 ```
 
 ---
 
 ## Security
 
-**Wake link security layers:**
+| Layer | Protection |
+|-------|-----------|
+| API Gateway URL | Random subdomain, not guessable or indexed |
+| One-time UUID token | Stored in SSM, deleted after use. Expired tokens → friendly error page |
+| Lambda permissions | Scoped to one specific instance |
+| Telegram link preview | `disable_web_page_preview: true` on all messages with wake links (prevents Telegram from auto-fetching the link and triggering a wake) |
+| No hardcoded secrets | All config in SSM Parameter Store, fetched at runtime |
+| State guards | Wake Lambda rejects if instance is `running`, `stopping`, or `pending` |
+| Min uptime guard | 15 min — prevents wake → immediate re-shutdown race |
 
-1. **API Gateway URL** — random subdomain, not guessable or indexed
-2. **One-time UUID token** — stored in SSM, deleted after first use. Expired tokens return a friendly error
-3. **Lambda scoped permissions** — can only start one specific instance
-4. **No hardcoded secrets** — all config (instance ID, Telegram credentials) stored in SSM Parameter Store and fetched at runtime by both the idle script and the Lambda
-
-**Cost:** Effectively $0/month — Lambda free tier (1M requests) + HTTP API Gateway ($1/million requests) + SSM free tier.
-
-> **Note on Lambda Function URLs:** These are simpler to set up but may be blocked by AWS Organizations SCPs (Service Control Policies). If you get `Forbidden` errors with Function URLs, use HTTP API Gateway instead — that's what this bootstrap uses.
-
----
-
-## State File
-
-`~/.openclaw/workspace/memory/heartbeat-state.json`:
-```json
-{
-  "idleShutdownAlertSent": false
-}
-```
-
----
-
-## Log File
-
-`/tmp/loki-idle-check.log` — auto-truncated to 500 lines on each run:
-```
-2026-04-05T08:06:23Z idle=0.0077h last_msg=2026-04-05T08:05:55.617Z
-2026-04-05T09:10:01Z IDLE >1h — generating wake token
-2026-04-05T09:10:02Z Alert sent with wake link. Will shutdown on next run.
-2026-04-05T09:15:01Z SKIP: uptime=0.0833h < 0.25h minimum — recently booted
-```
-
----
-
-## Smoke Tests
-
-Run these 5 tests after installation to verify the full system works end-to-end.
-
-```bash
-#!/bin/bash
-# smoke-test-idle-shutdown.sh — Run all 5 checks, report pass/fail
-set -uo pipefail
-REGION="us-east-1"
-PASS=0; FAIL=0
-result() { if [ "$1" -eq 0 ]; then echo "  ✅ PASS"; ((PASS++)); else echo "  ❌ FAIL"; ((FAIL++)); fi; }
-
-echo "=== Idle Shutdown Smoke Tests ==="
-echo ""
-
-# 1. Python helper finds user messages in session JSONL
-echo "1. Python helper — latest user timestamp"
-TS=$(python3 ~/.openclaw/workspace/idle-check.py --latest-ts ~/.openclaw/agents/main/sessions 2>/dev/null)
-if [[ "$TS" =~ ^20[0-9]{2}-[0-9]{2}-[0-9]{2}T ]]; then
-  echo "  Last user message: $TS"
-  result 0
-else
-  echo "  Got: '$TS'"
-  result 1
-fi
-
-# 2. SSM token round-trip — write, read, delete
-echo "2. SSM token round-trip"
-TEST_TOKEN="smoke-test-$(date +%s)"
-aws ssm put-parameter --name "/openclaw/wake-token" --value "$TEST_TOKEN" \
-  --type String --overwrite --region "$REGION" > /dev/null 2>&1
-READ_BACK=$(aws ssm get-parameter --name "/openclaw/wake-token" --region "$REGION" \
-  --query Parameter.Value --output text 2>/dev/null)
-aws ssm delete-parameter --name "/openclaw/wake-token" --region "$REGION" > /dev/null 2>&1
-if [[ "$READ_BACK" == "$TEST_TOKEN" ]]; then
-  echo "  Write→Read→Delete: matched"
-  result 0
-else
-  echo "  Expected '$TEST_TOKEN', got '$READ_BACK'"
-  result 1
-fi
-
-# 3. Telegram credentials fetchable from SSM
-echo "3. Telegram credentials from SSM"
-TG_TOKEN=$(aws ssm get-parameter --name "/openclaw/wake-config/telegram-bot-token" \
-  --with-decryption --region "$REGION" --query Parameter.Value --output text 2>/dev/null)
-TG_CHAT=$(aws ssm get-parameter --name "/openclaw/wake-config/telegram-chat-id" \
-  --region "$REGION" --query Parameter.Value --output text 2>/dev/null)
-if [[ -n "$TG_TOKEN" && -n "$TG_CHAT" ]]; then
-  echo "  Bot token: ${TG_TOKEN:0:8}... Chat ID: $TG_CHAT"
-  result 0
-else
-  echo "  Missing: token=${TG_TOKEN:+set} chat=${TG_CHAT:+set}"
-  result 1
-fi
-
-# 4. Wake Lambda responds via API Gateway
-echo "4. Wake Lambda via API Gateway"
-WAKE_URL=$(grep 'WAKE_LAMBDA_URL=' ~/.openclaw/workspace/loki-idle-check.sh \
-  | head -1 | sed 's/.*="//;s/"//')
-RESP=$(curl -sf "${WAKE_URL}?token=smoke-test-invalid" 2>/dev/null \
-  | grep -oP '<h2>\K[^<]+')
-if [[ "$RESP" == "Invalid Token" || "$RESP" == "Expired" ]]; then
-  echo "  Response: '$RESP' (correct rejection)"
-  result 0
-else
-  echo "  Expected 'Invalid Token' or 'Expired', got: '$RESP'"
-  result 1
-fi
-
-# 5. Full idle-check script runs without error
-echo "5. Full idle-check script execution"
-LINES_BEFORE=$(wc -l < /tmp/loki-idle-check.log 2>/dev/null || echo 0)
-bash ~/.openclaw/workspace/loki-idle-check.sh 2>/dev/null
-LINES_AFTER=$(wc -l < /tmp/loki-idle-check.log 2>/dev/null || echo 0)
-NEW_LINE=$(tail -1 /tmp/loki-idle-check.log 2>/dev/null)
-if [[ "$LINES_AFTER" -gt "$LINES_BEFORE" && "$NEW_LINE" =~ idle= ]]; then
-  echo "  $NEW_LINE"
-  result 0
-else
-  echo "  No new log entry written"
-  result 1
-fi
-
-echo ""
-echo "=== Results: $PASS passed, $FAIL failed ==="
-[[ $FAIL -eq 0 ]] && echo "🐺 All smoke tests passed!" || echo "⚠️  Some tests failed — review above."
-```
+**Cost:** ~$0/month. Lambda free tier + HTTP API Gateway ($1/million requests) + SSM free tier.
 
 ---
 
 ## Notes
 
-- The timer is **completely independent of OpenClaw** — if the gateway crashes, idle shutdown still works
-- Telegram credentials are fetched from **SSM at runtime** — never hardcoded in scripts
-- The **uptime guard** (default 15 min) prevents the wake → immediate re-shutdown race condition
-- The two-step shutdown (alert → wait 5min → shutdown) gives the user time to come back or tap the wake link
-- Session JSONL parsing handles both flat (`"role":"user"`) and nested (`"message":{"role":"user"}`) formats, and skips checkpoint files
-- The wake link works even after shutdown — it starts the instance directly via EC2 API
-- Log file is auto-truncated to prevent unbounded growth
+- The timer is **independent of OpenClaw** — if the gateway crashes, idle shutdown still works
+- The two-step shutdown (alert → wait 5 min → shutdown) gives you time to tap the wake link
+- Session parsing handles both flat and nested JSONL message formats, and skips checkpoint files
+- Log auto-truncates to 500 lines
+- `--dry-run` mode logs what would happen without sending alerts or shutting down
