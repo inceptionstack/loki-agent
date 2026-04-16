@@ -78,6 +78,19 @@ done
 REGION="${PACK_ARG_REGION}"
 MODEL="${PACK_ARG_MODEL}"
 
+# ── Guard against Bedrock model IDs leaking in via CFN's DefaultModel ────────────────────────────────────
+# install.sh / CFN template ship with a Bedrock-style DefaultModel
+# (e.g. us.anthropic.claude-opus-4-6-v1) that's great for openclaw/claude-code
+# but poison for codex-cli — OpenAI's API rejects it with HTTP 400.
+# If the caller hands us a Bedrock-style ID, fall back to the pack default
+# instead of writing a broken config.
+CODEX_DEFAULT_MODEL="gpt-5.4"
+if [[ "${MODEL}" =~ ^(us\.|eu\.|ap\.|anthropic\.|amazon\.|meta\.|mistral\.|cohere\.|ai21\.) ]]; then
+  warn "ignoring Bedrock-style model id '${MODEL}' — Codex CLI talks to OpenAI, not Bedrock"
+  warn "falling back to ${CODEX_DEFAULT_MODEL} (override with: bash install.sh --model <openai-model>)"
+  MODEL="${CODEX_DEFAULT_MODEL}"
+fi
+
 pack_banner "codex-cli"
 log "region=${REGION} model=${MODEL} sandbox=danger-full-access approval=never"
 
