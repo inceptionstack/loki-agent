@@ -1,0 +1,114 @@
+---
+title: "Simple-mode defaults"
+description: "What gets auto-configured when you pick a pack + profile in simple mode."
+---
+
+Simple mode (`--simple`, or the default when you pass `-y`) asks you for only two things: **pack** and **profile**. Everything else is derived from smart defaults. This page lists every defaulted value so there are no surprises.
+
+## Instance size
+
+| Profile | Instance |
+|---|---|
+| `builder` | `t4g.xlarge` (4 vCPU, 16 GiB) |
+| `account_assistant` | `t4g.medium` (2 vCPU, 4 GiB) |
+| `personal_assistant` | `t4g.medium` |
+
+All instances are arm64 Graviton by default.
+
+## Security services
+
+| Profile | Security Hub | GuardDuty | Inspector | Access Analyzer | Config recorder |
+|---|---|---|---|---|---|
+| `builder` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `account_assistant` | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `personal_assistant` | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+See [Security services](/reference/security-services) for what each one does.
+
+## Region
+
+Default: `us-east-1`. Override with `AWS_REGION` / `AWS_DEFAULT_REGION` env var, or by picking advanced mode.
+
+## Volumes
+
+| Pack | Root volume | Data volume |
+|---|---|---|
+| openclaw | 40 GB | 80 GB |
+| claude-code | 40 GB | 0 GB |
+| codex-cli | 40 GB | 0 GB |
+| kiro-cli | 40 GB | 0 GB |
+| nemoclaw | 40 GB | 80 GB |
+| hermes | 40 GB | 0 GB |
+| pi | 40 GB | 0 GB |
+| ironclaw | 40 GB | 0 GB |
+
+## VPC
+
+Simple mode creates a **new VPC** by default. Advanced mode prompts for VPC reuse if any tagged `loki:managed=true` VPC exists in the region.
+
+| Setting | Default |
+|---|---|
+| VPC CIDR | `10.0.0.0/16` |
+| Public subnet | `10.0.1.0/24` |
+| Internet gateway | Yes (public subnet) |
+| NAT gateway | No (instance has public IP) |
+
+## IAM
+
+The EC2 instance gets an instance profile with the profile-appropriate policy:
+
+| Profile | Managed policy |
+|---|---|
+| `builder` | `arn:aws:iam::aws:policy/AdministratorAccess` |
+| `account_assistant` | `arn:aws:iam::aws:policy/ReadOnlyAccess` + targeted tag/log writes |
+| `personal_assistant` | Inline policy: Bedrock `InvokeModel` only |
+
+All profiles also get `AmazonSSMManagedInstanceCore` so you can SSM in.
+
+## SSH
+
+Default: **disabled**. `SSHAllowedCidr=127.0.0.1/32` = no one can reach SSH. Use SSM Session Manager.
+
+Override in advanced mode by setting a real CIDR (e.g. `1.2.3.4/32` for your current IP).
+
+## Model defaults
+
+Each pack has its own default model. The installer threads the right default per pack — you never have to think about it:
+
+| Pack | Default model |
+|---|---|
+| openclaw | `us.anthropic.claude-opus-4-6-v1` |
+| claude-code | `us.anthropic.claude-sonnet-4-6` (main) + `us.anthropic.claude-haiku-4-5-20251001-v1:0` (haiku) |
+| codex-cli | `gpt-5.4` |
+| kiro-cli | — (Kiro cloud picks its own) |
+| nemoclaw | `us.anthropic.claude-sonnet-4-6` (via bedrockify) |
+| hermes | `anthropic/claude-opus-4.6` (OpenAI-style via bedrockify) |
+| pi | `us.anthropic.claude-sonnet-4-6-v1` (via bedrockify) |
+| ironclaw | `anthropic.claude-sonnet-4-6` (via bedrockify) |
+
+## Environment naming
+
+Simple mode auto-generates an environment name: `<pack>-<sequence>-<timestamp-suffix>`.
+
+Example: `openclaw-1-4521`.
+
+The sequence number counts existing `loki:managed=true` VPCs in the region so you don't collide.
+
+## Loki watermark tag
+
+Every resource created by Lowkey is tagged `loki:managed=true` + `loki:watermark=<env-name>`. This makes it easy to find and clean up everything the installer created.
+
+```bash
+aws resourcegroupstaggingapi get-resources \
+  --tag-filters Key=loki:managed,Values=true
+```
+
+## What simple mode does NOT auto-decide
+
+You still provide:
+
+- **Pack** (required)
+- **Profile** (defaults to `builder` if `-y` given with no `--profile`)
+- **Deploy method** (defaults to CloudFormation CLI)
+
+And anything you override explicitly via flags wins over the default.

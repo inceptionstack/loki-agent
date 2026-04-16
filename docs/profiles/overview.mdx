@@ -1,0 +1,51 @@
+---
+title: "Profiles overview"
+description: "Builder, account_assistant, personal_assistant — AWS blast radius per profile."
+---
+
+Every Lowkey install picks exactly one **profile**. The profile determines:
+
+1. **IAM policy** attached to the EC2 instance profile
+2. **Instance size** in simple mode
+3. **Which security services** auto-enable
+4. **Which packs are compatible** (a few packs are profile-gated)
+
+## Quick comparison
+
+| | **builder** | **account_assistant** | **personal_assistant** |
+|---|---|---|---|
+| IAM | AdministratorAccess | ReadOnlyAccess + targeted writes | Bedrock only |
+| Instance (simple) | `t4g.xlarge` | `t4g.medium` | `t4g.medium` |
+| Security Hub | ✅ on | ✅ on | ❌ off |
+| GuardDuty | ✅ on | ✅ on | ❌ off |
+| Inspector | ✅ on | ✅ on | ❌ off |
+| Access Analyzer | ✅ on | ✅ on | ❌ off |
+| Config recorder | ✅ on | ✅ on | ❌ off |
+| Typical use | Agent writes code + deploys AWS resources | Agent explains / audits existing AWS | Agent runs Bedrock inference only |
+
+## Picking a profile
+
+<CardGroup cols={3}>
+  <Card title="Builder" icon="hammer" href="/profiles/builder">
+    Full AWS admin. Agent can create VPCs, Lambdas, CloudFront, whatever. **Dedicated sandbox only.**
+  </Card>
+  <Card title="Account assistant" icon="magnifying-glass" href="/profiles/account-assistant">
+    Read-only plus a narrow set of writes. Safe for dev or staging accounts.
+  </Card>
+  <Card title="Personal assistant" icon="user" href="/profiles/personal-assistant">
+    Bedrock inference only — no AWS API surface. Use for coding help without giving the agent your AWS keys.
+  </Card>
+</CardGroup>
+
+## Compatibility with packs
+
+Most packs work with all three profiles. Exceptions:
+
+- **NemoClaw** requires `personal_assistant` — it runs in an OpenShell sandbox that blocks all AWS API calls.
+- Other packs take a warning/note in builder mode but work fine with any profile.
+
+If you pick an incompatible combination, the installer refuses the install and suggests alternatives.
+
+## Overriding defaults
+
+Advanced mode lets you pick any instance type, toggle any security service, supply your own VPC/subnet, etc. See [install.sh CLI reference](/reference/cli) for the full flag list.

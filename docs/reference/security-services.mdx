@@ -1,0 +1,82 @@
+---
+title: "Security services"
+description: "What Security Hub / GuardDuty / Inspector / Access Analyzer / Config do — and why Lowkey turns them on by default."
+---
+
+Lowkey enables five AWS security services by default for `builder` and `account_assistant` profiles. They cost a little money and give you alert-only monitoring of what the agent does.
+
+## What each service does
+
+<CardGroup cols={2}>
+  <Card title="Security Hub" icon="shield">
+    Aggregates findings from GuardDuty, Inspector, Access Analyzer, and AWS Config into a single dashboard. One place to look when reviewing what the agent's been up to.
+  </Card>
+  <Card title="GuardDuty" icon="radar">
+    Threat detection on AWS API activity. Flags anomalies: crypto-mining patterns, credential exfiltration, malware network signatures, unusual API call patterns. Great at catching agents doing obviously wrong things.
+  </Card>
+  <Card title="Inspector" icon="magnifying-glass">
+    Continuous vulnerability scanning on EC2 / Lambda / ECR. Tells you when the agent's running OS or Lambda runtimes have known CVEs.
+  </Card>
+  <Card title="Access Analyzer" icon="door-open">
+    Flags resources that are exposed outside your account (public S3 buckets, over-permissioned IAM roles). Catches the "oops the agent made this public" class of mistake.
+  </Card>
+  <Card title="Config recorder" icon="book">
+    Records every resource configuration change. Gives you an audit trail — what did the agent create, when, with what settings.
+  </Card>
+</CardGroup>
+
+## Why they're on by default
+
+Builder and account_assistant profiles give the agent meaningful AWS access. Running those profiles **without** monitoring would mean you find out about problems by reading the bill. These services are **alert-only** by default — they never block the agent; they just give you visibility.
+
+Personal assistant profile has **no AWS write access at all**, so there's nothing to monitor. Services are off by default to keep cost near zero.
+
+## Approximate cost
+
+Very rough; varies by region and activity:
+
+| Service | Small single-agent install | Notes |
+|---|---|---|
+| Security Hub | $1–5 / month | Per-finding + per-check |
+| GuardDuty | $5–20 / month | VPC flow logs + CloudTrail + DNS logs |
+| Inspector | $1–3 / month | Per-resource per-scan |
+| Access Analyzer | $0 | Free tier covers typical use |
+| Config recorder | $2–10 / month | Per-recording + per-evaluation |
+| **Total** | **~$10–40 / month** | Mostly GuardDuty |
+
+Your AWS bill is the source of truth.
+
+## Opting out (advanced mode)
+
+You can disable any subset:
+
+```bash
+curl -sfL install.lowkey.run | bash
+# → pick Advanced mode
+# → answer "no" to the ones you want to skip
+```
+
+Or deploy the template directly and override the `Enable*` parameters.
+
+## Opting in for personal_assistant
+
+Also possible in advanced mode. You might want GuardDuty even on a pure-Bedrock agent just to catch compromised instance credentials.
+
+## Where findings appear
+
+All findings route into **Security Hub** if enabled. Without it, each service has its own console:
+
+- GuardDuty: **GuardDuty > Findings**
+- Inspector: **Inspector > Findings**
+- Access Analyzer: **IAM Access Analyzer > Findings**
+- Config: **Config > Rules > Non-compliant resources**
+
+Routing into Security Hub is the lowest-friction setup.
+
+## Tagging
+
+All findings inherit the `loki:managed=true` + `loki:watermark=<env-name>` tags from the underlying resource, so you can filter to "findings about this Lowkey install" in Security Hub:
+
+```
+Filter: ResourceTags.key = loki:managed
+```

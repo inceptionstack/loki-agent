@@ -1,0 +1,56 @@
+---
+title: "IronClaw"
+description: "NEAR AI's Rust-based agent on Bedrock via bedrockify."
+---
+
+<Note>
+**Experimental pack.** IronClaw is NEAR AI's Rust-based agent. This pack runs it against Bedrock via bedrockify — Rust performance, Bedrock billing.
+</Note>
+
+## When to use
+
+- Want a compiled Rust agent over a Node/Python one
+- Want Bedrock billing through the standard IAM-role flow
+- Interested in NEAR AI's agent primitives
+
+## What the pack installs
+
+- `bedrockify` dep on port 8090
+- IronClaw binary (Rust, arm64)
+- Env pointing `LLM_MODEL` at the configured model via bedrockify
+
+## Install — non-interactive
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack ironclaw \
+  --profile builder
+```
+
+## Pack parameters
+
+| Param | Default | Description |
+|---|---|---|
+| `region` | `us-east-1` | AWS region for Bedrock |
+| `model` | `anthropic.claude-sonnet-4-6` | Model ID for `LLM_MODEL` (via bedrockify) |
+| `bedrockify-port` | `8090` | Where bedrockify listens |
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## First-run
+
+```bash
+aws ssm start-session --target <instance-id>
+ironclaw --version
+ironclaw
+```
+
+## Tear-down
+
+Delete the stack.

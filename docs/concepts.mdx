@@ -1,0 +1,73 @@
+---
+title: "Core concepts"
+description: "Packs, profiles, install modes, and how they combine."
+---
+
+Lowkey has four primary concepts. Understanding how they compose will save time when you pick options.
+
+## Pack
+
+A **pack** is a single agent deployment (OpenClaw, Claude Code, Codex, etc.). Each pack is a directory under `packs/` in the repo containing:
+
+- `manifest.yaml` — name, version, dependencies, params, resource requirements
+- `install.sh` — idempotent bash script that installs and configures the agent
+- `test.sh` — offline self-tests (static + arg-parser + contract)
+- `resources/` — shell profile, systemd unit templates, etc.
+
+All packs implement the same contract (see `tests/test-pack-contracts.sh`), so the top-level installer treats them uniformly.
+
+## Profile
+
+A **profile** controls how much AWS access the agent's EC2 instance has:
+
+| Profile | IAM | Typical use |
+|---|---|---|
+| `builder` | `AdministratorAccess` | Agent creates/modifies AWS resources (CDK, CloudFormation, deploy work) |
+| `account_assistant` | `ReadOnlyAccess` + targeted writes | Agent explains/audits infra, writes limited docs/tags |
+| `personal_assistant` | Bedrock-only | Agent runs inference; no AWS API surface |
+
+Profiles also drive defaults: instance size, which security services turn on, whether the agent gets extra tool permissions.
+
+## Install mode
+
+<CardGroup cols={2}>
+  <Card title="Simple (recommended)" icon="sparkles">
+    Ask for pack + profile. Auto-configure everything else from smart defaults keyed by profile. One screen of prompts and you're done.
+  </Card>
+  <Card title="Advanced" icon="sliders">
+    Prompts for every parameter: region, instance type, VPC reuse, security services, naming, etc. Use when you need tight control or are reusing an existing VPC.
+  </Card>
+</CardGroup>
+
+## Deploy method
+
+Lowkey ships both IaC flavors and keeps them in sync:
+
+- **CloudFormation** (default) — `aws cloudformation create-stack`
+- **Terraform** — `terraform apply` using the repo's module
+
+Both call the same `deploy/bootstrap.sh` from UserData, so the agent you get is identical either way. Pick based on what the rest of your stack uses.
+
+## How they combine
+
+```
+install mode (Simple / Advanced)
+   └── pack  (openclaw / claude-code / codex-cli / …)
+         └── profile  (builder / account_assistant / personal_assistant)
+               └── auto defaults  (instance size, security, region, …)
+```
+
+When you run `curl -sfL install.lowkey.run | bash -s -- -y --pack <pack> --profile <profile>` you're fixing the two top layers; everything below is computed. See [Simple-mode defaults](/reference/simple-mode-defaults) for the exact defaults table.
+
+## State and where things live
+
+| What | Where |
+|---|---|
+| EC2 instance | New VPC in your account, one instance per install |
+| Agent binary/service | `/home/ec2-user/` (via mise + pack install.sh) |
+| Pack config | `/tmp/loki-pack-config.json` (per-install) |
+| Secrets | AWS Secrets Manager (recommended) or systemd env files (`0600`) |
+| Logs | CloudWatch via SSM agent + pack-specific log files |
+| State / memory | Pack-specific (OpenClaw uses `~/.openclaw/`, others vary) |
+
+Lowkey never touches your AWS state except through the stack it creates. Tear down the stack — everything goes with it.

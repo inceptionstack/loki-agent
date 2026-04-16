@@ -1,0 +1,129 @@
+---
+title: "Kiro CLI"
+description: "AWS's agentic IDE terminal client, with MCP servers and optional headless mode."
+---
+
+<Note>
+**Experimental pack.** Kiro CLI v2 is AWS's agentic terminal (formerly Amazon Q CLI). This pack installs kiro-cli v2+ and pre-installs common AWS MCP servers. v2's `--no-interactive` flag lets you run it headless with an API key — ideal for CI / scheduled jobs.
+</Note>
+
+## When to use
+
+- Want **Kiro's agents + MCP servers** integrated out of the box
+- Want headless mode for CI / automation (`kiro-cli --no-interactive "prompt"`)
+- You're OK with an API key in Secrets Manager (or interactive SSO if you prefer)
+
+## What the pack installs
+
+- Kiro CLI v2+ via upstream installer (`cli.kiro.dev/install`)
+- MCP server tooling: `uv` + `uvenv` + build tools (gcc, python3-devel)
+- Common AWS MCP servers pre-installed:
+  - `awslabs.terraform-mcp-server`
+  - `awslabs.ecs-mcp-server`
+  - `awslabs.eks-mcp-server`
+  - `awslabs.core-mcp-server`
+  - `awslabs.aws-documentation-mcp-server`
+- (If `--from-secret` provided) `~/.kiro/env` (0600) with `KIRO_API_KEY`, sourced from `~/.bash_profile`
+
+## Install — non-interactive
+
+<Tabs>
+  <Tab title="Headless (recommended for automation)">
+    ```bash
+    # Store your Kiro key in Secrets Manager first (one-time)
+    aws secretsmanager create-secret \
+      --name /lowkey/kiro-api-key \
+      --secret-string "$KIRO_API_KEY"
+
+    # Then install — the secret ARN flows through CFN; raw key never leaves Secrets Manager
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+    ```
+  </Tab>
+  <Tab title="Interactive (browser SSO after deploy)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder
+    ```
+    Then SSM in and run `kiro-cli login --use-device-flow`.
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile account_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Pack parameters
+
+| Param | Flag (top-level installer) | Default | Description |
+|---|---|---|---|
+| `region` | `--region` | `us-east-1` | AWS region (informational — Kiro uses its own cloud) |
+| `from-secret` | `--kiro-from-secret` | — | Secrets Manager id/arn whose `SecretString` is the Kiro API key |
+
+<Warning>
+There's a deprecated `--kiro-api-key KEY` flag still accepted for back-compat, but **don't use it** — passing secrets on argv leaks them to shell history and `/proc/<pid>/cmdline`. Always use `--kiro-from-secret`.
+</Warning>
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## First-run (post-install)
+
+<Tabs>
+  <Tab title="Headless (API key already set)">
+    ```bash
+    aws ssm start-session --target <instance-id>
+    kiro-cli --version
+    kiro-cli --no-interactive "list running ECS tasks"
+    ```
+  </Tab>
+  <Tab title="Interactive SSO">
+    ```bash
+    aws ssm start-session --target <instance-id>
+    kiro-cli login --use-device-flow
+    # → follow device-flow URL in your browser
+    kiro-cli
+    ```
+  </Tab>
+</Tabs>
+
+## How `--kiro-from-secret` flows
+
+```
+install.sh CLI → CFN KiroFromSecret param → UserData env → bootstrap.sh → PACK_CONFIG
+                                                                                │
+                                        /home/ec2-user/.kiro/env (0600) ◄────── │
+                                                                        pack install.sh
+                                                                        resolves via
+                                                                        aws secretsmanager
+                                                                        get-secret-value
+```
+
+**The raw Kiro API key never appears in CFN state, Terraform state, UserData logs, or shell history.** Only the secret reference flows through deploy; IAM gates who can resolve it.
+
+## MCP servers
+
+Post-install, the pack's MCP servers are available inside the CLI:
+
+```bash
+kiro-cli
+> /tools
+# → lists awslabs.terraform-mcp-server, ecs-mcp-server, etc.
+```
+
+Add more via `uvenv install awslabs.<server>`.
+
+## Tear-down
+
+Delete the stack. `~/.kiro/env` disappears with the EBS volume. Rotate the Secrets Manager value separately if the key is shared.

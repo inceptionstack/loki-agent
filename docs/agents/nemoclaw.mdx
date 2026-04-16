@@ -1,0 +1,81 @@
+---
+title: "NemoClaw"
+description: "OpenClaw inside an OpenShell sandbox — Bedrock inference with zero AWS API surface."
+---
+
+<Note>
+**Experimental pack.** NemoClaw runs OpenClaw inside the OpenShell sandbox, which blocks all AWS API calls except Bedrock `InvokeModel`. Use when you want OpenClaw features (memory, channels, gateway) but zero AWS blast radius.
+</Note>
+
+<Warning>
+**NemoClaw requires `--profile personal_assistant`.** The installer refuses any other profile. NemoClaw's whole point is running without AWS API access; builder or account_assistant would defeat the sandbox.
+</Warning>
+
+## When to use
+
+- Want OpenClaw's features with maximum isolation
+- Need Bedrock inference but the agent should NOT touch AWS resources
+- Prefer the sandbox/OpenShell model
+
+## What the pack installs
+
+- OpenShell sandbox (`/opt/openshell/`)
+- `bedrockify` dep (OpenAI-compatible Bedrock proxy) on port 8090
+- `openclaw` running inside the sandbox
+- Named sandbox (default: `loki-assistant`)
+- Optional Telegram bridge if token/chat-ids provided
+
+## Install — non-interactive
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack nemoclaw \
+  --profile personal_assistant
+```
+
+Any other profile is rejected at install time.
+
+## Pack parameters
+
+| Param | Default | Description |
+|---|---|---|
+| `region` | `us-east-1` | AWS region for Bedrock |
+| `model` | `us.anthropic.claude-sonnet-4-6` | Bedrock model via bedrockify |
+| `bedrockify-port` | `8090` | Where bedrockify listens |
+| `sandbox-name` | `loki-assistant` | OpenShell sandbox name |
+| `telegram-token` | — | Optional Telegram bot token |
+| `allowed-chat-ids` | — | Comma-separated Telegram chat IDs |
+
+These are threaded through bootstrap.sh's generic `--*` passthrough; advanced mode or manual pack invocation is the current way to override them.
+
+## Resource requirements
+
+| | Personal assistant |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 80 GB |
+
+## First-run
+
+```bash
+aws ssm start-session --target <instance-id>
+
+# NemoClaw runs inside the sandbox
+openshell exec loki-assistant openclaw --version
+openshell exec loki-assistant openclaw agent --agent main -m "hello"
+```
+
+## Security model
+
+OpenShell blocks all AWS SDK calls except Bedrock. An agent running malicious code inside NemoClaw cannot:
+
+- Enumerate EC2/IAM/S3
+- Assume roles
+- Make non-Bedrock API calls
+
+It **can** make Bedrock inference calls (that's the whole point). If you need to cut Bedrock too, use `personal_assistant` + no agent install, or use a different profile.
+
+## Tear-down
+
+Delete the stack. Sandbox + data volume go with it.

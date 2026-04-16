@@ -1,0 +1,76 @@
+---
+title: "Builder profile"
+description: "Full AdministratorAccess on the agent instance — the heavy-hitter profile."
+---
+
+<Warning>
+The builder profile attaches **AWS managed `AdministratorAccess`** to the EC2 instance. Any code the agent runs has full access to the account. **Only deploy builder into a dedicated sandbox account** — never your production account.
+</Warning>
+
+## What it is
+
+The builder profile is for agents that need to *create* AWS resources: VPCs, Lambda, CloudFront, CodeBuild, EKS, whatever. It's the right choice if you want the agent to deploy your code end-to-end.
+
+## Defaults (simple mode)
+
+| Setting | Value |
+|---|---|
+| IAM policy | `arn:aws:iam::aws:policy/AdministratorAccess` |
+| Instance type | `t4g.xlarge` (4 vCPU, 16 GiB, arm64) |
+| Root volume | 40 GB |
+| Data volume | 80 GB (OpenClaw) / 0 GB (stateless packs) |
+| Security Hub | ✅ enabled |
+| GuardDuty | ✅ enabled |
+| Inspector | ✅ enabled |
+| Access Analyzer | ✅ enabled |
+| Config recorder | ✅ enabled |
+| SSH access | disabled (SSM only) |
+
+## Install examples
+
+<Tabs>
+  <Tab title="OpenClaw + builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile builder
+    ```
+    Gives you a persistent OpenClaw gateway that can deploy anything.
+  </Tab>
+  <Tab title="Claude Code + builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile builder
+    ```
+    Claude Code with full AWS admin via Bedrock.
+  </Tab>
+  <Tab title="Codex + builder">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile builder
+    ```
+    OpenAI Codex with AWS admin. Runs as builder agent (`danger-full-access` sandbox, never prompts). SSM in and run `codex login` post-deploy.
+  </Tab>
+</Tabs>
+
+## Guardrails that come with builder
+
+All five AWS security services auto-enable. They run in **alert-only** mode — they won't block the agent, but will tell you if it does something suspicious:
+
+- **Security Hub** aggregates findings from GuardDuty, Inspector, Access Analyzer
+- **GuardDuty** flags anomalous API calls (crypto-mining, credential exfiltration patterns)
+- **Inspector** continuously scans EC2 + Lambda + ECR for CVEs
+- **Access Analyzer** flags cross-account exposure (public S3, over-permissioned roles)
+- **Config recorder** captures every resource change for audit
+
+Plus the instance has no inbound SSH (`SSHAllowedCidr=127.0.0.1/32`). You reach it via [SSM Session Manager](/reference/cli#connect-via-ssm).
+
+## When NOT to use builder
+
+- **Production accounts** — too much blast radius.
+- **Shared accounts** — the agent has keys to everything your colleagues do.
+- **NemoClaw** — incompatible; NemoClaw requires `personal_assistant`.
+
+Use [account_assistant](/profiles/account-assistant) for a read-heavy agent or [personal_assistant](/profiles/personal-assistant) for a no-AWS agent.

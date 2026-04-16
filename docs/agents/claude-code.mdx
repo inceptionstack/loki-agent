@@ -1,0 +1,97 @@
+---
+title: "Claude Code"
+description: "Anthropic's coding agent with native Bedrock support."
+---
+
+<Note>
+**Stable pack.** Claude Code is Anthropic's official CLI coding agent. The pack configures it to use Bedrock via the instance's IAM role — no API key management.
+</Note>
+
+## When to use
+
+- Want **Claude Code** exactly as Anthropic ships it, running on Bedrock
+- Want the agent to auto-update (Anthropic releases frequently)
+- Need tight Claude integration with an existing Bedrock account
+- One-shot or interactive use; no long-running service
+
+## What the pack installs
+
+- Claude Code CLI (via Anthropic's installer)
+- Bedrock-mode env vars: `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL`, Bedrock region, etc.
+- Shell profile that adds `claude` to PATH and sets auto-update behavior
+- Health check: `claude --version`
+
+No systemd service — this is a pure CLI pack. You invoke `claude` directly when you SSM in.
+
+## Install — non-interactive
+
+<Tabs>
+  <Tab title="Builder (recommended)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Personal assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Pack parameters
+
+| Param | Flag | Default | Description |
+|---|---|---|---|
+| `region` | `--region` | `us-east-1` | AWS region for Bedrock |
+| `model` | `--model` | `us.anthropic.claude-sonnet-4-6` | Main Bedrock model (`ANTHROPIC_MODEL`) |
+| `haiku-model` | *(pack-only)* | `us.anthropic.claude-haiku-4-5-20251001-v1:0` | Fast-path model (`ANTHROPIC_DEFAULT_HAIKU_MODEL`) |
+
+The `--model` flag is threaded end-to-end through CFN → bootstrap.sh → pack. The haiku override is set in the manifest and can be changed by editing the pack and running manually.
+
+## Resource requirements
+
+| | Builder | Assistant profiles |
+|---|---|---|
+| Instance | `t4g.xlarge` | `t4g.large` (claude-code's pack default) |
+| Root volume | 40 GB | 40 GB |
+| Data volume | 0 GB | 0 GB |
+
+Claude Code is stateless on disk — the data volume isn't needed.
+
+## First-run (post-install)
+
+```bash
+aws ssm start-session --target <instance-id>
+
+claude --version
+claude "explain this repo" /home/ec2-user/your-repo
+```
+
+No login needed — Bedrock auth is via the instance's IAM role.
+
+## Advanced: custom Bedrock models
+
+If your Bedrock account has a different model ID (e.g. a provisioned-throughput ARN), override in advanced mode or edit pack config:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack claude-code \
+  --profile builder \
+  --advanced
+# Then pick custom model in the prompt.
+```
+
+## Tear-down
+
+Delete the stack. No lingering state to clean up.

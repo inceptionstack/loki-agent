@@ -1,0 +1,67 @@
+---
+title: "Account assistant profile"
+description: "ReadOnlyAccess plus targeted writes — for agents that explain, audit, and lightly tag."
+---
+
+<Info>
+Account assistant gives the agent `ReadOnlyAccess` (managed policy) plus a small allow-list of writes for tagging and minor housekeeping. Use it when you want an agent that *understands* your account but shouldn't be creating/deleting infra.
+</Info>
+
+## What it is
+
+A middle ground between full builder and zero-AWS personal assistant. The agent can:
+
+- Describe, list, and get any AWS resource
+- Read CloudWatch metrics, logs, Cost Explorer
+- Tag resources (housekeeping)
+- Write to its own CloudWatch Logs group
+
+It **cannot**:
+
+- Create, modify, or delete AWS resources
+- Assume other roles
+- Modify IAM
+
+## Defaults (simple mode)
+
+| Setting | Value |
+|---|---|
+| IAM policy | `arn:aws:iam::aws:policy/ReadOnlyAccess` + targeted tag/log writes |
+| Instance type | `t4g.medium` (2 vCPU, 4 GiB, arm64) |
+| Root volume | 40 GB |
+| Data volume | 80 GB (OpenClaw) / 0 GB (stateless packs) |
+| Security Hub | ✅ enabled |
+| GuardDuty | ✅ enabled |
+| Inspector | ✅ enabled |
+| Access Analyzer | ✅ enabled |
+| Config recorder | ✅ enabled |
+
+## Install examples
+
+<Tabs>
+  <Tab title="OpenClaw account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile account_assistant
+    ```
+    OpenClaw gateway that can explain any resource in the account. Good for ops / SRE workflows.
+  </Tab>
+  <Tab title="Claude Code account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile account_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## When to use account assistant
+
+- **Audit / explain agents** — "summarize this VPC", "what's costing us", "why is this Lambda slow"
+- **Dev or staging accounts** where the agent shouldn't ship code but should help debug
+- **Sensitive accounts** where builder is too much but you still want the agent to see everything
+
+## Upgrading later
+
+If the agent later needs write access, redeploy with `--profile builder`. Profiles are baked into the instance profile — they can't be flipped in place.
