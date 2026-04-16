@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# scripts/sync-registry — generate packs/registry.json from packs/registry.yaml
+#
+# The YAML is the source of truth. The JSON is a generated artifact consumed
+# by the local installer (which only has jq, not a YAML parser) — see install.sh.
+#
+# Usage:  bash scripts/sync-registry [--check]
+#   --check   exit non-zero if JSON is out-of-date (for CI / pre-commit)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+YAML="${REPO_DIR}/packs/registry.yaml"
+JSON="${REPO_DIR}/packs/registry.json"
+
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: python3 required" >&2
+  exit 1
+fi
+
+GENERATED="$(python3 - "${YAML}" <<'PY'
+import sys, json, os
+path = sys.argv[1]
+
+# Minimal YAML parser via PyYAML if available, else fallback to ruamel.yaml, else fail clearly.
+try:
+    import yaml
+except ImportError:
+    try:
+        from ruamel import yaml as _ry
+        class _YShim:
+            @staticmethod
+            def safe_load(s): return _ry.YAML(typ="safe").load(s)
+        yaml = _YShim()
+    except ImportError:
+        sys.stderr.write("error: need PyYAML (pip install pyyaml) or ruamel.yaml\n")
+        sys.exit(2)
+
+with open(path) as f:
+    data = yaml.safe_load(f)
+
+# Emit deterministic JSON: sorted keys, 2-space indent, trailing newline.
+print(json.dumps(data, indent=2, sort_keys=False, ensure_ascii=False))
+PY
+)"
+
+if [[ "${1:-}" == "--check" ]]; then
+  if [[ ! -f "${JSON}" ]]; then
+    echo "✗ ${JSON} missing; run: bash scripts/sync-registry" >&2
+    exit 1
+  fi
+  if diff -q <(printf '%s\n' "${GENERATED}") "${JSON}" >/dev/null 2>&1; then
+    echo "✓ packs/registry.json is in sync with packs/registry.yaml"
+  else
+    echo "✗ packs/registry.json is OUT OF SYNC with packs/registry.yaml" >&2
+    echo "  Run: bash scripts/sync-registry" >&2
+    diff <(printf '%s\n' "${GENERATED}") "${JSON}" | head -40 >&2 || true
+    exit 1
+  fi
+  exit 0
+fi
+
+printf '%s\n' "${GENERATED}" > "${JSON}"
+echo "✓ Wrote ${JSON} from ${YAML}"

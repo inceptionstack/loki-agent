@@ -1,0 +1,38 @@
+name: codex-cli
+version: "1.0.0"
+type: agent
+description: "Codex CLI — OpenAI's coding agent (builder profile, authenticate post-deploy)"
+
+deps: []
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.medium
+
+params:
+  - name: region
+    description: "AWS region (informational — Codex CLI uses OpenAI's API, not Bedrock)"
+    default: us-east-1
+  - name: model
+    description: "Default model for Codex CLI (see https://platform.openai.com/docs/models)"
+    default: "gpt-5.4"
+
+health_check:
+  command: "codex --version"
+  timeout: 10
+
+provides:
+  commands:
+    - codex
+  services: []
+
+instance_type: t4g.medium
+root_volume_gb: 40
+data_volume_gb: 0
+
+experimental: true

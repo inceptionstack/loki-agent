@@ -252,8 +252,17 @@ packs:
     experimental: true          # Set true for new packs
 ```
 
-### registry.json
-Same data in JSON format. Must stay in sync with registry.yaml.
+### registry.json (GENERATED — do NOT edit by hand)
+The JSON is a **generated artifact** for the client-side installer (which only
+has `jq`, not a YAML parser). `registry.yaml` is the single source of truth.
+
+Regenerate after editing `registry.yaml`:
+```bash
+bash scripts/sync-registry
+```
+
+CI/tests enforce parity via `bash scripts/sync-registry --check`. Manual edits
+to `registry.json` will be caught and rejected by `tests/test-pack-contracts.sh`.
 
 ---
 

@@ -1,0 +1,36 @@
+name: Registry sync check
+
+on:
+  push:
+    branches: [main, 'feature/**', 'add-*']
+    paths:
+      - 'packs/registry.yaml'
+      - 'packs/registry.json'
+      - 'scripts/sync-registry'
+      - 'tests/test-sync-registry.sh'
+      - '.github/workflows/registry-sync.yml'
+  pull_request:
+    paths:
+      - 'packs/registry.yaml'
+      - 'packs/registry.json'
+      - 'scripts/sync-registry'
+      - 'tests/test-sync-registry.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-check:
+    name: registry.json in sync with registry.yaml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install PyYAML
+        run: python3 -m pip install --quiet pyyaml
+
+      - name: sync-registry --check
+        run: bash scripts/sync-registry --check
+
+      - name: Full sync-registry test suite
+        run: bash tests/test-sync-registry.sh

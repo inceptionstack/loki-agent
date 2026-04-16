@@ -113,3 +113,17 @@ packs:
     brain: false
     claude_code: false
     experimental: true
+
+  codex-cli:
+    type: agent
+    description: "Codex CLI — OpenAI's coding agent (builder profile, authenticate post-deploy)"
+    deps: []
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    default_model: "gpt-5.4"
+    ports: {}
+    brain: false
+    claude_code: false
+    experimental: true
+    requires_openai_key: true
