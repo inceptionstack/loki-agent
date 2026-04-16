@@ -123,6 +123,10 @@ LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
 PROVIDER_KEY=""
+# Pack-specific: optional Secrets Manager id/arn to resolve at install time
+# into KIRO_API_KEY inside the kiro-cli pack (and potentially others later).
+# The raw key is NEVER written to CFN state, UserData, or bootstrap logs.
+KIRO_FROM_SECRET=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -190,6 +194,11 @@ while [[ $# -gt 0 ]]; do
       PROVIDER_KEY="$2"
       shift 2
       ;;
+    --kiro-from-secret)
+      [[ $# -gt 1 ]] || { echo "ERROR: --kiro-from-secret requires a value" >&2; exit 1; }
+      KIRO_FROM_SECRET="$2"
+      shift 2
+      ;;
     --*)
       # Skip unknown options (with optional value)
       if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
@@ -226,11 +235,13 @@ jq -n \
   --arg litellm_key "$LITELLM_KEY" \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_key "$PROVIDER_KEY" \
+  --arg from_secret "$KIRO_FROM_SECRET" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     hermes_model:$hermes_model, litellm_url:$litellm_url,
     litellm_key:$litellm_key, litellm_model:$litellm_model,
-    provider_key:$provider_key}' > "${PACK_CONFIG}"
+    provider_key:$provider_key,
+    "from-secret":$from_secret}' > "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"
 chown ec2-user:ec2-user "${PACK_CONFIG}"
 export PACK_CONFIG

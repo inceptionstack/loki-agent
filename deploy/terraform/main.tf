@@ -721,6 +721,7 @@ resource "aws_instance" "main" {
     litellm_api_key  = var.litellm_api_key
     litellm_model    = var.litellm_model
     provider_api_key = var.provider_api_key
+    kiro_from_secret = var.kiro_from_secret
     repo_branch      = var.repo_branch
   }))
 
