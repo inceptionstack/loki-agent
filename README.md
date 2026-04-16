@@ -84,8 +84,8 @@ The installer discovers packs dynamically and asks which to deploy. Experimental
 
 ```bash
 # Clone
-git clone https://github.com/inceptionstack/loki-agent.git
-cd loki-agent/deploy/cloudformation
+git clone https://github.com/inceptionstack/lowkey.git
+cd lowkey/deploy/cloudformation
 
 # Deploy (OpenClaw — default)
 aws cloudformation create-stack \
@@ -114,7 +114,7 @@ aws ssm start-session --target <instance-id>
 openclaw tui   # or use the alias: loki tui
 ```
 
-Full deployment guide: [Deploying Lowkey on AWS](https://github.com/inceptionstack/loki-agent/wiki/Deploying-Lowkey-on-AWS)
+Full deployment guide: [Deploying Lowkey on AWS](https://github.com/inceptionstack/lowkey/wiki/Deploying-Lowkey-on-AWS)
 
 </details>
 
@@ -122,11 +122,11 @@ Full deployment guide: [Deploying Lowkey on AWS](https://github.com/inceptionsta
 
 > **Important — these reduce mistakes and improve agent behavior significantly.**
 
-After connecting to Lowkey for the first time, run the essential bootstraps. These are located at: [`bootstraps/essential/`](https://github.com/inceptionstack/loki-agent/tree/main/bootstraps/essential)
+After connecting to Lowkey for the first time, run the essential bootstraps. These are located at: [`bootstraps/essential/`](https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential)
 
 **Example prompt** — paste this into your Lowkey chat:
 
-> *"Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/loki-agent/tree/main/bootstraps/essential"*
+> *"Lowkey please bootstrap yourself based on this url https://github.com/inceptionstack/lowkey/tree/main/bootstraps/essential"*
 
 Available essential bootstraps:
 
@@ -147,7 +147,7 @@ Available essential bootstraps:
 
 > Nice to have — take a look and pick what fits your workflow.
 
-After running essential bootstraps, run the optional bootstraps of your choice, located at: [`bootstraps/optional/`](https://github.com/inceptionstack/loki-agent/tree/main/bootstraps/optional)
+After running essential bootstraps, run the optional bootstraps of your choice, located at: [`bootstraps/optional/`](https://github.com/inceptionstack/lowkey/tree/main/bootstraps/optional)
 
 Available optional bootstraps:
 
@@ -158,7 +158,7 @@ Available optional bootstraps:
 
 ### Step 4: Telegram Integration (if needed)
 
-If you want to use Lowkey via Telegram, run the Telegram bootstraps located at: [`bootstraps/telegram/`](https://github.com/inceptionstack/loki-agent/tree/main/bootstraps/telegram)
+If you want to use Lowkey via Telegram, run the Telegram bootstraps located at: [`bootstraps/telegram/`](https://github.com/inceptionstack/lowkey/tree/main/bootstraps/telegram)
 
 - **BOOTSTRAP-TELEGRAM** — Sets up basic Telegram bot integration
 - **BOOTSTRAP-TELEGRAM-GROUP** — Configures Telegram group chat functionality
@@ -211,8 +211,8 @@ Packs can also be run individually (e.g., on an existing EC2 instance):
 
 ```bash
 # Install bedrockify + hermes manually
-git clone https://github.com/inceptionstack/loki-agent.git
-cd loki-agent
+git clone https://github.com/inceptionstack/lowkey.git
+cd lowkey
 
 # Install bedrockify first (dependency)
 bash packs/bedrockify/install.sh --region us-east-1 --port 8090
@@ -384,7 +384,7 @@ Lowkey isn't a one-shot tool you open when you need something. It's an always-on
 
 ## How It Works
 
-Lowkey is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-agent](https://github.com/inceptionstack/loki-agent) repository packages everything needed to deploy a production-ready Lowkey instance:
+Lowkey is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-source AI agent framework. The [loki-agent](https://github.com/inceptionstack/lowkey) repository packages everything needed to deploy a production-ready Lowkey instance:
 
 **1. One-click deployment.** Choose your IaC tool  (CloudFormation, SAM, or Terraform) and deploy. The template creates an isolated VPC, a T4g.xlarge EC2 instance by default (recommended so it can really do things like build run tests, build code, dockerize things and more, as a real dev machine), IAM roles, security services, and installs Lowkey with a pre-configured workspace. Total deploy time: \~4-10 minutes.
 
@@ -476,7 +476,7 @@ Lowkey is:
 
 ## Open Source
 
-Lowkey is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/loki-agent](https://github.com/inceptionstack/loki-agent).
+Lowkey is fully open source. The deployment templates, brain files, skills, and bootstrap scripts are all available at [github.com/inceptionstack/lowkey](https://github.com/inceptionstack/lowkey).
 
 Built on [OpenClaw](https://github.com/openclaw/openclaw), [Hermes](https://github.com/NousResearch/hermes-agent), [NemoClaw](https://github.com/NVIDIA/NemoClaw), and [Kiro CLI](https://kiro.dev) — choose your agent runtime at deploy time.
 
@@ -484,7 +484,7 @@ Built on [OpenClaw](https://github.com/openclaw/openclaw), [Hermes](https://gith
 
 | Repo | Description |
 |------|-------------|
-| **[loki-agent](https://github.com/inceptionstack/loki-agent)** | Deploy templates (CloudFormation, SAM, Terraform), pack system, bootstrap scripts, brain files |
+| **[loki-agent](https://github.com/inceptionstack/lowkey)** | Deploy templates (CloudFormation, SAM, Terraform), pack system, bootstrap scripts, brain files |
 | **[loki-skills](https://github.com/inceptionstack/loki-skills)** | Agent skills library — AWS infrastructure, observability, payments, and more (OpenClaw + Hermes) |
 | **[bedrockify](https://github.com/inceptionstack/bedrockify)** | OpenAI-compatible proxy for Amazon Bedrock — chat completions + embeddings in one binary |
 | **[ai-patterns](https://github.com/inceptionstack/ai-patterns)** | AI Agent Architecture Patterns — definitions, naming, and design considerations |
