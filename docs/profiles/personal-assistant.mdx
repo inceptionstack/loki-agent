@@ -1,0 +1,81 @@
+---
+title: "Personal assistant profile"
+description: "Bedrock inference only. No AWS API surface, no security services."
+---
+
+<Info>
+Personal assistant gives the agent **only Bedrock `InvokeModel`** permissions. Zero other AWS access. Use it when you want AI help but don't want the agent anywhere near your infrastructure.
+</Info>
+
+## What it is
+
+The minimal-surface profile. The instance has:
+
+- Outbound Bedrock `InvokeModel` / `InvokeModelWithResponseStream` only
+- No IAM except the bedrock-scoped policy
+- No security services (they're off by default to keep cost minimal)
+
+Best for:
+
+- Running a coding agent against Bedrock without broader AWS exposure
+- NemoClaw (mandatory — NemoClaw's OpenShell sandbox blocks AWS APIs anyway)
+- Personal productivity agents where the only question is "can I invoke the model"
+
+## Defaults (simple mode)
+
+| Setting | Value |
+|---|---|
+| IAM policy | Bedrock invoke (scoped to specific model ARNs) |
+| Instance type | `t4g.medium` (2 vCPU, 4 GiB, arm64) |
+| Root volume | 40 GB |
+| Data volume | 80 GB (OpenClaw / NemoClaw) / 0 GB (others) |
+| Security Hub | ❌ **off** |
+| GuardDuty | ❌ **off** |
+| Inspector | ❌ **off** |
+| Access Analyzer | ❌ **off** |
+| Config recorder | ❌ **off** |
+
+The security services are off because they cost money and there's nothing in the account surface to monitor — the agent has no write ability.
+
+## Install examples
+
+<Tabs>
+  <Tab title="NemoClaw (required profile)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack nemoclaw \
+      --profile personal_assistant
+    ```
+    NemoClaw **only** works with personal_assistant. It runs in an OpenShell sandbox.
+  </Tab>
+  <Tab title="OpenClaw personal">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile personal_assistant
+    ```
+    OpenClaw gateway for coding help; can't touch AWS.
+  </Tab>
+  <Tab title="Claude Code personal">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## When to use personal assistant
+
+- You want the agent to help you code, but not *touch* your AWS.
+- You're running NemoClaw (it's the only valid profile).
+- You want to minimize cost — security services off means just the EC2 + Bedrock calls.
+
+## When to NOT use personal assistant
+
+- The agent should deploy code or provision AWS resources → use [builder](/profiles/builder).
+- The agent should explain/audit existing AWS → use [account_assistant](/profiles/account-assistant).
+
+## Enabling security services anyway
+
+Advanced mode lets you enable them individually even on personal_assistant if you want the monitoring. See [Security services](/reference/security-services).

@@ -1,0 +1,125 @@
+---
+title: "Codex CLI"
+description: "OpenAI Codex — builder agent on AWS, authenticated post-install."
+---
+
+<Note>
+**Experimental pack.** Codex CLI is OpenAI's coding agent (not Bedrock). The pack installs the binary and configures it as a *builder agent* (`danger-full-access` sandbox, never-prompt approval). Authentication is deferred until after deploy — you run `codex login` or paste an API key on the instance.
+</Note>
+
+## When to use
+
+- You want OpenAI's Codex as the agent
+- You're OK with a post-deploy auth step (not fully headless)
+- You want `codex exec "prompt"` one-shots or the full TUI
+
+## What the pack installs
+
+- Codex CLI via npm (user-owned prefix if possible; falls back to `sudo npm install -g`)
+- `~/.codex/config.toml` with a managed block:
+  ```toml
+  model = "gpt-5.4"
+  approval_policy = "never"
+  sandbox_mode = "danger-full-access"
+  ```
+- No systemd service — pure CLI pack
+
+The managed block is sentinel-isolated: any user edits *outside* the markers are preserved on re-install.
+
+## Install — non-interactive
+
+<Tabs>
+  <Tab title="Builder (recommended)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile builder
+    ```
+    After install, SSM in and run `codex login`.
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Personal assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Pack parameters
+
+| Param | Flag | Default | Description |
+|---|---|---|---|
+| `region` | `--region` | `us-east-1` | AWS region (informational — Codex uses OpenAI's API) |
+| `model` | `--model` | `gpt-5.4` | OpenAI model id (see [platform.openai.com/docs/models](https://platform.openai.com/docs/models)) |
+
+<Warning>
+Bedrock-style model IDs (`us.anthropic.*`, `eu.*`, `amazon.*`, etc.) are **rejected by the pack** with a warning — OpenAI's API returns HTTP 400 for them. This is a defense-in-depth guard; the normal CFN flow now passes `gpt-5.4` by default.
+</Warning>
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## First-run (post-install)
+
+Codex auth is intentionally deferred — the pack won't embed your OpenAI credentials in the AMI. Pick one:
+
+<Tabs>
+  <Tab title="Browser-based ChatGPT login (easiest)">
+    ```bash
+    aws ssm start-session --target <instance-id>
+    codex login
+    # → prints a URL and device code; enter in your browser
+    ```
+  </Tab>
+  <Tab title="OpenAI API key">
+    ```bash
+    aws ssm start-session --target <instance-id>
+    export OPENAI_API_KEY=sk-...
+    # Or stdin:
+    printenv OPENAI_API_KEY | codex login --with-api-key
+    ```
+  </Tab>
+</Tabs>
+
+Then verify:
+
+```bash
+codex --version
+codex login status            # → "Logged in using ChatGPT"
+codex exec "what is 2+3?"     # → 5
+```
+
+## Security: managed block sentinels
+
+`~/.codex/config.toml` uses fenced markers so this pack plays nicely with your other Codex config:
+
+```toml
+# >>> managed by lowkey codex-cli pack >>>
+model = "gpt-5.4"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+# <<< managed by lowkey codex-cli pack <<<
+
+# anything BELOW here is yours — preserved on re-install
+[projects."/home/ec2-user/work"]
+trust_level = "trusted"
+```
+
+Re-running the pack regenerates the managed block (byte-identical if nothing changed) but leaves everything else alone.
+
+## Tear-down
+
+Delete the stack. Codex credentials on the instance vanish with the EBS volume — rotate your OpenAI key if the account is shared.

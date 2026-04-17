@@ -1,0 +1,115 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Lowkey",
+  "description": "Self-hosted AI coding agents on AWS — OpenClaw, Claude Code, Codex, Kiro, NemoClaw, Hermes, and more.",
+  "colors": {
+    "primary": "#7C3AED",
+    "light": "#A78BFA",
+    "dark": "#5B21B6"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "index",
+              "quickstart",
+              "concepts"
+            ]
+          },
+          {
+            "group": "Profiles",
+            "pages": [
+              "profiles/overview",
+              "profiles/builder",
+              "profiles/account-assistant",
+              "profiles/personal-assistant"
+            ]
+          },
+          {
+            "group": "Agents",
+            "pages": [
+              "agents/overview",
+              "agents/openclaw",
+              "agents/claude-code",
+              "agents/codex-cli",
+              "agents/kiro-cli",
+              "agents/nemoclaw",
+              "agents/hermes",
+              "agents/pi",
+              "agents/ironclaw"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "CLI",
+            "pages": [
+              "reference/cli",
+              "reference/simple-mode-defaults",
+              "reference/environment-variables"
+            ]
+          },
+          {
+            "group": "Deploy methods",
+            "pages": [
+              "reference/cloudformation",
+              "reference/terraform"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "reference/security-services",
+              "reference/secrets-manager"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "GitHub",
+          "href": "https://github.com/inceptionstack/lowkey",
+          "icon": "github"
+        },
+        {
+          "anchor": "Releases",
+          "href": "https://github.com/inceptionstack/lowkey/releases",
+          "icon": "tag"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "href": "https://github.com/inceptionstack/lowkey"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Install",
+      "href": "https://github.com/inceptionstack/lowkey#install"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/inceptionstack/lowkey"
+    }
+  }
+}

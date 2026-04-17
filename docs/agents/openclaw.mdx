@@ -1,0 +1,110 @@
+---
+title: "OpenClaw"
+description: "Stateful AI agent with a 24/7 gateway, persistent memory, and channel integrations."
+---
+
+<Note>
+**Stable pack.** OpenClaw is the flagship pack — a long-running agent with a gateway service, persistent state, cron jobs, multi-channel messaging (Telegram, Discord, Slack, WhatsApp, etc.), memory system, and sub-agent orchestration.
+</Note>
+
+## When to use
+
+Pick OpenClaw when you want **an agent that remembers and runs continuously**:
+
+- Ops assistant that keeps watch on your account
+- Personal assistant accessible from messaging apps
+- Coding agent with persistent memory across sessions
+- Orchestrator for scheduled tasks + sub-agents
+
+For one-shot "run this prompt and exit" workflows, a CLI pack ([claude-code](/agents/claude-code), [codex-cli](/agents/codex-cli), [kiro-cli](/agents/kiro-cli)) is simpler.
+
+## What the pack installs
+
+- Node.js + `openclaw` npm package via mise
+- `bedrockify` dep (OpenAI-compatible Bedrock proxy on localhost)
+- `openclaw-gateway` systemd user service on port 3001
+- `~/.openclaw/` state directory on the 80 GB data volume
+- `loki` and `openclaw` commands on `ec2-user`'s PATH
+
+## Install — non-interactive
+
+<Tabs>
+  <Tab title="Builder (recommended)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Account assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile account_assistant
+    ```
+  </Tab>
+  <Tab title="Personal assistant">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile personal_assistant
+    ```
+  </Tab>
+</Tabs>
+
+## Pack parameters
+
+Pack params are written to `/tmp/loki-pack-config.json` by `bootstrap.sh`. Simple-mode fills them automatically; advanced mode or manual pack invocation lets you override.
+
+| Param | Flag | Default | Description |
+|---|---|---|---|
+| `region` | `--region` | `us-east-1` | AWS region for Bedrock |
+| `model` | `--model` | `us.anthropic.claude-opus-4-6-v1` | Default Bedrock model ID |
+| `port` | `--gw-port` | `3001` | Gateway port |
+| `token` | *(auto)* | auto-generated | Gateway auth token |
+| `model-mode` | `--model-mode` | `bedrock` | `bedrock`, `litellm`, or `api-key` |
+| `litellm-url` | `--litellm-base-url` | — | LiteLLM base URL (model-mode=litellm) |
+| `litellm-key` | `--litellm-api-key` | — | LiteLLM API key (model-mode=litellm) |
+| `litellm-model` | `--litellm-model` | `claude-opus-4-6` | LiteLLM model ID |
+| `provider-key` | `--provider-api-key` | — | Anthropic key (model-mode=api-key) |
+
+## Resource requirements
+
+| | Builder | Assistant profiles |
+|---|---|---|
+| Instance | `t4g.xlarge` | `t4g.medium` |
+| Root volume | 40 GB | 40 GB |
+| Data volume | 80 GB | 80 GB |
+| Runtime | mise-managed Node.js | Same |
+
+## First-run (post-install)
+
+```bash
+# SSM into the instance
+aws ssm start-session --target <instance-id>
+
+# OpenClaw CLI is on PATH for ec2-user
+openclaw --version
+openclaw agent --agent main -m "Say hi"
+```
+
+The gateway starts as a systemd user unit:
+
+```bash
+systemctl --user status openclaw-gateway.service
+```
+
+## Connecting messaging channels
+
+Post-install, configure channels from inside the gateway:
+
+```bash
+openclaw configure            # interactive setup
+openclaw channels list        # show connected channels
+```
+
+Full channel docs live in OpenClaw's own docs at [docs.openclaw.ai](https://docs.openclaw.ai).
+
+## Tear-down
+
+Delete the CFN / Terraform stack. The data volume goes with it — back up `~/.openclaw/` first if you want to preserve state.

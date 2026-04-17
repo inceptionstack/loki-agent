@@ -1,0 +1,62 @@
+---
+title: "Hermes"
+description: "NousResearch's CLI agent on Bedrock via bedrockify."
+---
+
+<Note>
+**Experimental pack.** Hermes is NousResearch's CLI agent. This pack runs it against Bedrock through the bedrockify proxy (OpenAI-compatible API over localhost), so you get Hermes's UX with Claude/Nova/etc. as the backing model.
+</Note>
+
+## When to use
+
+- Want Hermes's terminal-focused workflow with self-improving skills
+- Want Bedrock billing but Hermes's CLI
+- Lighter-weight than OpenClaw — no gateway, no memory service
+
+## What the pack installs
+
+- `bedrockify` dep on port 8090 (OpenAI-compatible Bedrock proxy)
+- Hermes CLI (from NousResearch's installer)
+- Env config pointing Hermes at `http://localhost:8090/v1` with the configured model
+
+## Install — non-interactive
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack hermes \
+  --profile builder
+```
+
+## Pack parameters
+
+| Param | Default | Description |
+|---|---|---|
+| `region` | `us-east-1` | AWS region for Bedrock |
+| `hermes-model` | `anthropic/claude-opus-4.6` | Model ID (OpenAI-style via bedrockify). Generic `--model` is ignored. |
+| `bedrockify-port` | `8090` | Where bedrockify listens |
+
+<Info>
+Hermes uses OpenAI-style model IDs (`anthropic/claude-...`), not Bedrock IDs (`us.anthropic.*`). Bedrockify does the translation.
+</Info>
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## First-run
+
+```bash
+aws ssm start-session --target <instance-id>
+hermes --version
+hermes
+```
+
+Bedrock auth is via the instance IAM role; bedrockify handles the proxy transparently.
+
+## Tear-down
+
+Delete the stack.

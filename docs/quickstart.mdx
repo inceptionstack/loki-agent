@@ -1,0 +1,121 @@
+---
+title: "Quickstart"
+description: "Deploy an agent in ~10 minutes — interactive or fully unattended."
+---
+
+<Info>
+Lowkey needs credentials for an AWS account you own (a dedicated sandbox is recommended — the builder profile gets AdministratorAccess). Bedrock-native agents require Bedrock access in the chosen region.
+</Info>
+
+## Prerequisites
+
+<Steps>
+  <Step title="AWS credentials configured">
+    ```bash
+    aws sts get-caller-identity
+    ```
+    Must return your account ID. Use a dedicated sandbox account; never deploy into production.
+  </Step>
+  <Step title="A supported shell">
+    Works in `bash`, `zsh`, and AWS CloudShell.
+  </Step>
+  <Step title="(Optional) Bedrock access in your region">
+    Required for OpenClaw, Claude Code, NemoClaw, Hermes, Pi, IronClaw. Not needed for Codex CLI (OpenAI) or Kiro CLI (Kiro cloud).
+  </Step>
+</Steps>
+
+## Interactive install
+
+```bash
+curl -sfL install.lowkey.run | bash
+```
+
+You'll be prompted for:
+
+1. **Install mode** — Simple (recommended) or Advanced
+2. **Agent pack** — openclaw, claude-code, codex-cli, kiro-cli, nemoclaw, hermes, pi, ironclaw
+3. **Profile** — builder, account_assistant, or personal_assistant
+4. **Deploy method** — CloudFormation or Terraform
+
+Simple mode auto-configures everything else from the pack + profile choice. See [Simple-mode defaults](/reference/simple-mode-defaults) for what's decided for you.
+
+## Unattended install
+
+Pass `-y` (or `--non-interactive`) plus the pack and profile to skip prompts entirely.
+
+<Tabs>
+  <Tab title="OpenClaw (recommended)">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack openclaw \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Claude Code">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack claude-code \
+      --profile builder
+    ```
+  </Tab>
+  <Tab title="Codex CLI">
+    ```bash
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack codex-cli \
+      --profile builder
+    ```
+    Then SSM into the instance and run `codex login` — Codex auth is deferred until after deploy.
+  </Tab>
+  <Tab title="Kiro CLI (headless)">
+    ```bash
+    # First store your Kiro API key in Secrets Manager
+    aws secretsmanager create-secret \
+      --name /lowkey/kiro-api-key \
+      --secret-string "$KIRO_API_KEY"
+
+    curl -sfL install.lowkey.run | bash -s -- -y \
+      --pack kiro-cli \
+      --profile builder \
+      --kiro-from-secret /lowkey/kiro-api-key
+    ```
+  </Tab>
+</Tabs>
+
+## What happens next
+
+<AccordionGroup>
+  <Accordion title="CloudFormation / Terraform creates the base infrastructure">
+    New VPC (`10.0.0.0/16` by default), public subnet, security group, IAM instance profile, and an EC2 instance (`t4g.xlarge` for builder, `t4g.medium` for assistant profiles).
+  </Accordion>
+  <Accordion title="UserData bootstrap runs on the instance">
+    Installs Node.js via mise, clones the lowkey repo, dispatches to the pack's `install.sh`, and signals CFN / Terraform when done.
+  </Accordion>
+  <Accordion title="Pack installs the agent">
+    Each pack has its own logic — systemd service, CLI binary, or both. See the per-agent pages under [Agents](/agents/overview) for specifics.
+  </Accordion>
+  <Accordion title="Security services turn on (builder / account_assistant)">
+    Security Hub, GuardDuty, Inspector, Access Analyzer, Config recorder. Personal assistant profile keeps them off.
+  </Accordion>
+  <Accordion title="Connect via SSM">
+    ```bash
+    aws ssm start-session --target i-XXXXXXXXX
+    ```
+    SSH is disabled by default (`SSHAllowedCidr=127.0.0.1/32`). Use SSM Session Manager.
+  </Accordion>
+</AccordionGroup>
+
+## Verify
+
+Once the stack is `CREATE_COMPLETE`, SSM in and run the agent's command — e.g. `openclaw --version`, `claude --version`, `codex --version`, `kiro-cli --version`. The pack's post-install notice tells you what to run next (typically auth or first-run config).
+
+## Clean up
+
+```bash
+# CloudFormation
+aws cloudformation delete-stack --stack-name <your-stack>
+
+# Terraform
+terraform destroy
+```
+
+This removes everything the installer created: VPC, EC2, IAM, security-service subscriptions. Any Bedrock model invocations are billed through your account and stop when the instance terminates.

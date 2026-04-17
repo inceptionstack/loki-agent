@@ -1,0 +1,61 @@
+---
+title: "Agents overview"
+description: "Pick the right pack — tradeoffs, provider, auth, and install in one table."
+---
+
+Lowkey ships **eight agent packs**. Each one installs a different AI coding agent with a consistent deploy model (CFN or Terraform), security posture (profiles), and non-interactive install flow.
+
+## Pick at a glance
+
+| Pack | Stability | Provider | Auth | Agent model |
+|---|---|---|---|---|
+| [openclaw](/agents/openclaw) | stable | Bedrock (configurable) | IAM role | Stateful gateway + persistent memory |
+| [claude-code](/agents/claude-code) | stable | Bedrock | IAM role | Anthropic's coding CLI |
+| [codex-cli](/agents/codex-cli) | experimental | **OpenAI** (not Bedrock) | `codex login` post-install | OpenAI's coding CLI |
+| [kiro-cli](/agents/kiro-cli) | experimental | **Kiro cloud** (not Bedrock) | SSO or API key | AWS agentic IDE client |
+| [nemoclaw](/agents/nemoclaw) | experimental | Bedrock (via bedrockify) | IAM role | OpenClaw in OpenShell sandbox |
+| [hermes](/agents/hermes) | experimental | Bedrock (via bedrockify) | IAM role | NousResearch CLI |
+| [pi](/agents/pi) | experimental | Bedrock (via bedrockify) | IAM role | Minimal terminal harness |
+| [ironclaw](/agents/ironclaw) | experimental | Bedrock (via bedrockify) | IAM role | Rust-based NEAR AI agent |
+
+<Info>
+**Stable** = the pack is production-quality and won't change auth / API shape without notice.
+**Experimental** = expect rough edges; upstream agent may break our pack between releases.
+</Info>
+
+## If you're not sure
+
+- Want a **persistent agent with chat history, channels, and a gateway** → [OpenClaw](/agents/openclaw)
+- Want **Claude Code on Bedrock** as-is → [Claude Code](/agents/claude-code)
+- Want **Codex (OpenAI)** for one-shot execs → [codex-cli](/agents/codex-cli)
+- Want **Kiro CLI** with MCP servers → [kiro-cli](/agents/kiro-cli)
+- Want **maximum isolation** (sandboxed Bedrock agent) → [NemoClaw](/agents/nemoclaw)
+
+## How agents differ
+
+<AccordionGroup>
+  <Accordion title="Bedrock vs provider API">
+    Bedrock-native packs (openclaw, claude-code, nemoclaw, hermes, pi, ironclaw) authenticate via the instance's IAM role — no API keys to manage. Provider-API packs (codex-cli, kiro-cli) need post-install auth (browser login, stored token, or Secrets Manager).
+  </Accordion>
+  <Accordion title="With gateway vs pure CLI">
+    OpenClaw installs a systemd gateway on port 3001; other packs are pure CLI binaries invoked directly. This affects what "using the agent" means — OpenClaw has a long-running service; the others run per-invocation.
+  </Accordion>
+  <Accordion title="bedrockify dependency">
+    hermes, pi, ironclaw, and nemoclaw depend on **bedrockify** — a local OpenAI-compatible proxy that translates OpenAI-style API calls into Bedrock `InvokeModel`. Those packs install bedrockify as a dep automatically.
+  </Accordion>
+  <Accordion title="Data volume size">
+    Stateful packs (openclaw, nemoclaw) get an 80 GB data volume. Stateless CLI packs (claude-code, codex-cli, kiro-cli, hermes, pi, ironclaw) get 0 GB.
+  </Accordion>
+</AccordionGroup>
+
+## Same CLI, different packs
+
+Every pack uses the same non-interactive install flow:
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack <pack-name> \
+  --profile <builder|account_assistant|personal_assistant>
+```
+
+Pack-specific flags (like `--kiro-from-secret`) are documented on each agent's page.

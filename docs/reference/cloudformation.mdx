@@ -1,0 +1,107 @@
+---
+title: "Deploy with CloudFormation"
+description: "The default deploy method — how the CFN template is structured and how to customize."
+---
+
+Lowkey's CloudFormation template lives at `deploy/cloudformation/template.yaml`. When you pick "CloudFormation CLI" as the deploy method, `install.sh` calls `aws cloudformation create-stack` with parameters derived from your pack + profile choices.
+
+## Stack resources
+
+The template creates exactly one stack with:
+
+- **VPC + public subnet + IGW + route table** (new by default)
+- **Security group** (egress-any; inbound SSH disabled by default)
+- **IAM role + instance profile** (per-profile policy)
+- **EC2 instance** (arm64, sized per profile)
+- **SSM session preferences** for secure access
+- *(Optional)* Security service subscriptions: Security Hub, GuardDuty, Inspector, Access Analyzer, Config recorder
+
+## Key parameters
+
+<Info>
+You rarely set these by hand — `install.sh` computes them from your pack + profile + flags and passes them via `--parameters`. If you want to deploy the template directly, this is the reference.
+</Info>
+
+| Parameter | Example | Description |
+|---|---|---|
+| `PackName` | `openclaw` | Which pack to install |
+| `ProfileName` | `builder` | Which IAM profile |
+| `EnvironmentName` | `openclaw-1-4521` | Name prefix for all resources |
+| `InstanceType` | `t4g.xlarge` | EC2 instance type (arm64) |
+| `DefaultModel` | `us.anthropic.claude-opus-4-6-v1` | Per-pack default model (NoEcho: false; value is just an ID) |
+| `ModelMode` | `bedrock` | `bedrock` / `litellm` / `api-key` |
+| `BedrockRegion` | `us-east-1` | Bedrock region (can differ from deploy region) |
+| `LokiWatermark` | `openclaw-1-4521` | Tag applied to every resource |
+| `EnableSecurityHub` | `true` | Enable Security Hub |
+| `EnableGuardDuty` | `true` | Enable GuardDuty |
+| `EnableInspector` | `true` | Enable Inspector |
+| `EnableAccessAnalyzer` | `true` | Enable Access Analyzer |
+| `EnableConfigRecorder` | `true` | Enable Config recorder |
+| `ExistingVpcId` | `vpc-0abc123` | Reuse an existing VPC instead of creating one |
+| `ExistingSubnetId` | `subnet-0def456` | Public subnet in the existing VPC |
+| `RepoBranch` | `main` | Git branch of the lowkey repo to clone |
+| `SSHAllowedCidr` | `127.0.0.1/32` | CIDR allowed to SSH (default disables SSH) |
+| `KiroFromSecret` | `/lowkey/kiro-api-key` | Secrets Manager id/arn for Kiro API key (kiro-cli only) |
+| `LiteLLMApiKey` | — | `NoEcho: true`; only used when ModelMode=litellm |
+| `ProviderApiKey` | — | `NoEcho: true`; only used when ModelMode=api-key |
+
+<Warning>
+`LiteLLMApiKey` and `ProviderApiKey` are `NoEcho: true` — they won't appear in stack history or describe-stacks output, but they **do** pass through UserData (which is Base64-encoded in stack metadata). For long-lived secrets, prefer the `--kiro-from-secret` / Secrets Manager pattern which flows only a reference.
+</Warning>
+
+## Deploying the template directly
+
+```bash
+aws cloudformation create-stack \
+  --stack-name lowkey-myagent \
+  --template-body file://deploy/cloudformation/template.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=PackName,ParameterValue=openclaw \
+    ParameterKey=ProfileName,ParameterValue=builder \
+    ParameterKey=EnvironmentName,ParameterValue=my-agent \
+    ParameterKey=InstanceType,ParameterValue=t4g.xlarge \
+    ParameterKey=DefaultModel,ParameterValue=us.anthropic.claude-opus-4-6-v1 \
+    ParameterKey=LokiWatermark,ParameterValue=my-agent \
+    ...
+```
+
+For a builder-profile OpenClaw install this is ~17 parameters. Running `install.sh` is almost always easier.
+
+## Customizing UserData
+
+UserData is embedded in the template. It:
+
+1. Installs `git` if missing
+2. Clones the lowkey repo at `RepoBranch`
+3. Calls `deploy/bootstrap.sh` with the pack + profile args
+4. Signals CFN success/failure
+
+If you fork the repo and want to run the installer from your fork, change `RepoBranch` (and update the `git clone` URL in the template).
+
+## Watching the deploy
+
+```bash
+# Stack events
+aws cloudformation describe-stack-events \
+  --stack-name lowkey-myagent \
+  --query 'StackEvents[?ResourceStatus==`CREATE_IN_PROGRESS` || ResourceStatus==`CREATE_FAILED`]'
+
+# Bootstrap progress — published to SSM Parameter Store
+aws ssm get-parameter --name /loki/setup-step --query Parameter.Value
+aws ssm get-parameter --name /loki/setup-status --query Parameter.Value
+```
+
+Bootstrap publishes `/loki/setup-status` = `IN_PROGRESS|COMPLETE|FAILED` and `/loki/setup-step` = human-readable current step.
+
+## Tear-down
+
+```bash
+aws cloudformation delete-stack --stack-name lowkey-myagent
+```
+
+The stack owns the VPC, EC2, IAM — everything vanishes together. Security service subscriptions may linger briefly (AWS detaches them async).
+
+<Info>
+If you reused an existing VPC via `ExistingVpcId`, the VPC is **not** deleted (you brought it, you keep it).
+</Info>

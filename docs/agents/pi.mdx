@@ -1,0 +1,56 @@
+---
+title: "Pi"
+description: "Minimal terminal coding harness on Bedrock via bedrockify."
+---
+
+<Note>
+**Experimental pack.** Pi is a lightweight terminal coding harness. This pack runs it against Bedrock through bedrockify, so you get Pi's minimal UX with Claude/Nova as the model.
+</Note>
+
+## When to use
+
+- Want the smallest possible coding loop in a terminal
+- Want to script agent invocations without a heavy TUI
+- Bedrock billing, pure CLI
+
+## What the pack installs
+
+- `bedrockify` dep on port 8090
+- Pi binary / harness
+- Shell profile with PATH + aliases
+
+## Install — non-interactive
+
+```bash
+curl -sfL install.lowkey.run | bash -s -- -y \
+  --pack pi \
+  --profile builder
+```
+
+## Pack parameters
+
+| Param | Default | Description |
+|---|---|---|
+| `region` | `us-east-1` | AWS region for Bedrock |
+| `model` | `us.anthropic.claude-sonnet-4-6-v1` | Model ID passed to Pi via bedrockify |
+| `bedrockify-port` | `8090` | Where bedrockify listens |
+
+## Resource requirements
+
+| | All profiles |
+|---|---|
+| Instance | `t4g.medium` |
+| Root volume | 40 GB |
+| Data volume | 0 GB |
+
+## First-run
+
+```bash
+aws ssm start-session --target <instance-id>
+pi --version
+pi
+```
+
+## Tear-down
+
+Delete the stack.
