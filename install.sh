@@ -72,12 +72,14 @@ INSTALLER_VERSION="0.5.99"
 # --method <m>: pre-select deploy method (cfn, terraform/tf)
 # --profile <p>: pre-select permission profile (builder, account_assistant, personal_assistant)
 # --simple / --advanced: pre-select install mode
+# --test: mark this invocation as a test (no AWS deploy, telemetry tagged is_test)
 AUTO_YES=false
 PRESELECT_PACK=""
 PRESELECT_METHOD=""
 PRESELECT_PROFILE=""
 INSTALL_MODE=""  # "simple" or "advanced", empty = ask
 DEBUG_IN_REPO=false
+TEST_MODE=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
@@ -111,6 +113,7 @@ while [[ $# -gt 0 ]]; do
       fi
       KIRO_FROM_SECRET="$2"; shift 2 ;;
     --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
+    --test|--dry-run) TEST_MODE=true; shift ;;
     --help|-h)
       cat <<'USAGE'
 Usage: install.sh [OPTIONS]
@@ -129,6 +132,10 @@ Options:
   --kiro-from-secret <id|arn>    Secrets Manager id/arn for Kiro API key
                                  (kiro-cli headless mode)
   --debug-in-repo                Dev-only: run installer from cwd
+  --test, --dry-run              Run installer end-to-end without
+                                 provisioning AWS resources. Telemetry
+                                 hits from this invocation are tagged
+                                 is_test and excluded from dashboard stats.
   -h, --help                     Show this help and exit
 
 Examples:
@@ -136,6 +143,9 @@ Examples:
   curl -sfL install.lowkey.run | bash -s -- -y --pack openclaw --profile builder
   curl -sfL install.lowkey.run | bash -s -- -y --pack kiro-cli --profile builder \
       --kiro-from-secret /lowkey/kiro-api-key
+
+  # Test install (no AWS resources created, not counted in install stats):
+  curl -sfL "install.lowkey.run?test" | bash -s -- --test
 
 Docs: https://github.com/inceptionstack/lowkey/tree/main/docs
 USAGE
@@ -1996,6 +2006,18 @@ run_config_and_review() {
 main() {
   install_gum            # must run before anything that uses $GUM
   show_banner
+  if [[ "$TEST_MODE" == "true" ]]; then
+    echo ""
+    $GUM style --foreground 220 --bold --border rounded --border-foreground 220 \
+      --padding "0 2" --margin "0 2" "🧪 TEST MODE — no AWS resources will be created"
+    echo ""
+    info "This invocation is tagged is_test and excluded from install stats."
+    info "Pass --help to see all flags."
+    echo ""
+    ok "Installer downloaded and parsed successfully."
+    ok "Exit code 0."
+    exit 0
+  fi
   choose_install_mode    # simple (default) or advanced — needed before preflight
   preflight_checks       # step 1
   run_config_and_review  # steps 2-4 (config → review)
