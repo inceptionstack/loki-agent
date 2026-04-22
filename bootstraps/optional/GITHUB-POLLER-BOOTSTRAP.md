@@ -186,7 +186,7 @@ REGION="${AWS_REGION:-us-east-1}"
 SESSION_ID="${OPENCLAW_SESSION_ID:?set OPENCLAW_SESSION_ID}"
 LOG_FILE="${LOG_FILE:-$HOME/.openclaw/logs/pr-review-poller.log}"
 SEEN_FILE="${SEEN_FILE:-$HOME/.openclaw/state/pr-reviews-seen.json}"
-SEEN_TTL_SECONDS=2592000   # 30 days
+SEEN_TTL_SECONDS=${SEEN_TTL_SECONDS:-2592000}   # 30 days; override via env
 
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$SEEN_FILE")"
 [[ -f "$SEEN_FILE" ]] || echo '{}' > "$SEEN_FILE"
