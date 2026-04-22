@@ -1,6 +1,6 @@
 # Idle Shutdown & Wake
 
-Automatically shut down the EC2 instance after 30 minutes of user inactivity. Sends a Telegram alert with a **one-tap wake link** before shutdown. EventBridge notifies you when the instance starts or stops.
+Automatically shut down the EC2 instance after an hour of user inactivity. Sends a Telegram alert with a **one-tap wake link** before shutdown. EventBridge notifies you whenever the instance actually stops or starts.
 
 ## What's in this folder
 
@@ -8,231 +8,146 @@ Automatically shut down the EC2 instance after 30 minutes of user inactivity. Se
 idle-shutdown/
 ├── idle-check.py           # Python helper — idle detection, timestamp parsing, state management
 ├── idle-check.sh           # Bash orchestrator — run by systemd timer every 5 min
+├── install-idle.sh         # Idempotent installer (SSM, IAM, Lambdas, API GW, EventBridge, systemd)
+├── uninstall-idle.sh       # Tear-down mirror of install-idle.sh
 ├── wake-lambda/
 │   └── index.mjs           # Wake Lambda — validates token, starts instance
 ├── notify-lambda/
 │   └── handler.py          # EventBridge Lambda — Telegram notifications on start/stop
 ├── systemd/
-│   ├── idle-check.service  # systemd oneshot service
+│   ├── idle-check.service  # systemd oneshot service (hardened, ${INSTALL_USER} placeholder)
 │   └── idle-check.timer    # 5-minute timer
 └── README.md               # You are here
 ```
 
 ## Architecture
 
+Two independent paths create a fresh wake token. **Any** transition to `stopped` — idle-triggered, manual, or AWS-forced — produces a tappable wake link in Telegram, so you can always get back in.
+
 ```mermaid
 flowchart LR
     subgraph EC2["EC2 Instance"]
-        Timer["systemd timer\n(every 5 min)"] --> Script["idle-check.sh"]
-        Script -->|"idle > 30m\n+ scan clean"| SSM_PUT["SSM: store\none-time token"]
-        SSM_PUT --> TG_ALERT["Telegram alert\n(best-effort)"]
-        Script -->|"still idle\n5 min later"| SHUTDOWN["ec2 stop-instances"]
+        Timer["systemd timer<br/>(every 5 min)"] --> Script["idle-check.sh"]
+        Script -->|"idle > threshold<br/>+ scan clean"| SSM_PUT1["SSM: store<br/>wake-token (path A)"]
+        SSM_PUT1 --> TG_ALERT["Telegram alert<br/>(best-effort)"]
+        Script -->|"still idle<br/>5 min later"| SHUTDOWN["ec2 stop-instances"]
     end
 
-    subgraph AWS["AWS (works while EC2 is off)"]
-        EB["EventBridge"] -->|"state verified"| NotifyLambda["notify-lambda"]
-        NotifyLambda -->|"🟢 / 🔴"| TG_NOTIFY["Telegram"]
-        APIGW["API Gateway\n(throttled)"] --> WakeLambda["wake-lambda"]
-        WakeLambda -->|"start first\nthen consume token"| EC2_START["EC2"]
+    subgraph AWS["AWS (runs while EC2 is off)"]
+        EB["EventBridge<br/>state=stopped"] -->|"verified"| NotifyLambda["notify-lambda"]
+        NotifyLambda -->|"rotate if needed"| SSM_PUT2["SSM: wake-token<br/>(path B — any stop)"]
+        NotifyLambda -->|"🔴 stopped +<br/>tap-to-wake link"| TG_NOTIFY["Telegram"]
+        APIGW["API Gateway<br/>(2 rps / 5 burst)"] --> WakeLambda["wake-lambda"]
+        WakeLambda -->|"start first,<br/>delete token"| EC2_START["EC2 running"]
+        EC2_START --> EB2["EventBridge<br/>state=running"]
+        EB2 --> NotifyLambda2["notify-lambda<br/>(🟢 running + IP)"]
     end
 
     User["👤 tap wake link"] --> APIGW
 ```
 
+### Two token-generation paths
+
+| Path | Trigger | Generator | When used |
+|------|---------|-----------|-----------|
+| **A** | `idle-check.sh` says "idle too long" | on-box bash script | Graceful shutdown sequence |
+| **B** | EventBridge sees any `stopped` event | `notify-lambda` | Manual stop, AWS-forced stop, crash, path-A ran but Telegram failed |
+
+Both write to the same SSM key `/openclaw/wake-token`. Path B only rotates the token if the instance is truly stopped (stale-event guard), and only if the existing token is missing or older than the stop timestamp (dedup). **Net effect: any stop → fresh wake link.**
+
 ## How it works
 
 1. **Systemd timer** fires every 5 minutes
 2. **idle-check.sh** calls **idle-check.py** to scan OpenClaw session JSONL files for the last real user message
-3. Only messages with Telegram `sender_id` metadata count — heartbeats, system messages, and memory flushes are excluded
-4. If idle > 30 min and the scan is clean (no file errors, no parse failures): generates a one-time UUID token → stores in SSM → sends Telegram alert → waits one more cycle → shuts down
-5. **Wake Lambda** validates the token, starts the instance, *then* deletes the token. If start fails, token is preserved.
-6. **EventBridge** fires on start/stop → notify Lambda sends Telegram with IP (on start) or wake link (on stop)
+3. Activity detection is a **blocklist**: every `role=user` message counts, unless it starts with a known automated prefix (heartbeat poll, `System:`, memory flush). Messages from every chat surface — Telegram, TUI, web, Slack, Discord — are treated uniformly. See **Supported surfaces** below.
+4. If idle > threshold and the scan is clean (no file errors, no parse failures): generates a one-time UUID token → stores in SSM → sends Telegram alert → waits one more cycle → stops instance
+5. **Wake Lambda** validates the token, starts the instance, *then* deletes the token. If start fails, the token is preserved.
+6. **EventBridge** fires on `running`/`stopped` → notify Lambda sends Telegram with IP (on start) or a fresh wake link (on stop)
 
-## Where to put the files
+## Supported surfaces
 
-### On the EC2 instance
+Anything that writes a `role=user` message to the session JSONL counts as activity, so long as the text doesn't begin with an automated prefix. This includes at minimum:
 
-| File | Destination |
-|------|-------------|
-| `idle-check.py` | `~/.openclaw/workspace/idle-check.py` |
-| `idle-check.sh` | `~/.openclaw/workspace/idle-check.sh` |
-| `systemd/idle-check.service` | `/etc/systemd/system/idle-check.service` |
-| `systemd/idle-check.timer` | `/etc/systemd/system/idle-check.timer` |
+- Telegram (messages carry `sender_id` metadata — historically the only accepted source)
+- OpenClaw TUI (plain text, no metadata wrapper)
+- OpenClaw web chat
+- Slack plugin
+- Discord plugin
+- Nostr, MS Teams, Nextcloud Talk, Signal (BlueBubbles), Zalo, Feishu/Lark
+
+**Automated prefixes that do NOT count as activity:**
+
+- `Read HEARTBEAT.md` — heartbeat polls
+- `System:` — system notifications
+- `Pre-compaction memory flush` — memory compactor
+- `[Heartbeat]`, `[System]` — future/legacy variants
+
+Add more via environment variable `IDLE_EXTRA_AUTOMATED_PREFIXES="Prefix A,Prefix B"` in the systemd unit drop-in or `idle-check.sh` environment.
+
+## Install (recommended)
 
 ```bash
-chmod +x ~/.openclaw/workspace/idle-check.py ~/.openclaw/workspace/idle-check.sh
-sudo cp systemd/idle-check.service systemd/idle-check.timer /etc/systemd/system/
-sudo systemctl daemon-reload
+./install-idle.sh \
+  --region us-east-1 \
+  --instance-id i-0123456789abcdef0 \
+  --chat-id 1234567890 \
+  --reuse-openclaw-bot-token
+```
+
+The installer is **idempotent** — re-run it to update code or config without creating duplicates. It does **not** start the timer so you can review config first. At the end it prints:
+
+```bash
 sudo systemctl enable --now idle-check.timer
 ```
 
-### On AWS (serverless)
+### install-idle.sh flags
 
-| File | Deploy as |
-|------|-----------|
-| `wake-lambda/index.mjs` | Lambda function (Node.js 22, arm64) behind HTTP API Gateway |
-| `notify-lambda/handler.py` | Lambda function (Python 3.13, arm64) triggered by EventBridge |
+| Flag | Meaning |
+|------|---------|
+| `--region R` | AWS region (default `us-east-1`) |
+| `--instance-id I` | EC2 instance id to manage |
+| `--chat-id ID` | Telegram chat id (required — never auto-derived) |
+| `--bot-token-ssm-ref P` | Existing SSM SecureString parameter holding the bot token |
+| `--bot-token-file F` | File containing the bot token (stored as SecureString) |
+| `--reuse-openclaw-bot-token` | Read `.channels.telegram.botToken` from `~/.openclaw/openclaw.json` |
+| `--install-user U` | Unix user for the systemd service (default: `$SUDO_USER` or current user) |
+| `--dry-run` | Print actions without mutating anything |
 
-## Setup
+Exactly one of `--bot-token-ssm-ref`, `--bot-token-file`, or `--reuse-openclaw-bot-token` must be provided. Chat id is always required explicitly — copying config from one box to another should never accidentally broadcast wake links to the wrong chat.
 
-### 1. Store config in SSM
-
-```bash
-REGION="us-east-1"
-
-aws ssm put-parameter --name "/openclaw/wake-config/instance-id" \
-  --value "<your-instance-id>" --type String --overwrite --region "$REGION"
-
-aws ssm put-parameter --name "/openclaw/wake-config/telegram-chat-id" \
-  --value "<your-chat-id>" --type String --overwrite --region "$REGION"
-
-aws ssm put-parameter --name "/openclaw/wake-config/telegram-bot-token" \
-  --value "<your-bot-token>" --type SecureString --overwrite --region "$REGION"
-```
-
-### 2. Deploy Wake Lambda
+## Uninstall
 
 ```bash
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-
-# Create IAM role
-aws iam create-role --role-name wake-lambda-role \
-  --assume-role-policy-document '{
-    "Version":"2012-10-17",
-    "Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]
-  }'
-
-aws iam put-role-policy --role-name wake-lambda-role --policy-name wake-permissions \
-  --policy-document "{
-    \"Version\":\"2012-10-17\",
-    \"Statement\":[
-      {\"Effect\":\"Allow\",\"Action\":\"ec2:StartInstances\",\"Resource\":\"arn:aws:ec2:${REGION}:${ACCOUNT_ID}:instance/<your-instance-id>\"},
-      {\"Effect\":\"Allow\",\"Action\":\"ec2:DescribeInstanceStatus\",\"Resource\":\"*\"},
-      {\"Effect\":\"Allow\",\"Action\":[\"ssm:GetParameter\",\"ssm:DeleteParameter\"],\"Resource\":[\"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-token\",\"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-config/*\"]},
-      {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:${REGION}:${ACCOUNT_ID}:*\"}
-    ]
-  }"
-
-sleep 10
-
-# Deploy Lambda
-zip -j /tmp/wake-lambda.zip wake-lambda/index.mjs
-aws lambda create-function --function-name agent-wake \
-  --runtime nodejs22.x --handler index.handler \
-  --role "arn:aws:iam::${ACCOUNT_ID}:role/wake-lambda-role" \
-  --zip-file fileb:///tmp/wake-lambda.zip \
-  --timeout 10 --memory-size 128 --architectures arm64 --region "$REGION"
+./uninstall-idle.sh --region us-east-1 --instance-id i-0123456789abcdef0
 ```
 
-### 3. Create API Gateway
+Safe to re-run. Use `--keep-ssm` to preserve `/openclaw/wake-config/*` and `/openclaw/wake-token` if you plan to reinstall soon.
 
-```bash
-API_ID=$(aws apigatewayv2 create-api --name agent-wake --protocol-type HTTP \
-  --region "$REGION" --query ApiId --output text)
+## Manual install (advanced)
 
-INTEG_ID=$(aws apigatewayv2 create-integration --api-id "$API_ID" \
-  --integration-type AWS_PROXY \
-  --integration-uri "arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:agent-wake" \
-  --payload-format-version 2.0 --region "$REGION" --query IntegrationId --output text)
+If you'd rather wire everything up by hand, see [`install-idle.sh`](install-idle.sh) — the script is plain bash and ordered top-to-bottom (SSM → IAM → Lambdas → API GW → EventBridge → systemd). Copy the blocks you need.
 
-aws apigatewayv2 create-route --api-id "$API_ID" --route-key "GET /wake" \
-  --target "integrations/$INTEG_ID" --region "$REGION"
-
-aws apigatewayv2 create-stage --api-id "$API_ID" --stage-name '$default' \
-  --auto-deploy --region "$REGION"
-
-aws apigatewayv2 update-stage --api-id "$API_ID" --stage-name '$default' \
-  --route-settings '{"GET /wake":{"ThrottlingBurstLimit":5,"ThrottlingRateLimit":1}}'
-
-aws lambda add-permission --function-name agent-wake \
-  --statement-id apigw --action lambda:InvokeFunction \
-  --principal apigateway.amazonaws.com \
-  --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" --region "$REGION"
-
-WAKE_URL="$(aws apigatewayv2 get-api --api-id "$API_ID" --region "$REGION" \
-  --query ApiEndpoint --output text)/wake"
-
-# Store for idle-check.sh
-aws ssm put-parameter --name "/openclaw/wake-config/wake-url" \
-  --value "$WAKE_URL" --type String --overwrite --region "$REGION"
-
-echo "Wake URL: $WAKE_URL"
-```
-
-### 4. Deploy Notify Lambda
-
-```bash
-aws iam create-role --role-name ec2-notify-lambda-role \
-  --assume-role-policy-document '{
-    "Version":"2012-10-17",
-    "Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]
-  }'
-
-aws iam put-role-policy --role-name ec2-notify-lambda-role --policy-name notify-permissions \
-  --policy-document "{
-    \"Version\":\"2012-10-17\",
-    \"Statement\":[
-      {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"arn:aws:logs:${REGION}:${ACCOUNT_ID}:*\"},
-      {\"Effect\":\"Allow\",\"Action\":\"ec2:DescribeInstances\",\"Resource\":\"*\"},
-      {\"Effect\":\"Allow\",\"Action\":[\"ssm:GetParameter\",\"ssm:PutParameter\"],\"Resource\":[\"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-config/*\",\"arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/openclaw/wake-token\"]}
-    ]
-  }"
-
-sleep 10
-
-zip -j /tmp/notify-lambda.zip notify-lambda/handler.py
-aws lambda create-function --function-name ec2-notify \
-  --runtime python3.13 --handler handler.handler \
-  --role "arn:aws:iam::${ACCOUNT_ID}:role/ec2-notify-lambda-role" \
-  --zip-file fileb:///tmp/notify-lambda.zip \
-  --timeout 30 --memory-size 128 --architectures arm64 \
-  --environment "Variables={INSTANCE_ID=<your-instance-id>,TELEGRAM_CHAT_ID=<your-chat-id>,WAKE_URL=$WAKE_URL}" \
-  --region "$REGION"
-```
-
-### 5. Create EventBridge Rule
-
-```bash
-aws events put-rule --name ec2-state-notify \
-  --event-pattern "{
-    \"source\":[\"aws.ec2\"],
-    \"detail-type\":[\"EC2 Instance State-change Notification\"],
-    \"detail\":{\"state\":[\"running\",\"stopped\"],\"instance-id\":[\"<your-instance-id>\"]}
-  }" --region "$REGION"
-
-NOTIFY_ARN=$(aws lambda get-function --function-name ec2-notify \
-  --query Configuration.FunctionArn --output text --region "$REGION")
-
-aws events put-targets --rule ec2-state-notify \
-  --targets "Id=notify,Arn=$NOTIFY_ARN" --region "$REGION"
-
-aws lambda add-permission --function-name ec2-notify \
-  --statement-id eventbridge --action lambda:InvokeFunction \
-  --principal events.amazonaws.com \
-  --source-arn "arn:aws:events:${REGION}:${ACCOUNT_ID}:rule/ec2-state-notify" --region "$REGION"
-```
-
-### 6. Install on instance
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now idle-check.timer
-sudo systemctl status idle-check.timer
-```
+Key details the installer gets right and hand-rolled setups often miss:
+- `sleep 10` after `iam create-role` — Lambda create fails otherwise (IAM propagation)
+- `lambda:InvokeFunction` permissions added **after** the Lambda exists, **before** the caller (APIGW, EventBridge) is reachable
+- Wake URL written to SSM **after** the API is created, so `idle-check.sh` picks it up on the next run
+- Systemd unit has `${INSTALL_USER}` substituted to the resolved login user, not hard-coded `ec2-user`
 
 ## Verify
 
 ```bash
-# Dry run
-./idle-check.sh --dry-run
-tail -3 /tmp/idle-check.log
+# Dry run — logs what would happen, no shutdown
+~/.openclaw/workspace/idle-check.sh --dry-run
+tail -3 ~/.openclaw/logs/idle-check.log
+
+# Test activity detection logic
+bash <path-to-repo>/tests/test-idle-check.sh
 
 # Wake rejects bad tokens
-curl -s "$WAKE_URL?token=fake"
-
-# Scan error handling
-python3 idle-check.py --idle-hours /nonexistent
+curl -s "$(aws ssm get-parameter --name /openclaw/wake-config/wake-url --query Parameter.Value --output text)?token=fake"
 ```
+
+**Where's the log?** `$HOME/.openclaw/logs/idle-check.log`. It used to live in `/tmp/idle-check.log` but the systemd unit now sets `PrivateTmp=yes` for hardening — anything in `/tmp` during a service run is namespaced and invisible from outside. The log (and the flock lock) moved to `$HOME/.openclaw/logs/` so you can still `tail -f` them from your shell without sudo.
 
 ## Safety model
 
@@ -245,10 +160,24 @@ python3 idle-check.py --idle-hours /nonexistent
 | **Event dedup** | Duplicate `stopped` events don't overwrite valid wake links |
 | **flock** | Prevents overlapping timer runs |
 | **Min uptime guard** | 15 min — prevents wake → immediate re-shutdown |
-| **API throttling** | 1 req/sec, burst 5 on API Gateway |
-| **No hardcoded secrets** | Everything in SSM Parameter Store |
-| **No shell injection** | Telegram sends via env vars, not string interpolation |
+| **API throttling** | 2 req/sec, burst 5 on API Gateway default stage |
+| **No hardcoded secrets** | Bot token in SSM SecureString; chat id and URLs in plain SSM |
+| **No shell injection** | Telegram sends via env vars, never string interpolation |
+| **Systemd hardening** | `NoNewPrivileges=yes`, `ProtectSystem=strict`, `PrivateTmp=yes`, narrow `ReadWritePaths` |
 
 ## Cost
 
 ~$0/month — Lambda free tier + HTTP API Gateway ($1/million requests) + SSM free tier.
+
+## Threshold tuning
+
+Defaults live in `idle-check.sh`:
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `IDLE_THRESHOLD_HOURS` | `1.0` | Stop after this much idle time (warn one cycle before) |
+| `MIN_UPTIME_HOURS` | `0.25` | Skip shutdown if booted less than this long ago |
+| `MAX_NO_ACTIVITY_HOURS` | `1.0` | If no user messages **ever**, stop once uptime exceeds this |
+| `LOG_MAX_LINES` | `500` | Log rotation threshold |
+
+The previous default of 0.5 (30 minutes) was too aggressive — agents mid-response would get shut out. 1 hour leaves margin for a long streaming reply or build step.

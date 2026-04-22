@@ -4,10 +4,15 @@
 Used by idle-check.sh (systemd timer, every 5 min) to determine whether
 the machine should shut down due to user inactivity.
 
-Only counts REAL human messages (with Telegram sender metadata) as activity.
-Heartbeat polls, system notifications, and memory flushes are excluded.
+Activity detection: count every role=user message UNLESS it starts with a
+known automated prefix. This is a blocklist (not an allowlist) so TUI,
+web, Slack, Discord, and any future surface all count automatically.
+
+Customize via env:
+  IDLE_EXTRA_AUTOMATED_PREFIXES  comma-separated list of additional prefixes
+                                 to treat as automated (not human activity)
 """
-import sys, json, os, re
+import sys, json, os
 from datetime import datetime, timezone
 
 
@@ -39,37 +44,57 @@ def parse_ts(ts):
     return None
 
 
-# Prefixes that indicate automated/system messages (not real human input)
-_AUTOMATED_PREFIXES = (
+# Default prefixes that indicate automated/system messages (not real human input).
+# Add more via env IDLE_EXTRA_AUTOMATED_PREFIXES="Prefix A,Prefix B".
+_DEFAULT_AUTOMATED_PREFIXES = (
     'Read HEARTBEAT.md',
     'System:',
     'Pre-compaction memory flush',
+    '[Heartbeat]',
+    '[System]',
 )
 
-# Regex: structured Telegram metadata with numeric sender_id
-# Matches: "sender_id": "1234567" or "sender_id":"1234567"
-_SENDER_ID_PATTERN = re.compile(r'"sender_id"\s*:\s*"\d+"')
+
+def _automated_prefixes():
+    """Combine default + env-configured prefixes. Called per-scan (cheap)."""
+    extra = os.environ.get('IDLE_EXTRA_AUTOMATED_PREFIXES', '')
+    extras = tuple(p.strip() for p in extra.split(',') if p.strip())
+    return _DEFAULT_AUTOMATED_PREFIXES + extras
 
 
 def _is_real_user_message(text):
-    """Return True only for genuine human messages, not heartbeats/system.
+    """Return True for genuine human activity, False for automated messages.
 
-    Detection logic:
-    1. Messages with structured Telegram sender_id metadata → real human
-    2. Messages starting with known automated prefixes → not human
-    3. Everything else → conservative, not counted (avoids false idle resets)
+    Blocklist approach: a message counts as real human activity unless it
+    starts with a known automated prefix. This ensures TUI/web/Slack/Discord
+    messages — which don't carry Telegram sender_id metadata — still count.
+
+    Inbound messages from chat surfaces often lead with a metadata header
+    (e.g. 'Conversation info (untrusted metadata)' JSON block) before the
+    actual user text. We strip leading whitespace and the common metadata
+    wrapper before matching, so those still count as real activity.
     """
     if not text:
         return False
-    # Check for structured Telegram metadata pattern (regex, not bare substring)
-    if _SENDER_ID_PATTERN.search(text):
-        return True
-    # Known automated message prefixes
-    for prefix in _AUTOMATED_PREFIXES:
-        if text.startswith(prefix):
+
+    # Peel off any leading 'Conversation info ...' / 'Sender ...' metadata blocks
+    # before checking for automated prefixes, so real user text underneath them
+    # is evaluated rather than the wrapper.
+    stripped = text.lstrip()
+    for wrapper in ('Conversation info', 'Sender (untrusted'):
+        if stripped.startswith(wrapper):
+            # Find the user's actual text after the closing fence, if any.
+            idx = stripped.find('```\n', stripped.find('```') + 1)
+            if idx != -1:
+                after = stripped[idx + 4:].lstrip()
+                if after:
+                    stripped = after
+                    break
+
+    for prefix in _automated_prefixes():
+        if stripped.startswith(prefix):
             return False
-    # Unknown format — be conservative, don't count as idle-resetting
-    return False
+    return True
 
 
 def _extract_text(obj):
@@ -97,7 +122,8 @@ def _extract_text(obj):
 def find_idle_hours(sessions_dir):
     """Find hours since last real user activity.
 
-    Returns (hours_idle, latest_ts_str) or (None, None) if no messages found.
+    Returns (hours_idle, latest_ts_str, file_failures, parse_failures) or
+    (None, None, file_failures, parse_failures) if no messages found.
     Raises ScanError if the sessions directory cannot be read.
     Compares parsed datetime objects, not strings (fixes mixed-format sorting).
     """
@@ -150,9 +176,6 @@ def find_idle_hours(sessions_dir):
             f"refusing to report NO_MESSAGES"
         )
 
-    # Note: file_read_failures/parse_failures are returned to caller
-    # so it can decide whether to trust the result for shutdown decisions
-
     if parse_failures > 0:
         print(f"WARNING: {parse_failures} timestamp(s) could not be parsed", file=sys.stderr)
 
@@ -193,6 +216,7 @@ def set_state(state_file, key, value):
     except (OSError, json.JSONDecodeError):
         data = {}
     data[key] = value
+    os.makedirs(os.path.dirname(state_file), exist_ok=True)
     tmp = state_file + '.tmp'
     with open(tmp, 'w') as f:
         json.dump(data, f, indent=2)

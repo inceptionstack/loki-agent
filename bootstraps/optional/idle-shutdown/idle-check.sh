@@ -15,17 +15,9 @@
 #   ./idle-check.sh --dry-run    # log what would happen, don't shutdown or alert
 set -euo pipefail
 
-# --- Run lock (prevent overlapping runs) ---
-LOCK_FILE="/tmp/idle-check.lock"
-exec 200>"$LOCK_FILE"
-if ! flock -n 200; then
-  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) SKIP: Another instance is running" >> /tmp/idle-check.log
-  exit 0
-fi
-
 # --- Config ---
 REGION="us-east-1"
-IDLE_THRESHOLD_HOURS=0.5       # 30 minutes
+IDLE_THRESHOLD_HOURS=1.0       # 60 minutes (was 0.5 — too aggressive for mid-response)
 MIN_UPTIME_HOURS=0.25          # skip shutdown if booted < 15 min ago
 MAX_NO_ACTIVITY_HOURS=1.0      # shutdown if no user messages ever after this
 LOG_MAX_LINES=500
@@ -38,7 +30,21 @@ SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 STATE_FILE="$HOME/.openclaw/workspace/memory/heartbeat-state.json"
 SESSIONS_DIR="$HOME/.openclaw/agents/main/sessions"
 PY="$SCRIPT_DIR/idle-check.py"
-LOG="/tmp/idle-check.log"
+# Log lives under $HOME/.openclaw/logs/ so it survives systemd PrivateTmp=yes
+# and stays reachable from ordinary user shells (no sudo needed to tail).
+LOG_DIR="$HOME/.openclaw/logs"
+LOG="$LOG_DIR/idle-check.log"
+mkdir -p "$LOG_DIR"
+
+# --- Run lock (prevent overlapping runs) ---
+# Lock under $LOG_DIR too — with PrivateTmp=yes each service invocation sees
+# a fresh /tmp, so flock(/tmp/idle-check.lock) would never actually overlap.
+LOCK_FILE="$LOG_DIR/idle-check.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) SKIP: Another instance is running" >> "$LOG"
+  exit 0
+fi
 
 DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
@@ -203,7 +209,7 @@ if [[ "$ALERT_SENT" == "false" ]]; then
 
   # Telegram is best-effort — failure doesn't block shutdown progression
   WAKE_LINK="${WAKE_URL}?token=${WAKE_TOKEN}"
-  if ! send_telegram "🐺 Idle for over 30 min. Shutting down in ~5 min to save costs.
+  if ! send_telegram "🐺 Idle for over ${IDLE_THRESHOLD_HOURS}h. Shutting down in ~5 min to save costs.
 
 👉 Tap to wake me up: ${WAKE_LINK}"; then
     log "WARNING: Telegram alert failed — shutdown will still proceed on next run"
