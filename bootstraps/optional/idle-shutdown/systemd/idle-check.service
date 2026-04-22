@@ -4,14 +4,16 @@ Description=Agent idle check — shutdown after prolonged user inactivity
 [Service]
 Type=oneshot
 User=${INSTALL_USER}
-ExecStart=/bin/bash /home/${INSTALL_USER}/.openclaw/workspace/idle-check.sh
+ExecStart=/bin/bash ${INSTALL_HOME}/.openclaw/workspace/idle-check.sh
 TimeoutSec=30
 
 # --- Hardening ---
-# install-idle.sh substitutes ${INSTALL_USER} with the resolved login user.
+# install-idle.sh substitutes ${INSTALL_USER} + ${INSTALL_HOME} with values
+# resolved from getent(1). Do not hardcode /home/<user> here — some valid
+# install users (root, LDAP accounts, system users) live outside /home.
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/home/${INSTALL_USER}/.openclaw
+ReadWritePaths=${INSTALL_HOME}/.openclaw
 PrivateTmp=yes
 # Note: the log/lock live under $HOME/.openclaw/logs/ precisely because
 # PrivateTmp=yes makes /tmp invisible from outside the service. Do NOT

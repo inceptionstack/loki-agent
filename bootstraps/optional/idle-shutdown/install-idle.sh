@@ -78,13 +78,30 @@ $REUSE_OPENCLAW              && token_src_count=$((token_src_count + 1))
 
 id -u "$INSTALL_USER" >/dev/null 2>&1 || die "User '$INSTALL_USER' does not exist"
 
+# --- Root check ---
+# The script writes files to /etc/systemd/system and calls `systemctl daemon-reload`
+# at step 7. Bail out NOW, before any AWS mutations, if we can't do that. Otherwise
+# a non-root invocation would provision SSM/IAM/Lambda/API GW and then abort with
+# 'Permission denied' in step 7, leaving a half-installed deployment.
+if [[ $EUID -ne 0 ]]; then
+  die "install-idle.sh must run as root (need to write /etc/systemd/system and run systemctl). Try: sudo ./install-idle.sh ..."
+fi
+
+# --- Resolve the install user's real home via getent (NOT hardcoded /home) ---
+# `root` lives in /root, some accounts live in /var/lib/*, LDAP/AD users may have
+# custom homes. Everything downstream (WORKSPACE, LOG_DIR, systemd ReadWritePaths,
+# idle-check.sh's $HOME-derived paths) must agree on a single source of truth.
+INSTALL_HOME="$(getent passwd "$INSTALL_USER" | awk -F: '{print $6}')"
+[[ -n "$INSTALL_HOME" && -d "$INSTALL_HOME" ]] \
+  || die "Could not resolve home directory for '$INSTALL_USER' via getent passwd"
+
 command -v aws  >/dev/null || die "aws CLI not found"
 command -v jq   >/dev/null || die "jq not found"
 command -v zip  >/dev/null || die "zip not found"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE="/home/${INSTALL_USER}/.openclaw/workspace"
-LOG_DIR="/home/${INSTALL_USER}/.openclaw/logs"
+WORKSPACE="$INSTALL_HOME/.openclaw/workspace"
+LOG_DIR="$INSTALL_HOME/.openclaw/logs"
 
 # --- Execution helpers ---
 run() {
@@ -154,7 +171,7 @@ elif [[ -n "$BOT_TOKEN_FILE" ]]; then
   unset TOKEN_VAL
   ok "Stored bot token from $BOT_TOKEN_FILE → $SSM_BOT_TOKEN_PARAM"
 else
-  OPENCLAW_JSON="/home/${INSTALL_USER}/.openclaw/openclaw.json"
+  OPENCLAW_JSON="$INSTALL_HOME/.openclaw/openclaw.json"
   [[ -r "$OPENCLAW_JSON" ]] || die "$OPENCLAW_JSON not readable (needed for --reuse-openclaw-bot-token)"
   TOKEN_VAL="$(jq -r '.channels.telegram.botToken // empty' "$OPENCLAW_JSON")"
   [[ -n "$TOKEN_VAL" && "$TOKEN_VAL" != "null" ]] \
@@ -330,9 +347,11 @@ run "install -d -o \"$INSTALL_USER\" -g \"$INSTALL_USER\" -m 755 \"$LOG_DIR\""
 run "install -o \"$INSTALL_USER\" -g \"$INSTALL_USER\" -m 755 \"$SCRIPT_DIR/idle-check.sh\" \"$WORKSPACE/idle-check.sh\""
 run "install -o \"$INSTALL_USER\" -g \"$INSTALL_USER\" -m 755 \"$SCRIPT_DIR/idle-check.py\" \"$WORKSPACE/idle-check.py\""
 
-# Substitute ${INSTALL_USER} in the unit file
+# Substitute ${INSTALL_USER} + ${INSTALL_HOME} in the unit file
 TMP_UNIT="$(mktemp)"
-sed "s|\${INSTALL_USER}|${INSTALL_USER}|g" "$SCRIPT_DIR/systemd/idle-check.service" > "$TMP_UNIT"
+sed -e "s|\${INSTALL_USER}|${INSTALL_USER}|g" \
+    -e "s|\${INSTALL_HOME}|${INSTALL_HOME}|g" \
+    "$SCRIPT_DIR/systemd/idle-check.service" > "$TMP_UNIT"
 run "install -o root -g root -m 644 \"$TMP_UNIT\" /etc/systemd/system/idle-check.service"
 rm -f "$TMP_UNIT"
 
