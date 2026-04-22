@@ -188,17 +188,20 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG_FILE"; }
 
 cycle() {
   local resp
-  resp=$(aws sqs receive-message --queue-url "$QUEUE_URL" \
-          --max-number-of-messages 10 --wait-time-seconds 20 \
-          --region "$REGION" --output json 2>/dev/null || echo '{}')
+  if ! resp=$(aws sqs receive-message --queue-url "$QUEUE_URL" \
+                --max-number-of-messages 10 --wait-time-seconds 20 \
+                --region "$REGION" --output json 2>>"$LOG_FILE"); then
+    log "ERROR: sqs receive-message failed (auth/network/permission?). Backing off."
+    return 1
+  fi
 
-  local count=$(echo "$resp" | jq '.Messages // [] | length')
+  local count=$(echo "${resp:-{}}" | jq '.Messages // [] | length')
   [[ "$count" == "0" || -z "$count" ]] && return 0
 
-  # Build prompt, collect receipts
+  # Build prompt; track receipts separately for new vs. already-seen reviews.
   local prompt=$(mktemp)
   {
-    echo "A bot reviewer submitted $count PR review(s) since the last check."
+    echo "A bot reviewer submitted PR review(s) since the last check."
     echo "For each review:"
     echo "  1. Fetch the inline comments via: gh api repos/<repo>/pulls/<n>/reviews/<id>/comments"
     echo "  2. Triage — address real bugs, reply on subjective ones, skip duplicates"
@@ -208,29 +211,44 @@ cycle() {
     echo "Reviews:"
   } > "$prompt"
 
-  local -a receipts=()
+  local -a new_receipts=()      # delete + mark seen after successful turn
+  local -a dupe_receipts=()     # ack without firing a turn
+  local new_count=0
   for ((i=0; i<count; i++)); do
     local msg=$(echo "$resp" | jq -c ".Messages[$i]")
     local body=$(echo "$msg" | jq -r '.Body')
     local rid=$(echo "$body" | jq -r '.review_id')
+    local rh=$(echo "$msg"  | jq -r '.ReceiptHandle')
     # 30-day dedup
     if jq -e --arg id "$rid" 'has($id)' "$SEEN_FILE" >/dev/null; then
-      receipts+=("$(echo "$msg" | jq -r '.ReceiptHandle')")
+      dupe_receipts+=("$rh")
       continue
     fi
     echo "- $(echo "$body" | jq -r '.repo')#$(echo "$body" | jq -r '.pr_number') — $(echo "$body" | jq -r '.pr_title')" >> "$prompt"
     echo "    PR:     $(echo "$body" | jq -r '.pr_url')" >> "$prompt"
     echo "    Review: $(echo "$body" | jq -r '.review_url')" >> "$prompt"
-    receipts+=("$(echo "$msg" | jq -r '.ReceiptHandle')")
+    new_receipts+=("$rh:$rid")
+    new_count=$((new_count + 1))
   done
 
+  # Always ack duplicates so they don't redeliver forever.
+  for rh in "${dupe_receipts[@]}"; do
+    aws sqs delete-message --queue-url "$QUEUE_URL" --receipt-handle "$rh" --region "$REGION" --output text > /dev/null
+  done
+
+  # Gate delivery on AT LEAST ONE new review — otherwise a batch of pure
+  # duplicates would fire a spurious empty agent turn.
+  if (( new_count == 0 )); then
+    log "All $count message(s) were duplicates; no agent turn fired"
+    rm -f "$prompt"
+    return 0
+  fi
+
   if openclaw agent --session-id "$SESSION_ID" -m "$(cat "$prompt")" --deliver >> "$LOG_FILE" 2>&1; then
-    log "Agent turn dispatched for $count review(s)"
+    log "Agent turn dispatched for $new_count review(s)"
     local now=$(date -u +%FT%TZ)
-    for ((i=0; i<count; i++)); do
-      local msg=$(echo "$resp" | jq -c ".Messages[$i]")
-      local rid=$(echo "$msg" | jq -r '.Body | fromjson | .review_id')
-      local rh=$(echo "$msg"  | jq -r '.ReceiptHandle')
+    for entry in "${new_receipts[@]}"; do
+      local rh="${entry%%:*}" rid="${entry##*:}"
       aws sqs delete-message --queue-url "$QUEUE_URL" --receipt-handle "$rh" --region "$REGION" --output text > /dev/null
       # Record AFTER delete succeeds so a crash mid-flush re-plays at most one turn.
       jq --arg id "$rid" --arg ts "$now" '. + {($id): $ts}' "$SEEN_FILE" \
