@@ -112,12 +112,19 @@ export const handler = async (event) => {
     ? Buffer.from(event.body ?? "", "base64").toString("utf8")
     : (event.body ?? "");
 
+  // Headers are case-insensitive per RFC 9110, but API GW HTTP API v2 lowercases
+  // them while v1/REST and some provider shims preserve incoming casing. Normalize
+  // once so downstream lookups work in every integration.
+  const headers = Object.fromEntries(
+    Object.entries(event.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v])
+  );
+
   // 1) HMAC validate via GitHub's x-hub-signature-256
-  if (!(await verifyHmac(rawBody, event.headers?.["x-hub-signature-256"]))) {
+  if (!(await verifyHmac(rawBody, headers["x-hub-signature-256"]))) {
     return { statusCode: 401, body: "Invalid signature" };
   }
 
-  const ghEvent = event.headers?.["x-github-event"];
+  const ghEvent = headers["x-github-event"];
   if (ghEvent !== "pull_request_review") return { statusCode: 200, body: "ignored" };
 
   const body = JSON.parse(rawBody);
@@ -220,7 +227,9 @@ cycle() {
     local rid=$(echo "$body" | jq -r '.review_id')
     local rh=$(echo "$msg"  | jq -r '.ReceiptHandle')
     # 30-day dedup
-    if jq -e --arg id "$rid" 'has($id)' "$SEEN_FILE" >/dev/null; then
+    if jq -e --arg id "$rid" --argjson cut "$(( $(date -u +%s) - SEEN_TTL_SECONDS ))" \
+         '(.[$id] // empty) as $ts | ($ts != null) and (($ts | fromdateiso8601) >= $cut)' \
+         "$SEEN_FILE" >/dev/null; then
       dupe_receipts+=("$rh")
       continue
     fi
@@ -261,7 +270,20 @@ cycle() {
 }
 
 log "poller start"
-while true; do cycle || sleep 10; done
+
+# Prune seen-file entries older than SEEN_TTL_SECONDS once per cycle. Bounded
+# cost, bounded file size, and matches the documented TTL tuning knob.
+prune_seen() {
+  local cutoff=$(( $(date -u +%s) - SEEN_TTL_SECONDS ))
+  jq --argjson cut "$cutoff" \
+     'with_entries(select((.value | fromdateiso8601) >= $cut))' \
+     "$SEEN_FILE" > "${SEEN_FILE}.tmp" && mv "${SEEN_FILE}.tmp" "$SEEN_FILE"
+}
+
+while true; do
+  prune_seen
+  cycle || sleep 10
+done
 ```
 
 **Systemd unit** (`~/.config/systemd/user/pr-review-poller.service`):
