@@ -167,6 +167,11 @@ fi
 put_ssm_string "$SSM_CHAT_ID_PARAM" "$CHAT_ID"
 ok "Chat id → $SSM_CHAT_ID_PARAM"
 
+# Wake Lambda reads the instance id from SSM at cold start. Without this the
+# wake flow returns 'Config Error' and the instance never starts.
+put_ssm_string "/openclaw/wake-config/instance-id" "$INSTANCE_ID"
+ok "Instance id → /openclaw/wake-config/instance-id"
+
 # Wake URL written after API GW created (step 5)
 
 # ---------- 2. IAM roles ----------
@@ -200,6 +205,10 @@ NOTIFY_INLINE=$(cat <<JSON
   {"Effect":"Allow","Action":["ssm:GetParameter"],"Resource":[
     "arn:aws:ssm:${REGION}:${ACCT_ID}:parameter/openclaw/wake-config/*",
     "arn:aws:ssm:${REGION}:${ACCT_ID}:parameter/openclaw/wake-token"
+  ]},
+  {"Effect":"Allow","Action":["ssm:PutParameter"],"Resource":[
+    "arn:aws:ssm:${REGION}:${ACCT_ID}:parameter/openclaw/wake-token",
+    "arn:aws:ssm:${REGION}:${ACCT_ID}:parameter/openclaw/wake-config/last-stop-event-id"
   ]}
 ]}
 JSON
@@ -249,6 +258,9 @@ deploy_lambda() {
   fi
 }
 
+# Wake URL for the notify Lambda is finalized after the API is created
+# (step 4). We bounce the config through a local var and re-apply the env
+# once the URL is known — see step 4.
 NOTIFY_ENV='{"Variables":{"INSTANCE_ID":"'"$INSTANCE_ID"'","TELEGRAM_CHAT_ID":"'"$CHAT_ID"'"}}'
 WAKE_ENV='{"Variables":{"INSTANCE_ID":"'"$INSTANCE_ID"'","TELEGRAM_CHAT_ID":"'"$CHAT_ID"'","REGION":"'"$REGION"'"}}'
 
@@ -282,6 +294,13 @@ ok "Lambda:InvokeFunction for apigateway granted"
 API_ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com"
 put_ssm_string "$SSM_WAKE_URL_PARAM" "$API_ENDPOINT"
 ok "Wake URL → $SSM_WAKE_URL_PARAM = $API_ENDPOINT"
+
+# Re-apply notify Lambda env now that we have the wake URL. Without WAKE_URL
+# in the env, stop-event Telegram messages contain a bare '?token=...' link.
+NOTIFY_ENV_WITH_URL="{\"Variables\":{\"INSTANCE_ID\":\"${INSTANCE_ID}\",\"TELEGRAM_CHAT_ID\":\"${CHAT_ID}\",\"WAKE_URL\":\"${API_ENDPOINT}\"}}"
+run "aws lambda update-function-configuration --function-name \"$NOTIFY_LAMBDA\" --environment '$NOTIFY_ENV_WITH_URL' --region \"$REGION\" --output text > /dev/null"
+$DRY_RUN || aws lambda wait function-updated --function-name "$NOTIFY_LAMBDA" --region "$REGION"
+ok "Notify Lambda env updated with WAKE_URL"
 
 # ---------- 5. EventBridge rule (notify) ----------
 

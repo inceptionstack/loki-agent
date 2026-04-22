@@ -51,6 +51,8 @@ SSM_PARAMS=(
   "/openclaw/wake-config/telegram-bot-token"
   "/openclaw/wake-config/telegram-chat-id"
   "/openclaw/wake-config/wake-url"
+  "/openclaw/wake-config/instance-id"
+  "/openclaw/wake-config/last-stop-event-id"
   "/openclaw/wake-token"
 )
 
