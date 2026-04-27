@@ -72,7 +72,7 @@ REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 SSM_DOC_NAME=""
-INSTALLER_VERSION="0.5.108"
+INSTALLER_VERSION="0.5.109"
 
 # ── Telemetry ────────────────────────────────────────────────────────────
 # Source telemetry lib (fire-and-forget, never blocks install).
