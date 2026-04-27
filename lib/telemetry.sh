@@ -188,6 +188,42 @@ _telem_norm_os_version() {
   printf '%s\n' "$v"
 }
 
+# Resolve the installer delivery channel for the /v1/install beacon.
+# Server enum: brew | curl | dmg | msi | pkg. This describes HOW the
+# installer bits got onto the machine, not what cloud deploy method the
+# user chose. Default to 'curl' since install.lowkey.run is the canonical
+# delivery.
+_telem_resolve_install_method() {
+  # Allow override via env for Homebrew/pkg distribution channels later.
+  local m="${LOWKEY_INSTALL_CHANNEL:-}"
+  m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf '')"
+  case "$m" in
+    brew|curl|dmg|msi|pkg) printf '%s\n' "$m" ;;
+    *)                     printf 'curl\n' ;;
+  esac
+}
+
+# Resolve the deploy method to a catalog-compliant slug for telemetry.
+# install.sh stores DEPLOY_METHOD as a numeric code (1=cfn-console, 2=cfn-cli,
+# 3=terraform) and PRESELECT_METHOD as the raw user input. Both need
+# normalization to the server catalog: cfn | terraform | manual | ec2-direct.
+_telem_resolve_method() {
+  local m="${DEPLOY_METHOD:-}"
+  case "$m" in
+    1|2)    printf 'cfn\n'; return 0 ;;
+    3)      printf 'terraform\n'; return 0 ;;
+  esac
+  m="${PRESELECT_METHOD:-}"
+  m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf '')"
+  case "$m" in
+    cfn|cloudformation)  printf 'cfn\n' ;;
+    terraform|tf)        printf 'terraform\n' ;;
+    manual)              printf 'manual\n' ;;
+    ec2|ec2-direct)      printf 'ec2-direct\n' ;;
+    *)                   printf 'cfn\n' ;;
+  esac
+}
+
 _telem_norm_version() {
   # Schema: ^[A-Za-z0-9][A-Za-z0-9.+_-]*$, max 32 chars
   local v="${INSTALLER_VERSION:-0.0.0}"
@@ -207,7 +243,8 @@ _telem_event() {
   # Usage: _telem_event "event.name" '{"key":"value"}'
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   local name="${1:-unknown}"
-  local props="${2:-{}}"
+  local props="${2:-}"
+  [[ -n "$props" ]] || props='{}'
   local ts
   ts="$(_telem_iso)"
 
@@ -253,7 +290,7 @@ _telem_send_install_beacon() {
   os_name="$(_telem_norm_os)"
   arch_name="$(_telem_norm_arch)"
   os_ver="$(_telem_norm_os_version)"
-  install_method="${PRESELECT_METHOD:-unknown}"
+  install_method="$(_telem_resolve_install_method)"
 
   local body
   body=$(cat <<EOF
@@ -283,12 +320,7 @@ EOF
 
 # ── High-level: flush queued events (/v1/ingest) ───────────────────────
 _telem_flush() {
-  # DISABLED: /v1/ingest enforces a strict event-name catalog that does not
-  # include our install.* names (those are reflected in /v1/install as
-  # structured outcomes). Sending would either 400 or be silently dropped.
-  rm -f "$_TELEM_QUEUE" 2>/dev/null || true
-  return 0
-
+  # Backend catalog was expanded 2026-04-27 to accept install.* names.
   # Flush all queued events as one batch. Called at install end.
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   [[ -s "$_TELEM_QUEUE" ]] || return 0   # nothing to send
@@ -343,7 +375,7 @@ EOF
 _telem_install_started() {
   _telem_send_install_beacon "started"
   _telem_event "install.started" "$(printf '{"method":"%s"}' \
-    "${PRESELECT_METHOD:-unknown}")"
+    "$(_telem_resolve_method)")"
 }
 
 _telem_pack_selected() {
@@ -353,19 +385,19 @@ _telem_pack_selected() {
 
 _telem_method_selected() {
   _telem_event "install.method_selected" "$(printf '{"method":"%s","region":"%s"}' \
-    "${DEPLOY_METHOD:-unknown}" "${DEPLOY_REGION:-unknown}")"
+    "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}")"
 }
 
 _telem_deploy_started() {
   _telem_event "install.deploy_started" "$(printf '{"method":"%s","region":"%s","pack":"%s"}' \
-    "${DEPLOY_METHOD:-unknown}" "${DEPLOY_REGION:-unknown}" "${PACK_NAME:-unknown}")"
+    "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}" "${PACK_NAME:-unknown}")"
 }
 
 _telem_deploy_completed() {
   local dur
   dur="$(_telem_duration_ms)"
   _telem_event "install.deploy_completed" "$(printf '{"duration_ms":%s,"method":"%s"}' \
-    "$dur" "${DEPLOY_METHOD:-unknown}")"
+    "$dur" "$(_telem_resolve_method)")"
 }
 
 _telem_bootstrap_completed() {
@@ -379,7 +411,7 @@ _telem_install_completed() {
   local dur
   dur="$(_telem_duration_ms)"
   _telem_event "install.completed" "$(printf '{"duration_ms":%s,"pack":"%s","method":"%s","region":"%s"}' \
-    "$dur" "${PACK_NAME:-unknown}" "${DEPLOY_METHOD:-unknown}" "${DEPLOY_REGION:-unknown}")"
+    "$dur" "${PACK_NAME:-unknown}" "$(_telem_resolve_method)" "${DEPLOY_REGION:-unknown}")"
   _telem_send_install_beacon "completed" "$dur"
   _telem_flush
 }
@@ -392,7 +424,7 @@ _telem_install_failed() {
   local dur
   dur="$(_telem_duration_ms)"
   _telem_event "install.failed" "$(printf '{"duration_ms":%s,"exit_code":%s,"step":"%s","pack":"%s","method":"%s"}' \
-    "$dur" "$exit_code" "$failure_step" "${PACK_NAME:-unknown}" "${DEPLOY_METHOD:-unknown}")"
+    "$dur" "$exit_code" "$failure_step" "${PACK_NAME:-unknown}" "$(_telem_resolve_method)")"
   _telem_send_install_beacon "failed" "$dur" "$failure_step" "exit_${exit_code}"
   _telem_flush
 }
