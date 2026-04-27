@@ -58,14 +58,39 @@ trap '
   if [[ $exit_code -ne 0 ]]; then
     echo -e "\n\033[0;31m✗ Installer failed (exit code $exit_code)\033[0m" >&2
     show_debug_locations
+    # Telemetry: report failure (silently, never blocks >2s)
+    _telem_install_failed "$exit_code" "${_TELEM_CURRENT_STEP:-unknown}" 2>/dev/null || true
   fi
 ' EXIT
+
+# Track which step we're in (for failure attribution in telemetry)
+_TELEM_CURRENT_STEP="init"
 
 REPO_URL="https://github.com/inceptionstack/loki-agent.git"
 DOCS_URL="https://github.com/inceptionstack/loki-agent/wiki"
 TEMPLATE_RAW_URL="https://raw.githubusercontent.com/inceptionstack/loki-agent/main/deploy/cloudformation/template.yaml"
 SSM_DOC_NAME=""
 INSTALLER_VERSION="0.5.103"
+
+# ── Telemetry ────────────────────────────────────────────────────────────
+# Source telemetry lib (fire-and-forget, never blocks install).
+# If the file is missing (e.g. partial download), silently skip.
+_TELEM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" ]]; then
+  # shellcheck source=lib/telemetry.sh
+  source "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" 2>/dev/null || true
+else
+  # Stub out all _telem_ functions so hook calls are safe
+  _telem_install_started()    { :; }
+  _telem_pack_selected()      { :; }
+  _telem_method_selected()    { :; }
+  _telem_deploy_started()     { :; }
+  _telem_deploy_completed()   { :; }
+  _telem_bootstrap_completed(){ :; }
+  _telem_install_completed()  { :; }
+  _telem_install_failed()     { :; }
+  _telem_event()              { :; }
+fi
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
 # --pack <name>: pre-select agent pack
@@ -2006,6 +2031,7 @@ run_config_and_review() {
 main() {
   install_gum            # must run before anything that uses $GUM
   show_banner
+  _telem_install_started 2>/dev/null || true
   if [[ "$TEST_MODE" == "true" ]]; then
     echo ""
     $GUM style --foreground 220 --bold --border rounded --border-foreground 220 \
@@ -2019,18 +2045,27 @@ main() {
     exit 0
   fi
   choose_install_mode    # simple (default) or advanced — needed before preflight
+  _TELEM_CURRENT_STEP="preflight"
   preflight_checks       # step 1
+  _TELEM_CURRENT_STEP="config"
   run_config_and_review  # steps 2-4 (config → review)
+  _telem_pack_selected 2>/dev/null || true
+  _telem_method_selected 2>/dev/null || true
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
     TOTAL_STEPS=5
+    _TELEM_CURRENT_STEP="deploy_console"
+    _telem_deploy_started 2>/dev/null || true
     step "Deploy (Console)"
     deploy_console
+    _telem_install_completed 2>/dev/null || true
     exit 0
   fi
 
   # CLI deploys need the repo
+  _TELEM_CURRENT_STEP="deploy"
+  _telem_deploy_started 2>/dev/null || true
   step "Deploy"
   prepare_repo
   echo ""
@@ -2042,9 +2077,13 @@ main() {
        deploy_terraform ;;
     *) fail "Invalid choice: $DEPLOY_METHOD" ;;
   esac
+  _telem_deploy_completed 2>/dev/null || true
 
   wait_for_bootstrap   # step 6
+  _telem_bootstrap_completed 2>/dev/null || true
   ensure_ssm_session_document
+  _TELEM_CURRENT_STEP="complete"
+  _telem_install_completed 2>/dev/null || true
   show_complete        # step 7
 }
 
