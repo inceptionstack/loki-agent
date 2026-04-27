@@ -42,11 +42,18 @@ _telem_init() {
     return 0
   fi
 
-  # IDs
+  # IDs — validate against schema; if we can't produce a conformant machine_id,
+  # disable telemetry rather than send payloads that will 400.
   _TELEM_INSTALL_ID="$(_telem_uuid)"
   _TELEM_SESSION_ID="$(_telem_uuid)"
   _TELEM_MACHINE_ID="$(_telem_machine_id)"
   _TELEM_T0="$(_telem_epoch_ms)"
+
+  if [[ -z "$_TELEM_MACHINE_ID" ]] \
+     || ! [[ "$_TELEM_INSTALL_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+    _TELEM_ENABLED=false
+    return 0
+  fi
 
   # Init the event queue file
   : > "$_TELEM_QUEUE" 2>/dev/null || _TELEM_ENABLED=false
@@ -65,13 +72,17 @@ _telem_machine_id() {
   fi
   # Mix with hostname for extra uniqueness, hash it
   raw="${raw}:$(hostname 2>/dev/null || printf 'unknown')"
+  # Validate: schema requires sha256:<64-lowercase-hex>. Empty → disable.
+  local hex=""
   if command -v sha256sum &>/dev/null; then
-    printf 'sha256:%s\n' "$(printf '%s' "$raw" | sha256sum 2>/dev/null | cut -d' ' -f1 2>/dev/null || printf '%s' "${_TELEM_INSTALL_ID:-unknown}")"
+    hex="$(printf '%s' "$raw" | sha256sum 2>/dev/null | cut -d' ' -f1 2>/dev/null || printf '')"
   elif command -v shasum &>/dev/null; then
-    printf 'sha256:%s\n' "$(printf '%s' "$raw" | shasum -a 256 2>/dev/null | cut -d' ' -f1 2>/dev/null || printf '%s' "${_TELEM_INSTALL_ID:-unknown}")"
+    hex="$(printf '%s' "$raw" | shasum -a 256 2>/dev/null | cut -d' ' -f1 2>/dev/null || printf '')"
+  fi
+  if [[ "$hex" =~ ^[0-9a-f]{64}$ ]]; then
+    printf 'sha256:%s\n' "$hex"
   else
-    # Fallback: use the install_id (less stable but non-identifying)
-    printf 'fallback:%s\n' "${_TELEM_INSTALL_ID:-unknown}"
+    printf ''
   fi
 }
 
@@ -129,6 +140,56 @@ _telem_duration_ms() {
   printf '%s\n' "$(( now - start ))"
 }
 
+# ── Normalization helpers ──────────────────────────────────────────────
+# Keep outputs strictly within the schema enums.
+_telem_norm_os() {
+  # Map raw uname -s to schema enum: linux | darwin | windows
+  local s
+  s="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf 'linux')"
+  case "$s" in
+    darwin*)                 printf 'darwin\n' ;;
+    linux*)                  printf 'linux\n' ;;
+    mingw*|msys*|cygwin*|windows*) printf 'windows\n' ;;
+    *)                       printf 'linux\n' ;;   # safe default — avoids enum reject
+  esac
+}
+
+_telem_norm_arch() {
+  # Map raw uname -m / hw_arch to schema enum: arm64 | x86_64
+  local a
+  a="$(hw_arch 2>/dev/null || uname -m 2>/dev/null || printf 'x86_64')"
+  case "$a" in
+    arm64|aarch64|armv8*|armv9*) printf 'arm64\n' ;;
+    x86_64|amd64|x64)            printf 'x86_64\n' ;;
+    *)                           printf 'x86_64\n' ;;  # safe default
+  esac
+}
+
+_telem_norm_os_version() {
+  # Schema: alnum + . _ + - space, max 48 chars.
+  local v
+  v="$(uname -r 2>/dev/null || printf '0.0')"
+  # Strip anything not in the allowed set, then cap to 48 chars
+  v="$(printf '%s' "$v" | tr -cd 'A-Za-z0-9._+\- ' 2>/dev/null || printf '0.0')"
+  v="${v:0:48}"
+  [[ -n "$v" ]] || v="0.0"
+  printf '%s\n' "$v"
+}
+
+_telem_norm_version() {
+  # Schema: ^[A-Za-z0-9][A-Za-z0-9.+_-]*$, max 32 chars
+  local v="${INSTALLER_VERSION:-0.0.0}"
+  v="$(printf '%s' "$v" | tr -cd 'A-Za-z0-9.+_\-' 2>/dev/null || printf '0.0.0')"
+  # Ensure first char is alnum
+  case "${v:0:1}" in
+    [A-Za-z0-9]) : ;;
+    *) v="0.0.0" ;;
+  esac
+  v="${v:0:32}"
+  [[ -n "$v" ]] || v="0.0.0"
+  printf '%s\n' "$v"
+}
+
 # ── Event recording (local queue, no network) ──────────────────────────
 _telem_event() {
   # Usage: _telem_event "event.name" '{"key":"value"}'
@@ -177,9 +238,9 @@ _telem_send_install_beacon() {
   duration_ms="$(_telem_num_or_default "${2:-0}" 0)"
 
   local os_name arch_name os_ver install_method
-  os_name="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf 'unknown')"
-  arch_name="$(hw_arch 2>/dev/null || uname -m 2>/dev/null || printf 'unknown')"
-  os_ver="$(uname -r 2>/dev/null | cut -d. -f1-2 2>/dev/null || printf 'unknown')"
+  os_name="$(_telem_norm_os)"
+  arch_name="$(_telem_norm_arch)"
+  os_ver="$(_telem_norm_os_version)"
   install_method="${PRESELECT_METHOD:-unknown}"
 
   local body
@@ -190,7 +251,7 @@ _telem_send_install_beacon() {
   "install_id": "${_TELEM_INSTALL_ID}",
   "machine_id": "${_TELEM_MACHINE_ID}",
   "agent": {
-    "version": "${INSTALLER_VERSION:-unknown}",
+    "version": "$(_telem_norm_version)",
     "channel": "stable",
     "os": "${os_name}",
     "arch": "${arch_name}",
@@ -210,6 +271,12 @@ EOF
 
 # ── High-level: flush queued events (/v1/ingest) ───────────────────────
 _telem_flush() {
+  # DISABLED: /v1/ingest enforces a strict event-name catalog that does not
+  # include our install.* names (those are reflected in /v1/install as
+  # structured outcomes). Sending would either 400 or be silently dropped.
+  rm -f "$_TELEM_QUEUE" 2>/dev/null || true
+  return 0
+
   # Flush all queued events as one batch. Called at install end.
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   [[ -s "$_TELEM_QUEUE" ]] || return 0   # nothing to send
@@ -221,9 +288,9 @@ _telem_flush() {
 
   [[ -n "$queue_copy" ]] || return 0
 
-  os_name="$(uname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf 'unknown')"
-  arch_name="$(hw_arch 2>/dev/null || uname -m 2>/dev/null || printf 'unknown')"
-  os_ver="$(uname -r 2>/dev/null | cut -d. -f1-2 2>/dev/null || printf 'unknown')"
+  os_name="$(_telem_norm_os)"
+  arch_name="$(_telem_norm_arch)"
+  os_ver="$(_telem_norm_os_version)"
 
   # Build the events array from NDJSON lines
   events="["
@@ -241,7 +308,7 @@ _telem_flush() {
   "schema": "lowkey.telemetry.v1",
   "sent_at": "$(_telem_iso)",
   "agent": {
-    "version": "${INSTALLER_VERSION:-unknown}",
+    "version": "$(_telem_norm_version)",
     "channel": "stable",
     "os": "${os_name}",
     "arch": "${arch_name}",
