@@ -76,8 +76,10 @@ INSTALLER_VERSION="0.5.108"
 
 # ── Telemetry ────────────────────────────────────────────────────────────
 # Source telemetry lib (fire-and-forget, never blocks install).
-# If the file is missing (e.g. partial download), silently skip.
-_TELEM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# If the file is missing (e.g. curl|bash piped install, partial download),
+# silently skip and use the no-op fallbacks below.
+# NOTE: BASH_SOURCE[0] is unset when piped from stdin — guard with :-.
+_TELEM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd || printf '')"
 # Define safe no-op fallbacks first so partial/broken telemetry loads never
 # leave install hooks undefined under set -euo pipefail.
 _TELEM_LIB_READY=0
