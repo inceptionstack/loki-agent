@@ -76,20 +76,20 @@ INSTALLER_VERSION="0.5.104"
 # Source telemetry lib (fire-and-forget, never blocks install).
 # If the file is missing (e.g. partial download), silently skip.
 _TELEM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Define safe no-op fallbacks first so partial/broken telemetry loads never
+# leave install hooks undefined under set -euo pipefail.
+_telem_install_started()    { :; }
+_telem_pack_selected()      { :; }
+_telem_method_selected()    { :; }
+_telem_deploy_started()     { :; }
+_telem_deploy_completed()   { :; }
+_telem_bootstrap_completed(){ :; }
+_telem_install_completed()  { :; }
+_telem_install_failed()     { :; }
+_telem_event()              { :; }
 if [[ -f "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" ]]; then
   # shellcheck source=lib/telemetry.sh
   source "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" 2>/dev/null || true
-else
-  # Stub out all _telem_ functions so hook calls are safe
-  _telem_install_started()    { :; }
-  _telem_pack_selected()      { :; }
-  _telem_method_selected()    { :; }
-  _telem_deploy_started()     { :; }
-  _telem_deploy_completed()   { :; }
-  _telem_bootstrap_completed(){ :; }
-  _telem_install_completed()  { :; }
-  _telem_install_failed()     { :; }
-  _telem_event()              { :; }
 fi
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
