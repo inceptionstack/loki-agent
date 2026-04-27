@@ -409,7 +409,7 @@ Lowkey is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-so
 
 ---
 
-## Telemetry (Transparent)
+## Telemetry
 
 The `install.sh` installer sends anonymous, aggregate telemetry to help us fix install failures and understand which platforms people run it on.
 
