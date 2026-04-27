@@ -58,8 +58,10 @@ trap '
   if [[ $exit_code -ne 0 ]]; then
     echo -e "\n\033[0;31m✗ Installer failed (exit code $exit_code)\033[0m" >&2
     show_debug_locations
-    # Telemetry: report failure (silently, never blocks >2s)
-    _telem_install_failed "$exit_code" "${_TELEM_CURRENT_STEP:-unknown}" 2>/dev/null || true
+    if [[ -z "${_TELEM_FINAL_STATE:-}" ]]; then
+      # Telemetry: report failure (silently, never blocks >2s)
+      _telem_install_failed "$exit_code" "${_TELEM_CURRENT_STEP:-unknown}" 2>/dev/null || true
+    fi
   fi
 ' EXIT
 
@@ -78,6 +80,8 @@ INSTALLER_VERSION="0.5.105"
 _TELEM_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Define safe no-op fallbacks first so partial/broken telemetry loads never
 # leave install hooks undefined under set -euo pipefail.
+_TELEM_LIB_READY=0
+_TELEM_FINAL_STATE=""
 _telem_install_started()    { :; }
 _telem_pack_selected()      { :; }
 _telem_method_selected()    { :; }
@@ -87,9 +91,28 @@ _telem_bootstrap_completed(){ :; }
 _telem_install_completed()  { :; }
 _telem_install_failed()     { :; }
 _telem_event()              { :; }
+_telem_restore_noops() {
+  _TELEM_LIB_READY=0
+  _TELEM_FINAL_STATE=""
+  _telem_install_started()    { :; }
+  _telem_pack_selected()      { :; }
+  _telem_method_selected()    { :; }
+  _telem_deploy_started()     { :; }
+  _telem_deploy_completed()   { :; }
+  _telem_bootstrap_completed(){ :; }
+  _telem_install_completed()  { :; }
+  _telem_install_failed()     { :; }
+  _telem_event()              { :; }
+}
 if [[ -f "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" ]]; then
   # shellcheck source=lib/telemetry.sh
   source "${_TELEM_SCRIPT_DIR}/lib/telemetry.sh" 2>/dev/null || true
+  if [[ "${_TELEM_LIB_READY:-0}" != "1" ]] \
+    || ! declare -F _telem_install_started >/dev/null \
+    || ! declare -F _telem_install_completed >/dev/null \
+    || ! declare -F _telem_install_failed >/dev/null; then
+    _telem_restore_noops
+  fi
 fi
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts

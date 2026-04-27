@@ -14,6 +14,7 @@ _TELEM_INSTALL_ID=""
 _TELEM_MACHINE_ID=""
 _TELEM_SESSION_ID=""
 _TELEM_T0=""              # epoch ms when install started
+_TELEM_FINAL_STATE="${_TELEM_FINAL_STATE:-}"
 
 _telem_num_or_default() {
   local value="${1:-}"
@@ -294,6 +295,8 @@ _telem_bootstrap_completed() {
 }
 
 _telem_install_completed() {
+  [[ -z "${_TELEM_FINAL_STATE:-}" ]] || return 0
+  _TELEM_FINAL_STATE="completed"
   local dur
   dur="$(_telem_duration_ms)"
   _telem_event "install.completed" "$(printf '{"duration_ms":%s,"pack":"%s","method":"%s","region":"%s"}' \
@@ -303,6 +306,8 @@ _telem_install_completed() {
 }
 
 _telem_install_failed() {
+  [[ -z "${_TELEM_FINAL_STATE:-}" ]] || return 0
+  _TELEM_FINAL_STATE="failed"
   local exit_code="${1:-1}"
   local failure_step="${2:-unknown}"
   local dur
@@ -315,3 +320,4 @@ _telem_install_failed() {
 
 # ── Auto-init on source ────────────────────────────────────────────────
 _telem_init
+_TELEM_LIB_READY=1
