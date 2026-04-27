@@ -1,0 +1,170 @@
+---
+title: Telemetry & Privacy
+description: What the Lowkey installer sends, why, and how to turn it off.
+---
+
+# Telemetry & Privacy
+
+Lowkey collects **anonymous install telemetry** to help us understand how the installer is being used, which platforms people run it on, and where installs fail so we can fix them. This page describes exactly what is collected, when, and how to turn it off.
+
+<Tip>
+**TL;DR — opt out any of three ways:**
+```bash
+export LOWKEY_TELEMETRY=0
+# or
+export DO_NOT_TRACK=1
+# or
+mkdir -p ~/.lowkey && touch ~/.lowkey/telemetry-off
+```
+Any one of these disables **all** telemetry for that shell / user.
+</Tip>
+
+## What we send
+
+Telemetry is sent from `install.sh` (and its helper `lib/telemetry.sh`) to `https://telemetry.loki.run`. Three kinds of calls may happen:
+
+### 1. Install beacon (`POST /v1/install`)
+
+Sent at install **start**, install **completion**, and install **failure**.
+
+```json
+{
+  "schema": "lowkey.install.v1",
+  "sent_at": "2026-04-27T12:30:14Z",
+  "install_id": "09ff13c6-...",
+  "machine_id": "sha256:83d4cc5a...",
+  "agent": {
+    "version": "0.5.105",
+    "channel": "stable",
+    "os": "linux",
+    "arch": "arm64",
+    "os_version": "6.1"
+  },
+  "install_method": "cfn",
+  "outcome": "completed",
+  "duration_ms": 412380,
+  "is_test": false,
+  "failure_step": null,
+  "failure_class": null
+}
+```
+
+### 2. Event batch (`POST /v1/ingest`)
+
+Sent **once** at the end of an install run. Contains only install-flow events from this closed allowlist:
+
+- `install.started`
+- `install.pack_selected`
+- `install.method_selected`
+- `install.deploy_started`
+- `install.deploy_completed`
+- `install.bootstrap_completed`
+- `install.completed`
+- `install.failed`
+
+### 3. Config fetch (`GET /v1/config`)
+
+Optional — a remote kill-switch so we can disable telemetry globally without shipping a new installer.
+
+---
+
+## What we **do not** send
+
+We deliberately do **not** collect:
+
+- ❌ Your name, email, username, or AWS account ID
+- ❌ Your IP address (dropped before persistence on the backend)
+- ❌ Your AWS credentials, tokens, or access keys
+- ❌ File paths on your machine
+- ❌ Commands or shell history
+- ❌ Code, repo contents, prompts, or AI responses
+- ❌ Anything you type into the installer
+- ❌ Your hostname (only a salted sha256 hash of it, combined with the machine-id)
+- ❌ The contents of CloudFormation templates or Terraform plans
+- ❌ Anything after the install finishes — telemetry is installer-scoped only
+
+## `machine_id` — what it actually is
+
+`machine_id` is a **one-way SHA-256 hash** of your OS's own machine identifier (`/etc/machine-id`, `/var/lib/dbus/machine-id`, or the macOS `IOPlatformUUID`) combined with your hostname. The raw value never leaves your machine. We store only the hash, prefixed with `sha256:`.
+
+We use it to answer questions like *"is this the same machine retrying a failed install?"* without knowing **which** machine it is.
+
+If we can't compute a hash (no `sha256sum`/`shasum`), the field falls back to `fallback:<random uuid>` — even less identifying.
+
+## `install_id` and `session_id`
+
+Random UUIDs generated **per install run**. They let us correlate the `started` / `completed` / `failed` beacons for a single install. They are not persisted on your machine.
+
+## Country (approximate)
+
+The backend may derive a 2-letter country code from your request's network routing (CloudFront viewer headers) for high-level geo stats. IP is never stored.
+
+## `is_test`
+
+If you pass `--test` to the installer, every record carries `is_test: true` and our backends exclude it from funnel/product metrics.
+
+---
+
+## When we send
+
+- **Start of install** — one `lowkey.install.v1` beacon with `outcome: "started"`
+- **Deploy success** — one `lowkey.install.v1` beacon with `outcome: "completed"` + one batched `/v1/ingest` with the install-flow events
+- **Deploy failure** — one `lowkey.install.v1` beacon with `outcome: "failed"` + batched events
+- **Runtime after install** — nothing. Telemetry stops the moment the installer exits.
+
+All sends are **fire-and-forget**: the `curl` call runs in the background, hard-limited to 2 seconds total, and any failure is silently ignored. The installer **never blocks** on telemetry and **never fails** because of it — even if our endpoint is down, unreachable, or returns an error.
+
+## Retention
+
+On our side:
+
+| Record type | Retained for |
+|---|---|
+| Install beacons | ≤ 365 days (then auto-deleted via DynamoDB TTL) |
+| Event batches | ≤ 90 days |
+| Test installs (`is_test: true`) | Excluded from product dashboards |
+
+## How to turn it off
+
+### Per-shell / per-install
+
+```bash
+LOWKEY_TELEMETRY=0 curl -sfL install.lowkey.run | bash
+# or
+DO_NOT_TRACK=1 curl -sfL install.lowkey.run | bash
+```
+
+### Permanently for your user
+
+```bash
+mkdir -p ~/.lowkey
+touch ~/.lowkey/telemetry-off
+```
+
+When any of these are set, the installer:
+
+1. Sets `_TELEM_ENABLED=false` at init time
+2. Skips machine-id hashing, UUID generation, and everything else
+3. Makes every `_telem_*` call a no-op
+4. Never contacts `telemetry.loki.run`
+
+### Point it somewhere else
+
+If you want to run your own collector (the [schema is published](/reference/telemetry-schema)):
+
+```bash
+LOWKEY_TELEMETRY_URL=https://your-collector.example.com curl -sfL install.lowkey.run | bash
+```
+
+---
+
+## Source of truth
+
+Don't trust this page — read the code:
+
+- [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh) — the complete telemetry client (≈320 lines of bash)
+- [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) — call sites (search for `_telem_`)
+- [Telemetry schema](/reference/telemetry-schema) — full wire contract
+- [`docs/reference/telemetry-v1.schema.json`](https://github.com/inceptionstack/lowkey/blob/main/docs/reference/telemetry-v1.schema.json) — JSON Schema you can verify payloads against
+
+If you find anything on the wire that's not described here, open an issue — that's a bug.

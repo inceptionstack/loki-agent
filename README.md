@@ -405,7 +405,25 @@ Lowkey is built on [OpenClaw](https://github.com/openclaw/openclaw), the open-so
 
 **4. Persistent memory.** Conversation history and agent memory are stored locally on the instance. Lowkey maintains workspace files (SOUL.md, TOOLS.md, MEMORY.md) that give it continuity across sessions and restarts. It knows what it built yesterday. 
 
-**5. Your data stays yours.** The only external calls are to Amazon Bedrock for AI inference (processed under the Bedrock data privacy policy — your data is not used to train models). Alternatively, use your own Anthropic API key or a LiteLLM proxy. No code, infrastructure configurations, or application data leaves your account.
+**5. Your data stays yours.** The only external calls are to Amazon Bedrock for AI inference (processed under the Bedrock data privacy policy — your data is not used to train models). Alternatively, use your own Anthropic API key or a LiteLLM proxy. No code, infrastructure configurations, or application data leaves your account. The installer itself sends **anonymous install telemetry** (install start/success/failure with OS + arch + duration — no code, credentials, IPs, hostnames, or file paths) — [see exactly what's sent and how to turn it off](https://docs.lowkey.run/reference/telemetry-privacy).
+
+---
+
+## Telemetry (Transparent)
+
+The `install.sh` installer sends anonymous, aggregate telemetry to help us fix install failures and understand which platforms people run it on.
+
+- **What's sent:** OS + arch + installer version + install outcome (`started` / `completed` / `failed`) + duration + a one-way SHA-256 hashed machine fingerprint. That's it.
+- **What's NOT sent:** no IPs, no hostnames, no AWS account IDs, no credentials, no tokens, no file paths, no code, no prompts, no AI responses, no CloudFormation templates. Nothing after the installer exits.
+- **Delivery:** fire-and-forget, 2-second hard timeout, silently ignored on any failure. The installer **cannot fail, hang, or delay** because of telemetry under any condition.
+- **Opt out** — any one of:
+  ```bash
+  export LOWKEY_TELEMETRY=0
+  export DO_NOT_TRACK=1
+  touch ~/.lowkey/telemetry-off
+  ```
+
+Full details, wire-level schema, and source references: **[Telemetry & Privacy](https://docs.lowkey.run/reference/telemetry-privacy)** — and the code is [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh), ~320 lines. Don't trust us — read it.
 
 
 ---

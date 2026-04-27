@@ -75,6 +75,7 @@
           {
             "group": "Telemetry",
             "pages": [
+              "reference/telemetry-privacy",
               "reference/telemetry-schema"
             ]
           }
