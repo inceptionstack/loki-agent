@@ -49,8 +49,19 @@ _telem_init() {
   _TELEM_MACHINE_ID="$(_telem_machine_id)"
   _TELEM_T0="$(_telem_epoch_ms)"
 
+  local os_name arch_name os_ver version os_ver_re
+  os_name="$(_telem_norm_os)"
+  arch_name="$(_telem_norm_arch)"
+  os_ver="$(_telem_norm_os_version)"
+  version="$(_telem_norm_version)"
+  os_ver_re='^[-A-Za-z0-9./_+ ]{1,48}$'
+
   if [[ -z "$_TELEM_MACHINE_ID" ]] \
-     || ! [[ "$_TELEM_INSTALL_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+     || [[ -z "$os_name" ]] \
+     || [[ -z "$arch_name" ]] \
+     || ! [[ "$_TELEM_INSTALL_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+     || ! [[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9.+_-]*$ ]] \
+     || ! [[ "$os_ver" =~ $os_ver_re ]]; then
     _TELEM_ENABLED=false
     return 0
   fi
@@ -150,7 +161,7 @@ _telem_norm_os() {
     darwin*)                 printf 'darwin\n' ;;
     linux*)                  printf 'linux\n' ;;
     mingw*|msys*|cygwin*|windows*) printf 'windows\n' ;;
-    *)                       printf 'linux\n' ;;   # safe default — avoids enum reject
+    *)                       printf '' ;;
   esac
 }
 
@@ -158,10 +169,11 @@ _telem_norm_arch() {
   # Map raw uname -m / hw_arch to schema enum: arm64 | x86_64
   local a
   a="$(hw_arch 2>/dev/null || uname -m 2>/dev/null || printf 'x86_64')"
+  a="$(printf '%s' "$a" | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf '')"
   case "$a" in
     arm64|aarch64|armv8*|armv9*) printf 'arm64\n' ;;
     x86_64|amd64|x64)            printf 'x86_64\n' ;;
-    *)                           printf 'x86_64\n' ;;  # safe default
+    *)                           printf '' ;;
   esac
 }
 
