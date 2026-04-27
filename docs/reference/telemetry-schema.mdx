@@ -1,0 +1,289 @@
+---
+title: Telemetry Schema
+description: Full wire-level contract for Lowkey install telemetry — event envelopes, field types, retention, and backend reference.
+---
+
+# Telemetry Schema
+
+This is the **authoritative wire contract** between the Lowkey installer (`install.sh` + `lib/telemetry.sh`) and any telemetry backend that ingests its events. It is versioned, stable, and backwards-compatible within a major version.
+
+<Note>
+Telemetry is **opt-out by default** via `LOWKEY_TELEMETRY=0` or `DO_NOT_TRACK=1`. Test installs (`--test` mode) are flagged with `is_test: true` so backends can exclude them from product metrics. See [Telemetry Privacy](/reference/telemetry-privacy) for a plain-English version.
+</Note>
+
+## Transport
+
+| Aspect | Value |
+|---|---|
+| Endpoint (default) | `https://telemetry.loki.run` (override: `LOWKEY_TELEMETRY_URL`) |
+| Protocol | HTTPS POST, `Content-Type: application/json` |
+| Timeout | `--connect-timeout 2s --max-time 2s` |
+| Delivery | Fire-and-forget background `curl`, detached from parent shell |
+| Retry | None — all sends are best-effort |
+| Auth | None required. Backend may add IP rate-limiting or a CF front door. |
+| Max body | 256 KB |
+| Max events per ingest batch | 500 |
+
+## Envelopes
+
+The installer sends **two envelope types** on three paths:
+
+| Path | Method | Envelope `schema` | When |
+|---|---|---|---|
+| `/v1/install` | POST | `lowkey.install.v1` | At install start (`outcome: started`), on completion (`completed`), on failure (`failed`) |
+| `/v1/ingest` | POST | `lowkey.telemetry.v1` | Batched at install end — contains all queued fine-grained events |
+| `/v1/config` | GET | _(response only)_ | Installer fetches remote kill-switch + sampling config |
+
+---
+
+## `lowkey.install.v1` — Install Beacon
+
+Sent to `POST /v1/install`. One envelope per outcome transition (`started`, `completed`, `failed`). This is the **primary record** for install funnel analytics.
+
+### Example
+
+```json
+{
+  "schema": "lowkey.install.v1",
+  "sent_at": "2026-04-27T12:30:14Z",
+  "install_id": "09ff13c6-0d4e-4e18-9d93-011e0afd9a6e",
+  "machine_id": "sha256:83d4cc5a36917da57120c27553c78ea83607b9b32ca23af148fc90cdca132a1f",
+  "agent": {
+    "version": "0.5.103",
+    "channel": "stable",
+    "os": "linux",
+    "arch": "arm64",
+    "os_version": "6.1"
+  },
+  "install_method": "cfn",
+  "outcome": "completed",
+  "duration_ms": 412380,
+  "is_test": false,
+  "failure_step": null,
+  "failure_class": null
+}
+```
+
+### Fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schema` | string (const) | yes | Always `lowkey.install.v1`. |
+| `sent_at` | string (ISO-8601 UTC) | yes | Wall-clock time on client, e.g. `2026-04-27T12:30:14Z`. |
+| `install_id` | string (UUIDv4) | yes | Unique per install run. Regenerated on every `curl | bash` invocation. |
+| `machine_id` | string | yes | `sha256:<hex>` of machine fingerprint, or `fallback:<uuid>` if hashing unavailable. Never the raw fingerprint. |
+| `agent.version` | string | yes | Installer version (e.g. `0.5.103`). `unknown` if unset. |
+| `agent.channel` | string | yes | Release channel. Currently always `stable`. Reserved: `beta`, `nightly`. |
+| `agent.os` | string enum | yes | `linux`, `darwin`, `unknown`. Lower-cased `uname -s`. |
+| `agent.arch` | string enum | yes | `arm64`, `x86_64`, `unknown`. |
+| `agent.os_version` | string | yes | Kernel major.minor, e.g. `6.1` or `23.6`. |
+| `install_method` | string enum | yes | `cfn`, `terraform`, `tf`, `console`, `unknown`. |
+| `outcome` | string enum | yes | `started` \| `completed` \| `failed`. |
+| `duration_ms` | integer | yes | ms since install start. `0` on `started`. |
+| `is_test` | boolean | yes | `true` when installer ran with `--test` / `TEST_MODE=true`. Backends MUST exclude these from funnels. |
+| `failure_step` | string \| null | conditional | `null` unless `outcome: failed`. Short step identifier, e.g. `aws_cli_check`, `cfn_deploy`, `bootstrap_timeout`. Max 64 chars. |
+| `failure_class` | string \| null | conditional | `null` unless `outcome: failed`. Machine-friendly class, e.g. `exit_1`, `exit_130`. Max 64 chars. |
+
+### Outcome lifecycle
+
+```
+install starts
+   ↓  POST /v1/install  { outcome: "started",   duration_ms: 0 }
+   ↓  ...user picks pack/method, downloads CFN, etc...
+   ↓  fine-grained events recorded to local queue
+   ↓
+  ├─ success path ─→  POST /v1/install  { outcome: "completed", duration_ms: N }
+  │                   POST /v1/ingest   { events: [...all queued...] }
+  │
+  └─ failure path ─→  POST /v1/install  { outcome: "failed",
+                                          duration_ms: N,
+                                          failure_step: "cfn_deploy",
+                                          failure_class: "exit_1" }
+                      POST /v1/ingest   { events: [...all queued...] }
+```
+
+---
+
+## `lowkey.telemetry.v1` — Event Batch
+
+Sent to `POST /v1/ingest`. Exactly **once per install run**, at the end. Contains all fine-grained events that were queued locally during the run.
+
+### Example
+
+```json
+{
+  "schema": "lowkey.telemetry.v1",
+  "sent_at": "2026-04-27T12:30:15Z",
+  "agent": {
+    "version": "0.5.103",
+    "channel": "stable",
+    "os": "linux",
+    "arch": "arm64",
+    "os_version": "6.1"
+  },
+  "machine_id": "sha256:83d4cc5a...",
+  "install_id": "09ff13c6-0d4e-4e18-9d93-011e0afd9a6e",
+  "session_id": "5e172374-29a2-442e-8f47-f15b0b8148ef",
+  "is_test": false,
+  "events": [
+    { "t": "2026-04-27T12:23:35Z", "name": "install.started",         "props": { "method": "cfn" } },
+    { "t": "2026-04-27T12:23:42Z", "name": "install.pack_selected",   "props": { "pack": "openclaw", "profile": "builder" } },
+    { "t": "2026-04-27T12:23:58Z", "name": "install.method_selected", "props": { "method": "cfn", "region": "us-east-1" } },
+    { "t": "2026-04-27T12:24:10Z", "name": "install.deploy_started",  "props": { "method": "cfn", "region": "us-east-1", "pack": "openclaw" } },
+    { "t": "2026-04-27T12:29:50Z", "name": "install.deploy_completed","props": { "duration_ms": 340000, "method": "cfn" } },
+    { "t": "2026-04-27T12:30:11Z", "name": "install.bootstrap_completed","props":{ "instance_id": "i-0abc..." } },
+    { "t": "2026-04-27T12:30:14Z", "name": "install.completed",       "props": { "duration_ms": 412380, "pack": "openclaw", "method": "cfn", "region": "us-east-1" } }
+  ]
+}
+```
+
+### Envelope fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `schema` | string (const) | yes | Always `lowkey.telemetry.v1`. |
+| `sent_at` | string (ISO-8601 UTC) | yes | Time the flush happened. |
+| `agent.*` | object | yes | Same shape as `lowkey.install.v1.agent`. |
+| `machine_id` | string | yes | Same value as in install beacon for this run. |
+| `install_id` | string (UUIDv4) | yes | Same value as in install beacon for this run. |
+| `session_id` | string (UUIDv4) | yes | Regenerated per `source lib/telemetry.sh` — always equal to `install_id` today, reserved for future sub-sessions. |
+| `is_test` | boolean | yes | Inherited from install run. |
+| `events` | array of Event | yes | 1–500 entries. |
+
+### `Event` shape
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `t` | string (ISO-8601 UTC) | yes | Client-side timestamp of the event. |
+| `name` | string enum | yes | Event name — see [allowed events](#allowed-event-names). Max 64 chars. |
+| `props` | object | yes | Flat object, primitive values only. Max 20 keys. Keys ≤40 chars, values ≤500 chars. Nested objects get JSON-stringified by the backend. |
+
+---
+
+## Allowed event names
+
+<Warning>
+Backends MUST reject events whose `name` is not on this allowlist. This prevents runaway cardinality and keeps cost/dashboards predictable.
+</Warning>
+
+### Install funnel (emitted by `install.sh`)
+
+| Name | Props | Meaning |
+|---|---|---|
+| `install.started` | `{method}` | User launched installer. |
+| `install.pack_selected` | `{pack, profile}` | User picked an agent pack. |
+| `install.method_selected` | `{method, region}` | User picked deploy method (cfn/terraform/console) + region. |
+| `install.deploy_started` | `{method, region, pack}` | CFN/TF apply kicked off. |
+| `install.deploy_completed` | `{duration_ms, method}` | Stack reached `CREATE_COMPLETE` or equivalent. |
+| `install.bootstrap_completed` | `{instance_id}` | EC2 instance finished userdata bootstrap. |
+| `install.completed` | `{duration_ms, pack, method, region}` | Full install success. |
+| `install.failed` | `{duration_ms, exit_code, step, pack, method}` | Installer exited non-zero. |
+
+### Runtime (reserved — not yet emitted by installer)
+
+The following names are pre-registered so the agent runtime and extensions can emit them without a schema bump:
+
+`first_run`, `session.started`, `session.ended`, `heartbeat.daily`,
+`command.used`, `feature.used`, `model.invoked`,
+`error.reported`, `crash.reported`,
+`update.available`, `update.applied`, `update.skipped`,
+`auth.started`, `auth.completed`, `auth.failed`,
+`onboarding.completed`.
+
+Event **names** are closed (allowlist). Event **props** are open — backends should tolerate unknown keys and drop values that exceed length caps.
+
+---
+
+## `/v1/config` — Remote Kill-Switch
+
+`GET https://telemetry.loki.run/v1/config` returns a JSON config that the installer **may** consult to throttle or disable itself. Missing/unreachable config is treated as "defaults".
+
+### Response
+
+```json
+{
+  "enabled": true,
+  "sample_rate": 1.0,
+  "flush_interval_sec": 600,
+  "dropped_events": [],
+  "latest_version": "",
+  "ttl_sec": 300
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Master kill-switch. If `false`, installer MUST skip all sends. |
+| `sample_rate` | number | `1.0` | 0.0–1.0. Clients hash `machine_id` and only send if hash mod 10000 < `sample_rate * 10000`. |
+| `flush_interval_sec` | integer | `600` | Reserved for long-running agents. Installer flushes at exit only. |
+| `dropped_events` | array\<string\> | `[]` | Event names to drop client-side before queuing. |
+| `latest_version` | string | `""` | Optional — latest known installer version. Clients may log a "you are out of date" hint. |
+| `ttl_sec` | integer | `300` | How long clients may cache this config. |
+
+Response headers: `Cache-Control: public, max-age=60`.
+
+---
+
+## Data-retention & privacy contract
+
+Backends implementing this schema MUST:
+
+| Rule | Rationale |
+|---|---|
+| Drop IP addresses before persisting. | We only care about country (from `CloudFront-Viewer-Country`). |
+| Never re-hash or de-anonymize `machine_id`. | Already `sha256:<hex>`. |
+| TTL raw events ≤ **90 days**. | High-volume, low-business-value. |
+| TTL install beacons ≤ **365 days**. | Funnel metrics are still useful long-term. |
+| Exclude `is_test: true` from all product dashboards. | Dev/CI noise. |
+| Reject `Content-Length > 256 KB`. | Abuse / accidental logs. |
+| Reject batches with > 500 events. | Backpressure. |
+| Return `204 No Content` on success. | Minimize wire overhead. |
+| Never return body/stack traces on error. | Don't leak backend details to curl pipes. |
+| Provide `/v1/health` returning `200`. | Ops monitoring. |
+
+---
+
+## Reference backend (DynamoDB)
+
+A minimal compliant backend needs:
+
+**Table `lowkey-install-events`** (beacon persistence)
+- Partition key: `id` (string, UUIDv4 assigned by backend)
+- Sort key: `timestamp` (string, ISO-8601)
+- Attributes: all fields from `lowkey.install.v1` + `country`, `source: "v1_install"`
+- TTL attribute: `ttl` (epoch seconds, +365d)
+
+**Table `lowkey-telemetry-events`** (per-event persistence)
+- Partition key: `id` (string, UUIDv4)
+- Sort key: `timestamp` (string, ISO-8601)
+- GSI `by-name` on `(name, timestamp)` — for per-event-name dashboards
+- GSI `by-machine` on `(machine_id, timestamp)` — for per-machine queries
+- TTL attribute: `ttl` (epoch seconds, +90d)
+
+---
+
+## Backward-compatibility rules
+
+- `schema` version is in the envelope; any breaking change bumps the suffix (`v1` → `v2`).
+- Within `v1`, backends MAY add new optional fields; clients MUST ignore unknown fields.
+- Adding a new event name requires updating the allowlist in both the installer and backend.
+- Removing a field within `v1` is forbidden.
+- Renaming a field is forbidden (emit both for one major version).
+
+---
+
+## Versioning
+
+| Schema version | Introduced | Status |
+|---|---|---|
+| `lowkey.install.v1` | `lowkey@0.5.103` | **Current** |
+| `lowkey.telemetry.v1` | `lowkey@0.5.103` | **Current** |
+
+---
+
+## Related
+
+- Source: [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh) (client emitter)
+- Source: [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) (call sites)
+- [Telemetry Privacy](/reference/telemetry-privacy) — what's sent and how to opt out
+- [Environment variables](/reference/environment-variables) — `LOWKEY_TELEMETRY`, `LOWKEY_TELEMETRY_URL`, `DO_NOT_TRACK`

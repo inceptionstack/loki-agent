@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lowkey.run/schemas/telemetry-v1.json",
+  "title": "Lowkey telemetry wire schemas (v1)",
+  "description": "Authoritative JSON Schema for the Lowkey installer telemetry wire format. Backends SHOULD validate inbound payloads against these definitions. Human-readable docs: https://docs.lowkey.run/reference/telemetry-schema",
+  "oneOf": [
+    { "$ref": "#/$defs/InstallBeacon" },
+    { "$ref": "#/$defs/TelemetryBatch" }
+  ],
+
+  "$defs": {
+    "InstallBeacon": {
+      "type": "object",
+      "description": "POST /v1/install body.",
+      "required": [
+        "schema", "sent_at", "install_id", "machine_id",
+        "agent", "install_method", "outcome", "duration_ms", "is_test"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema":         { "const": "lowkey.install.v1" },
+        "sent_at":        { "$ref": "#/$defs/IsoTimestamp" },
+        "install_id":     { "$ref": "#/$defs/UuidV4" },
+        "machine_id":     { "$ref": "#/$defs/MachineId" },
+        "agent":          { "$ref": "#/$defs/Agent" },
+        "install_method": { "$ref": "#/$defs/InstallMethod" },
+        "outcome":        { "enum": ["started", "completed", "failed"] },
+        "duration_ms":    { "type": "integer", "minimum": 0 },
+        "is_test":        { "type": "boolean" },
+        "failure_step":   { "type": ["string", "null"], "maxLength": 64 },
+        "failure_class":  { "type": ["string", "null"], "maxLength": 64 }
+      },
+      "allOf": [
+        {
+          "if":  { "properties": { "outcome": { "const": "failed" } } },
+          "then": { "required": ["failure_step", "failure_class"] }
+        }
+      ]
+    },
+
+    "TelemetryBatch": {
+      "type": "object",
+      "description": "POST /v1/ingest body.",
+      "required": [
+        "schema", "sent_at", "agent", "machine_id",
+        "install_id", "session_id", "is_test", "events"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema":     { "const": "lowkey.telemetry.v1" },
+        "sent_at":    { "$ref": "#/$defs/IsoTimestamp" },
+        "agent":      { "$ref": "#/$defs/Agent" },
+        "machine_id": { "$ref": "#/$defs/MachineId" },
+        "install_id": { "$ref": "#/$defs/UuidV4" },
+        "session_id": { "$ref": "#/$defs/UuidV4" },
+        "is_test":    { "type": "boolean" },
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/Event" }
+        }
+      }
+    },
+
+    "Event": {
+      "type": "object",
+      "required": ["t", "name", "props"],
+      "additionalProperties": false,
+      "properties": {
+        "t":     { "$ref": "#/$defs/IsoTimestamp" },
+        "name":  { "$ref": "#/$defs/EventName" },
+        "props": {
+          "type": "object",
+          "maxProperties": 20,
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string",  "maxLength": 500 },
+              { "type": "number" },
+              { "type": "boolean" },
+              { "type": "null" }
+            ]
+          }
+        }
+      }
+    },
+
+    "Agent": {
+      "type": "object",
+      "required": ["version", "channel", "os", "arch", "os_version"],
+      "additionalProperties": false,
+      "properties": {
+        "version":    { "type": "string", "maxLength": 32 },
+        "channel":    { "enum": ["stable", "beta", "nightly", "unknown"] },
+        "os":         { "enum": ["linux", "darwin", "unknown"] },
+        "arch":       { "enum": ["arm64", "x86_64", "amd64", "unknown"] },
+        "os_version": { "type": "string", "maxLength": 32 }
+      }
+    },
+
+    "InstallMethod": {
+      "enum": ["cfn", "terraform", "tf", "console", "unknown"]
+    },
+
+    "EventName": {
+      "description": "Allowlist of event names. Unknown names MUST be rejected by the backend.",
+      "enum": [
+        "install.started",
+        "install.pack_selected",
+        "install.method_selected",
+        "install.deploy_started",
+        "install.deploy_completed",
+        "install.bootstrap_completed",
+        "install.completed",
+        "install.failed",
+        "first_run",
+        "session.started",
+        "session.ended",
+        "heartbeat.daily",
+        "command.used",
+        "feature.used",
+        "model.invoked",
+        "error.reported",
+        "crash.reported",
+        "update.available",
+        "update.applied",
+        "update.skipped",
+        "auth.started",
+        "auth.completed",
+        "auth.failed",
+        "onboarding.completed"
+      ]
+    },
+
+    "MachineId": {
+      "type": "string",
+      "description": "sha256:<hex> | fallback:<uuid>",
+      "pattern": "^(sha256:[0-9a-f]{64}|fallback:[0-9a-f-]{8,})$"
+    },
+
+    "UuidV4": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+
+    "IsoTimestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+
+    "ConfigResponse": {
+      "type": "object",
+      "description": "GET /v1/config response body.",
+      "required": ["enabled", "sample_rate"],
+      "additionalProperties": true,
+      "properties": {
+        "enabled":            { "type": "boolean" },
+        "sample_rate":        { "type": "number", "minimum": 0, "maximum": 1 },
+        "flush_interval_sec": { "type": "integer", "minimum": 1 },
+        "dropped_events":     { "type": "array",   "items": { "$ref": "#/$defs/EventName" } },
+        "latest_version":     { "type": "string",  "maxLength": 32 },
+        "ttl_sec":            { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

@@ -71,6 +71,12 @@
               "reference/security-services",
               "reference/secrets-manager"
             ]
+          },
+          {
+            "group": "Telemetry",
+            "pages": [
+              "reference/telemetry-schema"
+            ]
           }
         ]
       }
