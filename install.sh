@@ -75,12 +75,15 @@ SSM_DOC_NAME=""
 INSTALLER_VERSION="0.5.112"
 
 # ── Telemetry ────────────────────────────────────────────────────────────
-# Telemetry library is inlined at build time so `curl | bash` works without
-# a second fetch. Edit only in lib/telemetry.sh and run scripts/build-installer.sh
-# (or commit — CI runs the build on push).
+# Fire-and-forget telemetry. Opt-out: LOWKEY_TELEMETRY=0 / DO_NOT_TRACK=1
+# / ~/.lowkey/telemetry-off. 2s hard timeout, silent on every failure,
+# never blocks install. Payloads documented at:
+#   https://docs.lowkey.run/reference/telemetry-privacy
+#   https://docs.lowkey.run/reference/telemetry-schema
 
-# Safe no-op fallbacks first so partial loads never leave install hooks
-# undefined under set -euo pipefail. Overwritten by the inline block below.
+# Safe no-op fallbacks first — overwritten below. Keeps install hooks
+# defined under set -euo pipefail even if something in the block below
+# fails to load (e.g. partial download).
 _TELEM_LIB_READY=0
 _TELEM_FINAL_STATE=""
 _telem_install_started()    { :; }
@@ -93,10 +96,9 @@ _telem_install_completed()  { :; }
 _telem_install_failed()     { :; }
 _telem_event()              { :; }
 
-# >>> INLINE: lib/telemetry.sh (generated — do not edit; see scripts/build-installer.sh) <<<
-# lib/telemetry.sh — Lowkey installer telemetry
-# Sourced by install.sh. All functions are prefixed with _telem_ to avoid collisions.
-# Design: fire-and-forget, 2-second timeouts, silent on every failure.
+# ── Telemetry implementation ─────────────────────────────────────────
+# All functions below are prefixed _telem_ to avoid collisions.
+# Fire-and-forget, 2-second timeouts, silent on every failure.
 # Opt-out: LOWKEY_TELEMETRY=0 | DO_NOT_TRACK=1 | ~/.lowkey/telemetry-off
 
 # ── Config ──────────────────────────────────────────────────────────────
@@ -527,7 +529,6 @@ _telem_install_failed() {
 # ── Auto-init on source ────────────────────────────────────────────────
 _telem_init
 _TELEM_LIB_READY=1
-# >>> END INLINE <<<
 
 # --non-interactive / --yes / -y: accept all defaults, minimal prompts
 # --pack <name>: pre-select agent pack

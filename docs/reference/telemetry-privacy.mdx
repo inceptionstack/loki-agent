@@ -21,7 +21,7 @@ Any one of these disables **all** telemetry for that shell / user.
 
 ## What we send
 
-Telemetry is sent from `install.sh` (and its helper `lib/telemetry.sh`) to `https://telemetry.loki.run`. Three kinds of calls may happen:
+Telemetry is sent from `install.sh` (the telemetry client is inlined in that single file) to `https://telemetry.loki.run`. Three kinds of calls may happen:
 
 ### 1. Install beacon (`POST /v1/install`)
 
@@ -162,7 +162,7 @@ LOWKEY_TELEMETRY_URL=https://your-collector.example.com curl -sfL install.lowkey
 
 Don't trust this page — read the code:
 
-- [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh) — the complete telemetry client (≈320 lines of bash)
+- [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) — the complete installer, with the telemetry client inlined. Search for `_telem_` to find the telemetry functions (≈320 lines)
 - [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) — call sites (search for `_telem_`)
 - [Telemetry schema](/reference/telemetry-schema) — full wire contract
 - [`docs/reference/telemetry-v1.schema.json`](https://github.com/inceptionstack/lowkey/blob/main/docs/reference/telemetry-v1.schema.json) — JSON Schema you can verify payloads against

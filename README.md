@@ -423,7 +423,7 @@ The `install.sh` installer sends anonymous, aggregate telemetry to help us fix i
   touch ~/.lowkey/telemetry-off
   ```
 
-Full details, wire-level schema, and source references: **[Telemetry & Privacy](https://docs.lowkey.run/reference/telemetry-privacy)** — and the code is [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh), ~320 lines. Don't trust us — read it.
+Full details, wire-level schema, and source references: **[Telemetry & Privacy](https://docs.lowkey.run/reference/telemetry-privacy)** — and the code lives in [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) (search for `_telem_`). Don't trust us — read it.
 
 
 ---

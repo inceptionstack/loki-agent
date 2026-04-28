@@ -5,7 +5,7 @@ description: Full wire-level contract for Lowkey install telemetry — event env
 
 # Telemetry Schema
 
-This is the **authoritative wire contract** between the Lowkey installer (`install.sh` + `lib/telemetry.sh`) and any telemetry backend that ingests its events. It is versioned, stable, and backwards-compatible within a major version.
+This is the **authoritative wire contract** between the Lowkey installer (`install.sh`, with the telemetry client inlined) and any telemetry backend that ingests its events. It is versioned, stable, and backwards-compatible within a major version.
 
 <Note>
 Telemetry is **opt-out by default** via `LOWKEY_TELEMETRY=0` or `DO_NOT_TRACK=1`. Test installs (`--test` mode) are flagged with `is_test: true` so backends can exclude them from product metrics. See [Telemetry Privacy](/reference/telemetry-privacy) for a plain-English version.
@@ -146,7 +146,7 @@ Sent to `POST /v1/ingest`. Exactly **once per install run**, at the end. Contain
 | `agent.*` | object | yes | Same shape as `lowkey.install.v1.agent`. |
 | `machine_id` | string | yes | Same value as in install beacon for this run. |
 | `install_id` | string (UUIDv4) | yes | Same value as in install beacon for this run. |
-| `session_id` | string (UUIDv4) | yes | Regenerated per `source lib/telemetry.sh` — always equal to `install_id` today, reserved for future sub-sessions. |
+| `session_id` | string (UUIDv4) | yes | Regenerated every time `install.sh` is sourced — always equal to `install_id` today, reserved for future sub-sessions. |
 | `is_test` | boolean | yes | Inherited from install run. |
 | `events` | array of Event | yes | 1–500 entries. |
 
@@ -283,7 +283,7 @@ A minimal compliant backend needs:
 
 ## Related
 
-- Source: [`lib/telemetry.sh`](https://github.com/inceptionstack/lowkey/blob/main/lib/telemetry.sh) (client emitter)
+- Source: [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) (search for `_telem_` — client emitter)
 - Source: [`install.sh`](https://github.com/inceptionstack/lowkey/blob/main/install.sh) (call sites)
 - [Telemetry Privacy](/reference/telemetry-privacy) — what's sent and how to opt out
 - [Environment variables](/reference/environment-variables) — `LOWKEY_TELEMETRY`, `LOWKEY_TELEMETRY_URL`, `DO_NOT_TRACK`
