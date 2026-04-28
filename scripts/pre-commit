@@ -31,6 +31,23 @@ echo ""
 printf "${BOLD}Pre-commit: running tests...${NC}\n"
 echo ""
 
+# Rebuild install.sh if telemetry sources changed
+if git diff --cached --name-only | grep -qE '^(lib/telemetry\.sh|install\.sh|scripts/build-installer\.sh)$'; then
+  printf "${CYAN}▸${NC} Rebuilding install.sh (inlining lib/telemetry.sh)..."
+  if bash "${REPO_ROOT}/scripts/build-installer.sh" >/dev/null 2>&1; then
+    # If install.sh was regenerated, stage it so the commit includes it
+    if ! git diff --quiet install.sh; then
+      git add install.sh
+      printf " ${GREEN}✓ staged${NC}\n"
+    else
+      printf " ${GREEN}✓ up to date${NC}\n"
+    fi
+  else
+    printf " ${RED}✗ build failed${NC}\n"
+    FAILED=$((FAILED + 1))
+  fi
+fi
+
 # Discover and run all test scripts (same as CI)
 while IFS= read -r test_script; do
   [[ -f "$test_script" ]] && run_test "$test_script"
