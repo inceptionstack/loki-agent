@@ -342,16 +342,25 @@ _telem_norm_version() {
 # ── Event recording (local queue, no network) ──────────────────────────
 _telem_event() {
   # Usage: _telem_event "event.name" '{"key":"value"}'
+  #
+  # Spec note: Event.props is a `oneOf` across many per-event schemas, all of
+  # which allow `{}`. An empty object therefore matches multiple branches and
+  # fails strict JSON Schema `oneOf` validation. We OMIT props entirely when
+  # the caller passes no props or an empty object, instead of writing `{}`.
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   local name="${1:-unknown}"
   local props="${2:-}"
-  [[ -n "$props" ]] || props='{}'
   local ts
   ts="$(_telem_iso)"
 
-  # Append to the NDJSON queue file (one JSON object per line)
-  printf '{"t":"%s","name":"%s","props":%s}\n' "$ts" "$name" "$props" \
-    >> "$_TELEM_QUEUE" 2>/dev/null || true
+  # Normalize: treat empty string or {} as "no props".
+  if [[ -z "$props" || "$props" == "{}" ]]; then
+    printf '{"t":"%s","name":"%s"}\n' "$ts" "$name" \
+      >> "$_TELEM_QUEUE" 2>/dev/null || true
+  else
+    printf '{"t":"%s","name":"%s","props":%s}\n' "$ts" "$name" "$props" \
+      >> "$_TELEM_QUEUE" 2>/dev/null || true
+  fi
 }
 
 # ── Network: fire-and-forget POST ──────────────────────────────────────
@@ -380,15 +389,33 @@ _telem_post() {
   return 0
 }
 
+# Validate a string against the spec's Ident regex.
+# Returns the value if it matches, else empty.
+_telem_ident() {
+  local v="${1:-}"
+  [[ "$v" =~ ^[A-Za-z][A-Za-z0-9_.:-]{0,63}$ ]] && printf '%s' "$v"
+}
+
 # ── High-level: install beacon (/v1/install) ────────────────────────────
 _telem_send_install_beacon() {
   # Usage: _telem_send_install_beacon "completed" [duration_ms] [failure_step] [failure_class]
+  #
+  # Spec note (openapi-spec.json InstallEnvelope):
+  # failure_step and failure_class are NOT nullable — they must be OMITTED
+  # entirely unless outcome=failed AND the value passes the Ident regex.
+  # Previous code emitted "null" which a strict OpenAPI 3.1 validator rejects.
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   local outcome="${1:-started}"
   local duration_ms
-  local failure_step="${3:-}"
-  local failure_class="${4:-}"
+  local failure_step=""
+  local failure_class=""
   duration_ms="$(_telem_num_or_default "${2:-0}" 0)"
+
+  # Only include failure fields when outcome=failed AND they pass Ident regex.
+  if [[ "$outcome" == "failed" ]]; then
+    failure_step="$(_telem_ident "${3:-}")"
+    failure_class="$(_telem_ident "${4:-}")"
+  fi
 
   local os_name arch_name os_ver install_method
   os_name="$(_telem_norm_os)"
@@ -396,27 +423,14 @@ _telem_send_install_beacon() {
   os_ver="$(_telem_norm_os_version)"
   install_method="$(_telem_resolve_install_method)"
 
+  # Build JSON with failure_step / failure_class OMITTED when empty.
+  local fs_json="" fc_json=""
+  [[ -n "$failure_step"  ]] && fs_json=",\"failure_step\":\"${failure_step}\""
+  [[ -n "$failure_class" ]] && fc_json=",\"failure_class\":\"${failure_class}\""
+
   local body
   body=$(cat <<EOF
-{
-  "schema": "lowkey.install.v1",
-  "sent_at": "$(_telem_iso)",
-  "install_id": "${_TELEM_INSTALL_ID}",
-  "machine_id": "${_TELEM_MACHINE_ID}",
-  "agent": {
-    "version": "$(_telem_norm_version)",
-    "channel": "stable",
-    "os": "${os_name}",
-    "arch": "${arch_name}",
-    "os_version": "${os_ver}"
-  },
-  "install_method": "${install_method}",
-  "outcome": "${outcome}",
-  "duration_ms": ${duration_ms},
-  "is_test": ${TEST_MODE:-false},
-  "failure_step": $(if [[ -n "$failure_step" ]]; then echo "\"$failure_step\""; else echo "null"; fi),
-  "failure_class": $(if [[ -n "$failure_class" ]]; then echo "\"$failure_class\""; else echo "null"; fi)
-}
+{"schema":"lowkey.install.v1","sent_at":"$(_telem_iso)","install_id":"${_TELEM_INSTALL_ID}","machine_id":"${_TELEM_MACHINE_ID}","agent":{"version":"$(_telem_norm_version)","channel":"stable","os":"${os_name}","arch":"${arch_name}","os_version":"${os_ver}"},"install_method":"${install_method}","outcome":"${outcome}","duration_ms":${duration_ms},"is_test":${TEST_MODE:-false}${fs_json}${fc_json}}
 EOF
   )
   _telem_post "/v1/install" "$body"
