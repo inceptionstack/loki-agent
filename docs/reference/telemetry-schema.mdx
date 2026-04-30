@@ -59,6 +59,7 @@ Sent to `POST /v1/install`. One envelope per outcome transition (`started`, `com
   "outcome": "completed",
   "duration_ms": 412380,
   "is_test": false,
+  "account_rename_enabled": false,
   "failure_step": null,
   "failure_class": null
 }
@@ -81,6 +82,7 @@ Sent to `POST /v1/install`. One envelope per outcome transition (`started`, `com
 | `outcome` | string enum | yes | `started` \| `completed` \| `failed`. |
 | `duration_ms` | integer | yes | ms since install start. `0` on `started`. |
 | `is_test` | boolean | yes | `true` when installer ran with `--test` / `TEST_MODE=true`. Backends MUST exclude these from funnels. |
+| `account_rename_enabled` | boolean | no | `true` when `--auto-rename-account-enabled` was passed. Surfaces headless opt-in without waiting for event batch. Absent on installers < v0.5.117. |
 | `failure_step` | string \| null | conditional | `null` unless `outcome: failed`. Short step identifier, e.g. `aws_cli_check`, `cfn_deploy`, `bootstrap_timeout`. Max 64 chars. |
 | `failure_class` | string \| null | conditional | `null` unless `outcome: failed`. Machine-friendly class, e.g. `exit_1`, `exit_130`. Max 64 chars. |
 
@@ -176,6 +178,7 @@ Backends MUST reject events whose `name` is not on this allowlist. This prevents
 | `install.deploy_started` | `{method, region, pack}` | CFN/TF apply kicked off. |
 | `install.deploy_completed` | `{duration_ms, method}` | Stack reached `CREATE_COMPLETE` or equivalent. |
 | `install.bootstrap_completed` | `{instance_id}` | EC2 instance finished userdata bootstrap. |
+| `install.account_renamed` | `{renamed, allowed, auto_rename_enabled, skipped_reason}` | Account rename outcome — whether rename happened, user allowed it, and skip reason if applicable. |
 | `install.completed` | `{duration_ms, pack, method, region}` | Full install success. |
 | `install.failed` | `{duration_ms, exit_code, step, pack, method}` | Installer exited non-zero. |
 

@@ -422,19 +422,19 @@ changed since this design was written.
 Checklist of files/repos that need changes:
 
 ### `inceptionstack/lowkey` (this repo)
-- [ ] `install.sh`: Add `maybe_rename_account()`, `_emit_rename_telemetry()`,
+- [x] `install.sh`: Add `maybe_rename_account()`, `_emit_rename_telemetry()`,
       flag parsing (`--auto-rename-account-enabled`, `--disable-account-rename`),
       call site in `main()` after `run_config_and_review()`
-- [ ] `install.sh`: Add `account_rename_enabled` field to `_telem_send_install_beacon`
-- [ ] `install.sh` `--help` text: Document new flags
-- [ ] `uninstall.sh`: Add `maybe_restore_account_name()` — **significant scope:**
-      currently has zero account/SSM-restore code. Needs `aws account` calls,
-      SSM parameter reads, interactive restore prompt, region discovery, cleanup.
-- [ ] `docs/reference/cli.mdx`: Document new flags (per `docs/README.md` policy:
-      "If a new top-level flag is added, update `docs/reference/cli.mdx` and
-      `docs/reference/environment-variables.mdx`.")
-- [ ] `docs/quickstart.mdx`: Mention account rename in install flow overview
-- [ ] Tests: Add test cases for flag parsing, rename logic
+- [x] `install.sh`: Add `account_rename_enabled` field to `_telem_send_install_beacon`
+- [x] `install.sh` `--help` text: Document new flags
+- [x] `docs/reference/telemetry-v1.schema.json`: Add `account_rename_enabled` to beacon,
+      `install.account_renamed` to EventName enum
+- [x] `docs/reference/telemetry-schema.mdx`: Document new beacon field and event
+- [x] `docs/reference/cli.mdx`: Document new flags
+- [x] Tests: 47 test cases in `tests/test-account-rename.sh`
+- [ ] `uninstall.sh`: Add `maybe_restore_account_name()` — **significant scope,
+      tracked as follow-up:** currently has zero account/SSM-restore code.
+- [ ] `docs/quickstart.mdx`: Mention account rename in install flow overview (follow-up)
 
 ### `inceptionstack/loki-dashboard` (separate repo)
 - [ ] `lambda-shared/validate.py`: Register `install.account_renamed` event,
