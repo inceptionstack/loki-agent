@@ -2,7 +2,7 @@
 
 > **Applies to:** Any agent with AWS credentials (IAM role) and Python 3.10+
 
-This bootstrap equips you to run rigorous, reproducible latency benchmarks comparing models on Amazon Bedrock — and optionally against the Anthropic Direct API. The methodology is battle-tested across Haiku, Sonnet, and Opus workloads at various payload sizes and regions.
+This bootstrap equips you to investigate customer-reported latency issues on Amazon Bedrock and to run rigorous, reproducible latency benchmarks comparing models — optionally against the Anthropic Direct API. The methodology is battle-tested across Haiku, Sonnet, and Opus workloads at various payload sizes and regions.
 
 ---
 
@@ -121,6 +121,91 @@ If the user asks for something that will produce misleading results, **say so**:
 
 ---
 
+
+---
+
+## Investigating Customer-Reported Latency Issues
+
+When a customer says "Bedrock is slow" or "X is faster than Y", follow this process **before** characterizing the invocation profile or running diagnostics. The most expensive mistake is investigating a problem that isn't real, or diagnosing the wrong variable.
+
+### Step 0: Validate the Comparison First
+
+**Do not accept the problem framing at face value.** A-vs-B latency comparisons are only meaningful if the workloads are equivalent. Check every item:
+
+- [ ] Are the **same requests** (same prompts, same parameters) sent to both endpoints?
+- [ ] Same **input token range**? Same **output token range**?
+- [ ] Same `max_tokens` value on both sides?
+- [ ] **Thinking** on/off consistent between both?
+- [ ] Same streaming mode? (streaming TTFT ≠ non-streaming E2E)
+- [ ] Same **time window**? (Measurements hours apart aren't comparable)
+- [ ] Comparable **sample sizes** and concurrency levels?
+
+If any fail → state the comparison is invalid before going further. What looks like "Bedrock is slower" may simply be "Bedrock is handling heavier requests."
+
+**Common example:** Customer routes 32K–200K token requests exclusively to Bedrock and smaller requests to Direct API, then compares tail latency. Of course Bedrock looks worse — it's doing more work.
+
+### Step 1: Read the Evidence Before Diagnosing
+
+When a customer provides graphs, metrics, or logs, extract these signals before proposing any root cause:
+
+1. **What does the baseline look like?** Mean/median at equivalent request sizes — not just the tail. Bedrock may actually be faster at the baseline even if it has a worse tail.
+2. **Do "outliers" correlate with request size?** High latency at 100K+ input tokens is *expected behavior*, not an anomaly. Verify this before calling it a problem.
+3. **Are there outliers at SMALL request sizes?** Small requests (< 5K tokens) taking minutes — that is the real signal worth investigating.
+4. **What's missing from the visualization?** Common missing dimensions that change the interpretation:
+   - Output token count (dominates E2E latency)
+   - Thinking token count (invisible overhead)
+   - Actual API parameters used (vs framework config)
+   - Timestamps of spikes (to correlate with capacity events)
+
+### Step 2: Distinguish Framework Config from Actual API Parameters
+
+A frequent pitfall: code shows what looks like API configuration but is actually framework-level metadata that never reaches the API.
+
+| Looks like | Actually is | What to do |
+|---|---|---|
+| `max_context_window=200_000` | Framework hint about model capability | Harmless; ignore for latency investigation |
+| `thinking_budget=(1024, 32768)` | Capability range declaration (min, max tuple) | Does NOT mean thinking is enabled — verify actual request body |
+| Model ID in config file | May differ from actual invocation (e.g., comment says `us.` but code uses `global.`) | Check runtime logs or intercepted request |
+
+**Always ask:** "Can you share the actual API request body, or add logging to capture what parameters are sent?" before concluding a parameter is or isn't active.
+
+### Step 3: Work With Incomplete Data
+
+You will rarely have a complete picture. Don't wait for perfect data — investigate with what you have:
+
+1. **Form theories from available evidence.** Label each HIGH / MEDIUM / LOW confidence based on what the data actually shows vs what you're inferring.
+2. **Be explicit about assumptions.** "I'm assuming thinking is enabled because of the config — but this needs confirmation" is better than stating it as fact.
+3. **Identify the single most valuable missing data point.** Ask for the one piece that would confirm or rule out the top theory. Targeted asks beat generic ones:
+   - "Filter your scatter plot to content_len < 32K only — do outliers disappear?"
+   - "Check response usage for `thinking_tokens` on a few of the slow requests"
+   - "What is your `max_tokens` value, and what is your typical actual output token count?"
+   - "Log `cache_creation_input_tokens` vs `cache_read_input_tokens` on slow requests"
+
+### Step 4: Expected Latency Reference
+
+Before calling something an outlier, check if the latency is simply expected for that request profile. At Sonnet 4.6 (~50–80 output tokens/sec):
+
+| Input tokens | Output tokens | Thinking | Expected E2E |
+|---|---|---|---|
+| 1–5K | 100–500 | Off | 2–8s |
+| 5–20K | 200–1000 | Off | 5–15s |
+| 20–50K | 500–2000 | Off | 15–45s |
+| 50–128K | 500–2000 | Off | 30–90s |
+| 128–200K | 1000–4000 | Off | 60–180s |
+| Any | Any | On (32K budget) | **Add 6–10 min** before first output token |
+
+If the customer's "outliers" fall within these ranges → the issue is likely workload distribution, not Bedrock performance.
+
+**Thinking budget impact:** At 32K `budget_tokens`, the model generates up to 32,768 thinking tokens *before* producing any visible output. At 50–80 OTPS that's 6–10 minutes of silent generation. This looks exactly like extreme latency and leaves no obvious error signal. Verify by checking `thinking_tokens` in the response usage object.
+
+### Step 5: Structuring Your Response to the Customer
+
+1. **What the data shows** — observations only, no diagnosis yet
+2. **What we can conclude** — theories, labeled by confidence (HIGH/MEDIUM/LOW)
+3. **What we can't conclude yet** — explicitly name the missing data
+4. **Specific asks** — the minimum additional data to confirm/rule out top theories
+5. **Recommendations** — only after theories are validated, or as parallel quick-wins
+
 ## Diagnosing Latency Issues
 
 When investigating a latency issue (e.g. "Claude on Bedrock is slower than on Anthropic Direct"), **don't jump to benchmarking**. First, characterize the problem and gather the right information.
@@ -205,6 +290,13 @@ For workloads with repeated system prompts or large contexts, enabling prompt ca
 - Same mode? (Streaming vs non-streaming TTFT are not comparable)
 - Same `max_tokens`? (Bedrock quota reservation doesn't apply to Direct API)
 - Same time window? (Measured hours apart = different load conditions)
+
+
+#### Unfair Comparison — Workload Mismatch (check before all others)
+One endpoint handles heavier workloads (larger tokens, thinking enabled, different parameters). Appears as "X is slower" when it's actually "X is doing more work." Fix: ensure equivalent requests on both sides before investigating further.
+
+#### Expected Latency for Request Size
+The observed latency is within the normal range for that token count — not an outlier. At Sonnet 4.6 (~50–80 OTPS): 50K-token requests take 30–90s; 128K+ take 60–180s. Check the expected latency table in the Investigation section above before escalating.
 
 ### Step 4: Diagnostic Tools
 
@@ -827,6 +919,13 @@ The benchmark should auto-generate a markdown report. Structure:
 - Client location (same-region EC2 = baseline)
 - RPM/TPM quota limits for the account+model
 - Actual TPM/RPM utilization during measurement
+
+### Latency Investigation (when customer reports slowness)
+- Validate comparison first: same requests, same params, same token range on both sides?
+- Read data before diagnosing: do "outliers" correlate with large request sizes? That's expected behavior.
+- Distinguish framework config from actual API params — verify what's actually sent
+- Work with incomplete data: form ranked theories (HIGH/MEDIUM/LOW), ask for the single most useful missing data point
+- Expected E2E at Sonnet 4.6: 5-20K tokens→5-15s, 50-128K→30-90s, 128-200K→60-180s; thinking (32K budget) adds 6-10 min
 
 ### Methodology
 - Min 10 iterations (20+ preferred); 2-3 warmup iterations excluded
