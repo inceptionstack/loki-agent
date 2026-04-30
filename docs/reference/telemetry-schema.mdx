@@ -133,7 +133,7 @@ Sent to `POST /v1/ingest`. Exactly **once per install run**, at the end. Contain
     { "t": "2026-04-27T12:23:58Z", "name": "install.method_selected", "props": { "method": "cfn", "region": "us-east-1" } },
     { "t": "2026-04-27T12:24:10Z", "name": "install.deploy_started",  "props": { "method": "cfn", "region": "us-east-1", "pack": "openclaw" } },
     { "t": "2026-04-27T12:29:50Z", "name": "install.deploy_completed","props": { "duration_ms": 340000, "method": "cfn" } },
-    { "t": "2026-04-27T12:30:11Z", "name": "install.bootstrap_completed","props":{ "instance_id": "i-0abc..." } },
+    { "t": "2026-04-27T12:30:11Z", "name": "install.bootstrap_completed","props":{ "account_id": "550430683542" } },
     { "t": "2026-04-27T12:30:14Z", "name": "install.completed",       "props": { "duration_ms": 412380, "pack": "openclaw", "method": "cfn", "region": "us-east-1" } }
   ]
 }
@@ -177,7 +177,7 @@ Backends MUST reject events whose `name` is not on this allowlist. This prevents
 | `install.method_selected` | `{method, region}` | User picked deploy method (cfn/terraform/console) + region. |
 | `install.deploy_started` | `{method, region, pack}` | CFN/TF apply kicked off. |
 | `install.deploy_completed` | `{duration_ms, method}` | Stack reached `CREATE_COMPLETE` or equivalent. |
-| `install.bootstrap_completed` | `{instance_id}` | EC2 instance finished userdata bootstrap. |
+| `install.bootstrap_completed` | `{account_id}` | EC2 instance finished userdata bootstrap. |
 | `install.account_renamed` | `{renamed, allowed, auto_rename_enabled, skipped_reason}` | Account rename outcome — whether rename happened, user allowed it, and skip reason if applicable. |
 | `install.completed` | `{duration_ms, pack, method, region}` | Full install success. |
 | `install.failed` | `{duration_ms, exit_code, step, pack, method}` | Installer exited non-zero. |

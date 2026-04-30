@@ -542,10 +542,10 @@ _telem_aws_region() {
   [[ "$v" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}[a-z]?$ ]] && printf '%s' "$v"
 }
 
-# Return $1 only if it matches EC2 instance-id pattern, else empty.
-_telem_instance_id() {
+# Return $1 only if it matches AWS 12-digit account ID pattern, else empty.
+_telem_account_id() {
   local v="${1:-}"
-  [[ "$v" =~ ^i-[0-9a-f]{8,17}$ ]] && printf '%s' "$v"
+  [[ "$v" =~ ^[0-9]{12}$ ]] && printf '%s' "$v"
 }
 
 # Return $1 only if it's a valid InstallPack enum value, else empty.
@@ -619,7 +619,7 @@ _telem_deploy_completed() {
 _telem_bootstrap_completed() {
   local props
   props="$(_telem_props \
-    "$(_telem_kv instance_id "$(_telem_instance_id "${INSTANCE_ID:-}")")")"
+    "$(_telem_kv account_id "$(_telem_account_id "${ACCOUNT_ID:-}")")")"
   _telem_event "install.bootstrap_completed" "$props"
 }
 
