@@ -99,7 +99,8 @@
     },
 
     "InstallMethod": {
-      "enum": ["cfn", "terraform", "tf", "console", "unknown"]
+      "description": "Installer delivery channel (how the bits got onto the machine). 'github-actions' lets CI-triggered installer runs be filtered in dashboards without relying on is_test.",
+      "enum": ["brew", "curl", "msi", "dmg", "pkg", "github-actions"]
     },
 
     "EventName": {

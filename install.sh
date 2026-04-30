@@ -291,12 +291,20 @@ _telem_norm_os_version() {
 # user chose. Default to 'curl' since install.lowkey.run is the canonical
 # delivery.
 _telem_resolve_install_method() {
+  # CI runs of install.sh fire real beacons before the TEST_MODE guard
+  # kicks in. Detecting the GitHub Actions runner environment here lets
+  # dashboards filter on install_method instead of is_test (which is
+  # validated but not persisted in the data lake).
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    printf 'github-actions\n'; return 0
+  fi
   # Allow override via env for Homebrew/pkg distribution channels later.
+  # Server enum: brew | curl | dmg | msi | pkg | github-actions.
   local m="${LOWKEY_INSTALL_CHANNEL:-}"
   m="$(printf '%s' "$m" | tr '[:upper:]' '[:lower:]' 2>/dev/null || printf '')"
   case "$m" in
-    brew|curl|dmg|msi|pkg) printf '%s\n' "$m" ;;
-    *)                     printf 'curl\n' ;;
+    brew|curl|dmg|msi|pkg|github-actions) printf '%s\n' "$m" ;;
+    *)                                    printf 'curl\n' ;;
   esac
 }
 

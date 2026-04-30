@@ -55,7 +55,7 @@ Sent to `POST /v1/install`. One envelope per outcome transition (`started`, `com
     "arch": "arm64",
     "os_version": "6.1"
   },
-  "install_method": "cfn",
+  "install_method": "curl",
   "outcome": "completed",
   "duration_ms": 412380,
   "is_test": false,
@@ -77,7 +77,7 @@ Sent to `POST /v1/install`. One envelope per outcome transition (`started`, `com
 | `agent.os` | string enum | yes | `linux`, `darwin`, `unknown`. Lower-cased `uname -s`. |
 | `agent.arch` | string enum | yes | `arm64`, `x86_64`, `unknown`. |
 | `agent.os_version` | string | yes | Kernel major.minor, e.g. `6.1` or `23.6`. |
-| `install_method` | string enum | yes | `cfn`, `terraform`, `tf`, `console`, `unknown`. |
+| `install_method` | string enum | yes | Delivery channel: `brew`, `curl`, `msi`, `dmg`, `pkg`, `github-actions`. |
 | `outcome` | string enum | yes | `started` \| `completed` \| `failed`. |
 | `duration_ms` | integer | yes | ms since install start. `0` on `started`. |
 | `is_test` | boolean | yes | `true` when installer ran with `--test` / `TEST_MODE=true`. Backends MUST exclude these from funnels. |
