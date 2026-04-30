@@ -343,24 +343,24 @@ _telem_norm_version() {
 _telem_event() {
   # Usage: _telem_event "event.name" '{"key":"value"}'
   #
-  # Spec note: Event.props is a `oneOf` across many per-event schemas, all of
-  # which allow `{}`. An empty object therefore matches multiple branches and
-  # fails strict JSON Schema `oneOf` validation. We OMIT props entirely when
-  # the caller passes no props or an empty object, instead of writing `{}`.
+  # Spec note: Event.props is REQUIRED (required: ["t","name","props"] in
+  # $defs/Event). Per-event `oneOf` branches all permit `{}`; an empty object
+  # is valid. Always emit `props`, defaulting to {} when no props are given.
   [[ "$_TELEM_ENABLED" == "true" ]] || return 0
   local name="${1:-unknown}"
   local props="${2:-}"
   local ts
   ts="$(_telem_iso)"
 
-  # Normalize: treat empty string or {} as "no props".
+  # Event.props is REQUIRED per $defs/Event in telemetry-v1.schema.json
+  # (required: ["t", "name", "props"]). Always emit it, defaulting to {}
+  # when the caller passes no props or an empty body. An empty object is
+  # valid against the Event.props schema (no minProperties constraint).
   if [[ -z "$props" || "$props" == "{}" ]]; then
-    printf '{"t":"%s","name":"%s"}\n' "$ts" "$name" \
-      >> "$_TELEM_QUEUE" 2>/dev/null || true
-  else
-    printf '{"t":"%s","name":"%s","props":%s}\n' "$ts" "$name" "$props" \
-      >> "$_TELEM_QUEUE" 2>/dev/null || true
+    props='{}'
   fi
+  printf '{"t":"%s","name":"%s","props":%s}\n' "$ts" "$name" "$props" \
+    >> "$_TELEM_QUEUE" 2>/dev/null || true
 }
 
 # ── Network: fire-and-forget POST ──────────────────────────────────────
