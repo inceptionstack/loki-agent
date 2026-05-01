@@ -2830,13 +2830,24 @@ _resolve_final_name() {
       info "Name truncated to 50 chars"
     fi
     echo ""
-    info "Current account name: $(printf '%s' "$current_name")"
-    info "Proposed name: $(printf '%s' "$proposed")"
-    echo ""
-    info "Renaming your account with the 'Loki-' prefix is highly recommended."
-    info "It enables governance, cost tracking, and organization-wide visibility"
-    info "of Lowkey-managed accounts."
-    info "This name appears in the AWS console account switcher and billing."
+    local safe_current safe_proposed
+    safe_current=$(printf '%s' "$current_name")
+    safe_proposed=$(printf '%s' "$proposed")
+    printf '%s\n' \
+      "Current name:   ${safe_current}" \
+      "Proposed name:  ${safe_proposed}" \
+      "" \
+      "Adding the 'Loki-' prefix is highly recommended." \
+      "It enables:" \
+      "  • Governance & compliance tracking" \
+      "  • Cost attribution across your organization" \
+      "  • Quick identification of Lowkey-managed accounts" \
+      "" \
+      "This name appears in the AWS console account" \
+      "switcher and billing." | $GUM style \
+      --border double --border-foreground 117 \
+      --foreground 255 --padding "1 2" --margin "0 2" \
+      --bold
     echo ""
 
     local choice
