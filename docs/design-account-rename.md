@@ -63,11 +63,16 @@ _telem_event "install.account_renamed" "$props" 2>/dev/null || true
 
 ## Proposed Flow
 
-Call `maybe_rename_account()` **after** `run_config_and_review()` — this is
-the point where the user has fully committed to deployment in all modes
-(normal, simple, with or without `-y`). Placing it inside `preflight_checks`
-would risk renaming the account before the user confirms deployment in
-simple mode (where `preflight_checks` has no deploy confirmation).
+Call `maybe_rename_account()` inside `run_config_and_review()`, **before**
+`show_summary()`. This ensures `DEPLOY_REGION` is set (needed for SSM writes)
+and the user has gone through configuration but hasn't yet confirmed
+deployment. The rename prompt appears as the last config step before the
+"Ready to deploy?" confirmation.
+
+Placing it inside `preflight_checks` would risk renaming the account before
+the user confirms deployment in simple mode (where `preflight_checks` has no
+deploy confirmation). Placing it in `main()` before the config wizard would
+leave `DEPLOY_REGION` unset.
 
 ```
 preflight_checks()
@@ -76,8 +81,10 @@ preflight_checks()
   → if normal mode: warn + confirm + check_permissions
   → else (simple): ok "Using current account and region"
 collect_config()
-run_config_and_review()      → user confirms all settings
-**maybe_rename_account()**   ← NEW, after user fully commits to deploy
+run_config_and_review()
+  → build_deploy_params
+  → **maybe_rename_account()**   ← before show_summary
+  → show_summary               ← user confirms deploy here
 deploy()                     → including console-deploy early-exit path
 ```
 
@@ -90,10 +97,12 @@ All deploy paths — CFN console, CFN CLI, Terraform — get the rename.
 **Safety invariant:** Nothing in this function may abort the install.
 All AWS API calls (`aws account`, `aws ssm`) and all telemetry calls
 must be guarded with `2>/dev/null || true` or wrapped in `if` blocks.
-The function itself should be called from `main()` as:
+The function itself is called from `run_config_and_review()` as:
 ```bash
-maybe_rename_account 2>/dev/null || true
+maybe_rename_account || true
 ```
+Note: no outer `2>/dev/null` — gum renders its interactive UI on stderr,
+so suppressing stderr would hide the rename prompt.
 
 ### Helper: `_emit_rename_telemetry`
 

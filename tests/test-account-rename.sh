@@ -463,7 +463,7 @@ test_rename_in_config_and_review() {
 }; test_rename_in_config_and_review
 
 test_rename_before_show_summary() {
-  # Verify maybe_rename_account is called BEFORE show_summary
+  # Verify maybe_rename_account is called BEFORE show_summary in run_config_and_review()
   local body
   body=$(sed -n '/^run_config_and_review()/,/^}/p' "$INSTALL_SH")
   local rename_line summary_line
