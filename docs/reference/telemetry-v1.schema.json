@@ -27,6 +27,7 @@
         "outcome":        { "enum": ["started", "completed", "failed"] },
         "duration_ms":    { "type": "integer", "minimum": 0 },
         "is_test":        { "type": "boolean" },
+        "account_rename_enabled": { "type": "boolean" },
         "failure_step":   { "type": ["string", "null"], "maxLength": 64 },
         "failure_class":  { "type": ["string", "null"], "maxLength": 64 }
       },
@@ -112,6 +113,7 @@
         "install.deploy_started",
         "install.deploy_completed",
         "install.bootstrap_completed",
+        "install.account_renamed",
         "install.completed",
         "install.failed",
         "first_run",

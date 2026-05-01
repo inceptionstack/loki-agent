@@ -18,6 +18,15 @@ mkdir -p "${HOOKS_DIR}"
 cp "${REPO_ROOT}/scripts/pre-commit" "${HOOKS_DIR}/pre-commit"
 chmod +x "${HOOKS_DIR}/pre-commit"
 
+# Install git-secrets hooks (if git-secrets is available)
+if command -v git-secrets &>/dev/null; then
+  ( cd "${REPO_ROOT}" && git secrets --register-aws 2>/dev/null || true )
+  echo "✓ git-secrets AWS patterns registered"
+else
+  echo "⚠ git-secrets not found — install for local secret scanning:"
+  echo "  brew install git-secrets  OR  https://github.com/awslabs/git-secrets#installing-git-secrets"
+fi
+
 echo "✓ Git hooks installed:"
 echo "  pre-commit → runs all unit tests before commit"
 echo ""

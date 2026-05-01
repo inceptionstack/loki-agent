@@ -17,6 +17,9 @@ This page lists every flag accepted by `install.sh` (the script you get from `in
 | `--method <cfn\|terraform\|tf>` | Pre-select deploy method. Default: CFN via CLI. |
 | `--kiro-from-secret <id-or-arn>` | Secrets Manager id/arn whose `SecretString` is the Kiro API key (kiro-cli pack, headless mode). |
 | `--debug-in-repo` | Dev-only: run the installer from the current working directory instead of downloading. |
+| `--test`, `--dry-run` | Run installer end-to-end without provisioning AWS resources. Telemetry tagged `is_test`. |
+| `--auto-rename-account-enabled` | Enable auto-rename of AWS account to `Loki-<name>` in headless (`-y`) mode. No-op in interactive mode (user is always prompted). |
+| `--disable-account-rename` | Skip account rename entirely. Suppresses the interactive rename prompt too. |
 | `--help`, `-h` | Show the help text and exit. |
 
 ## Canonical non-interactive invocations

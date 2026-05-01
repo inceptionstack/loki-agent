@@ -438,7 +438,7 @@ _telem_send_install_beacon() {
 
   local body
   body=$(cat <<EOF
-{"schema":"lowkey.install.v1","sent_at":"$(_telem_iso)","install_id":"${_TELEM_INSTALL_ID}","machine_id":"${_TELEM_MACHINE_ID}","agent":{"version":"$(_telem_norm_version)","channel":"stable","os":"${os_name}","arch":"${arch_name}","os_version":"${os_ver}"},"install_method":"${install_method}","outcome":"${outcome}","duration_ms":${duration_ms},"is_test":${TEST_MODE:-false}${fs_json}${fc_json}}
+{"schema":"lowkey.install.v1","sent_at":"$(_telem_iso)","install_id":"${_TELEM_INSTALL_ID}","machine_id":"${_TELEM_MACHINE_ID}","agent":{"version":"$(_telem_norm_version)","channel":"stable","os":"${os_name}","arch":"${arch_name}","os_version":"${os_ver}"},"install_method":"${install_method}","outcome":"${outcome}","duration_ms":${duration_ms},"is_test":${TEST_MODE:-false},"account_rename_enabled":${AUTO_RENAME_ACCOUNT:-false}${fs_json}${fc_json}}
 EOF
   )
   _telem_post "/v1/install" "$body"
@@ -542,10 +542,10 @@ _telem_aws_region() {
   [[ "$v" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]{1,2}[a-z]?$ ]] && printf '%s' "$v"
 }
 
-# Return $1 only if it matches EC2 instance-id pattern, else empty.
-_telem_instance_id() {
+# Return $1 only if it matches AWS 12-digit account ID pattern, else empty.
+_telem_account_id() {
   local v="${1:-}"
-  [[ "$v" =~ ^i-[0-9a-f]{8,17}$ ]] && printf '%s' "$v"
+  [[ "$v" =~ ^[0-9]{12}$ ]] && printf '%s' "$v"
 }
 
 # Return $1 only if it's a valid InstallPack enum value, else empty.
@@ -619,7 +619,7 @@ _telem_deploy_completed() {
 _telem_bootstrap_completed() {
   local props
   props="$(_telem_props \
-    "$(_telem_kv instance_id "$(_telem_instance_id "${INSTANCE_ID:-}")")")"
+    "$(_telem_kv account_id "$(_telem_account_id "${ACCOUNT_ID:-}")")")"
   _telem_event "install.bootstrap_completed" "$props"
 }
 
@@ -665,6 +665,8 @@ PRESELECT_PROFILE=""
 INSTALL_MODE=""  # "simple" or "advanced", empty = ask
 DEBUG_IN_REPO=false
 TEST_MODE=false
+AUTO_RENAME_ACCOUNT=false
+DISABLE_ACCOUNT_RENAME=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --non-interactive|--yes|-y) AUTO_YES=true; shift ;;
@@ -699,6 +701,8 @@ while [[ $# -gt 0 ]]; do
       KIRO_FROM_SECRET="$2"; shift 2 ;;
     --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
     --test|--dry-run) TEST_MODE=true; shift ;;
+    --auto-rename-account-enabled) AUTO_RENAME_ACCOUNT=true; shift ;;
+    --disable-account-rename)      DISABLE_ACCOUNT_RENAME=true; shift ;;
     --help|-h)
       cat <<'USAGE'
 Usage: install.sh [OPTIONS]
@@ -721,6 +725,9 @@ Options:
                                  provisioning AWS resources. Telemetry
                                  hits from this invocation are tagged
                                  is_test and excluded from dashboard stats.
+  --auto-rename-account-enabled  Enable auto-rename of AWS account to
+                                 Loki-<name> in headless (-y) mode
+  --disable-account-rename       Skip account rename entirely
   -h, --help                     Show this help and exit
 
 Examples:
@@ -2552,6 +2559,255 @@ show_complete() {
 }
 
 # ============================================================================
+# Account Rename
+# ============================================================================
+
+# SAFE_NAME_PATTERN: printable ASCII subset excluding shell metacharacters.
+# Keeps: alnum, space, hyphen, underscore, dot, plus, equals, at, colon,
+#        semicolon, comma, exclamation, question, hash, parens, brackets,
+#        braces, tilde, caret, slash.
+# Strips: $, `, ", \, &, |, *, ', %  and control chars.
+_sanitize_account_name() {
+  local name="$1"
+  # Strip control chars, then strip excluded metacharacters
+  printf '%s' "$name" \
+    | tr -d '\000-\037' \
+    | sed 's/[\$`"\\&|*'\''%]//g'
+}
+
+_emit_rename_telemetry() {
+  # Usage: _emit_rename_telemetry <renamed> <allowed> [skipped_reason]
+  local renamed="${1:-false}"
+  local allowed="${2:-false}"
+  local skipped_reason="${3:-}"
+  # Defensive: coerce to JSON booleans
+  [[ "$renamed" == "true" ]] || renamed="false"
+  [[ "$allowed" == "true" ]] || allowed="false"
+  local auto_val="false"
+  [[ "$AUTO_RENAME_ACCOUNT" == "true" ]] && auto_val="true"
+  local props
+  props=$(printf '{"renamed":%s,"allowed":%s,"auto_rename_enabled":%s' \
+    "$renamed" "$allowed" "$auto_val")
+  # Note: skipped_reason values are always hardcoded string literals from callers.
+  # Do not pass user input here — the printf pattern does not escape for JSON.
+  if [[ -n "$skipped_reason" ]]; then
+    props+=$(printf ',"skipped_reason":"%s"' "$skipped_reason")
+  fi
+  props+='}'
+  _telem_event "install.account_renamed" "$props" 2>/dev/null || true
+}
+
+maybe_rename_account() {
+  # Step 1: Check disable flag
+  if [[ "$DISABLE_ACCOUNT_RENAME" == "true" ]]; then
+    [[ "$AUTO_RENAME_ACCOUNT" == "true" ]] && \
+      info "Both --auto-rename-account-enabled and --disable-account-rename set; rename disabled"
+    info "Account rename disabled via --disable-account-rename"
+    _emit_rename_telemetry false false "disabled_flag"
+    return 0
+  fi
+
+  # Step 2: Check aws account subcommand availability
+  if ! aws account help >/dev/null 2>&1; then
+    info "Account rename requires AWS CLI v2.8+, skipping"
+    _emit_rename_telemetry false false "cli_missing"
+    return 0
+  fi
+
+  # Step 3: Read current account name
+  local account_info current_name
+  if ! account_info=$(aws account get-account-information --output json 2>&1); then
+    warn "Could not read account name"
+    _emit_rename_telemetry false false "api_error"
+    return 0
+  fi
+  current_name=$(printf '%s' "$account_info" | jq -r '.AccountName // ""' 2>/dev/null || printf '')
+
+  # Step 4: Already prefixed?
+  if _account_already_prefixed "$current_name"; then
+    return 0
+  fi
+
+  # Step 5-7: Build proposed name (sets _RENAME_PROPOSED, _RENAME_WAS_TRUNCATED)
+  _build_proposed_name "$current_name"
+  local proposed="$_RENAME_PROPOSED"
+  local was_truncated="$_RENAME_WAS_TRUNCATED"
+
+  # Step 8-11: Resolve final name (headless or interactive)
+  # Sets _RENAME_FINAL_NAME or returns 0 with telemetry emitted on skip.
+  if ! _resolve_final_name "$proposed" "$current_name" "$was_truncated"; then
+    return 0  # user skipped or headless without opt-in (telemetry already emitted)
+  fi
+
+  # Step 12-13: Apply rename via AWS API
+  _apply_account_rename "$_RENAME_FINAL_NAME" "$current_name"
+}
+
+# Returns 0 (true) if already prefixed and handled; 1 otherwise.
+_account_already_prefixed() {
+  local current_name="$1"
+  local lower_name
+  lower_name=$(printf '%s' "$current_name" | tr '[:upper:]' '[:lower:]')
+  if [[ "$lower_name" == loki-* ]]; then
+    local display_name
+    display_name=$(printf '%s' "$current_name" | tr -d '\000-\037')
+    ok "Account already named for Loki: $(printf '%s' "$display_name")"
+    # Write SSM params if they don't exist yet (first install with pre-existing prefix).
+    # Note: stripped_original is a best-guess — if account was manually named
+    # "LOKI-Foo", we store "Foo" but the true pre-Loki original is unknown.
+    if ! aws ssm get-parameter --name "/loki/original-account-name" \
+        --region "$DEPLOY_REGION" --output text >/dev/null 2>&1; then
+      local stripped_original="${current_name:5}"  # strip 5-char prefix (Loki-)
+      [[ -n "$stripped_original" ]] || stripped_original="$ACCOUNT_ID"
+      aws ssm put-parameter --name "/loki/original-account-name" \
+        --value "$stripped_original" --type String --overwrite \
+        --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+      aws ssm put-parameter --name "/loki/installed-account-name" \
+        --value "$current_name" --type String --overwrite \
+        --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    fi
+    _emit_rename_telemetry false false "already_prefixed"
+    return 0
+  fi
+  return 1
+}
+
+# Builds the proposed "Loki-<sanitized>" name.
+# Sets _RENAME_PROPOSED and _RENAME_WAS_TRUNCATED.
+_build_proposed_name() {
+  local current_name="$1"
+  local sanitized
+  _RENAME_WAS_TRUNCATED=false
+  _RENAME_PROPOSED=""
+
+  sanitized=$(_sanitize_account_name "$current_name")
+  if [[ -z "$sanitized" ]]; then
+    _RENAME_PROPOSED="Loki-${ACCOUNT_ID}"
+  else
+    _RENAME_PROPOSED="Loki-${sanitized}"
+  fi
+
+  if [[ ${#_RENAME_PROPOSED} -gt 50 ]]; then
+    _RENAME_PROPOSED="${_RENAME_PROPOSED:0:50}"
+    _RENAME_PROPOSED=$(printf '%s' "$_RENAME_PROPOSED" | sed 's/[- ]*$//')
+    _RENAME_WAS_TRUNCATED=true
+  fi
+  if [[ ${#_RENAME_PROPOSED} -lt 6 ]]; then
+    _RENAME_PROPOSED="Loki-${ACCOUNT_ID}"
+    _RENAME_WAS_TRUNCATED=false
+  fi
+}
+
+# Resolves the final name via headless auto-apply or interactive prompt.
+# Sets _RENAME_FINAL_NAME on success (return 0).
+# Returns 1 if user skipped or headless without opt-in (telemetry emitted inside).
+_resolve_final_name() {
+  local proposed="$1" current_name="$2" was_truncated="$3"
+  _RENAME_FINAL_NAME=""
+
+  if [[ "$AUTO_YES" == "true" ]]; then
+    # Headless mode
+    if [[ "$AUTO_RENAME_ACCOUNT" != "true" ]]; then
+      info "Headless mode: account rename skipped (pass --auto-rename-account-enabled to enable)"
+      _emit_rename_telemetry false false "headless_no_opt_in"
+      return 1
+    fi
+    _RENAME_FINAL_NAME="$proposed"
+    if [[ "$was_truncated" == "true" ]]; then
+      warn "Account name truncated to 50 chars: $(printf '%s' "$_RENAME_FINAL_NAME")"
+    fi
+  else
+    # Interactive mode
+    if [[ "$was_truncated" == "true" ]]; then
+      info "Name truncated to 50 chars"
+    fi
+    echo ""
+    info "Current account name: $(printf '%s' "$current_name")"
+    info "Proposed name: $(printf '%s' "$proposed")"
+    info "This name appears in the AWS console account switcher and billing."
+    echo ""
+
+    local choice
+    choice=$($GUM choose --header "Rename AWS account?" \
+      "Rename to $proposed" "Edit name" "Skip" 2>/dev/null || echo "Skip")
+
+    # Use if/elif instead of case to avoid glob pattern matching on $proposed
+    # (account names may contain ?, [], which are bash glob characters)
+    if [[ "$choice" == "Rename to $proposed" ]]; then
+        _RENAME_FINAL_NAME="$proposed"
+    elif [[ "$choice" == "Edit name" ]]; then
+        local edit_attempts=0
+        while true; do
+          edit_attempts=$((edit_attempts + 1))
+          if [[ $edit_attempts -gt 3 ]]; then
+            warn "Too many invalid attempts, skipping rename"
+            _emit_rename_telemetry false false "user_declined"
+            return 1
+          fi
+          _RENAME_FINAL_NAME=$($GUM input --placeholder "Enter account name (1-50 chars)" \
+            --value "$proposed" 2>/dev/null || echo "")
+          # Validate against SAFE_NAME_PATTERN — reject (don't silently mutate)
+          local sanitized_check
+          sanitized_check=$(_sanitize_account_name "$_RENAME_FINAL_NAME")
+          if [[ "$sanitized_check" != "$_RENAME_FINAL_NAME" ]]; then
+            warn "Name contains invalid characters (no \$, \`, \", \\, &, |, *, ', %)"
+            continue
+          fi
+          if [[ -z "$_RENAME_FINAL_NAME" || "${_RENAME_FINAL_NAME// /}" == "" ]]; then
+            warn "Name cannot be empty or whitespace-only"
+            continue
+          fi
+          if [[ ${#_RENAME_FINAL_NAME} -gt 50 ]]; then
+            warn "Name must be 50 characters or less (got ${#_RENAME_FINAL_NAME})"
+            continue
+          fi
+          break
+        done
+    else
+        info "Keeping account name: $(printf '%s' "$current_name")"
+        _emit_rename_telemetry false false "user_declined"
+        return 1
+    fi
+  fi
+  return 0
+}
+
+# Calls put-account-name with retry, writes SSM params. All non-fatal.
+_apply_account_rename() {
+  local final_name="$1" current_name="$2"
+  local put_err
+
+  if ! put_err=$(aws account put-account-name --account-name "$final_name" 2>&1); then
+    if [[ "$put_err" == *"TooManyRequestsException"* || "$put_err" == *"429"* ]]; then
+      sleep 2
+      if ! put_err=$(aws account put-account-name --account-name "$final_name" 2>&1); then
+        warn "Could not rename account: $(printf '%s' "$put_err"). Deployment will continue."
+        _emit_rename_telemetry false true "api_error"
+        return 0
+      fi
+    else
+      warn "Could not rename account: $(printf '%s' "$put_err"). Deployment will continue."
+      _emit_rename_telemetry false true "api_error"
+      return 0
+    fi
+  fi
+
+  ok "Account renamed to $(printf '%s' "$final_name")"
+  info "May take up to 4 hours to appear everywhere in AWS console"
+  _emit_rename_telemetry true true
+
+  # Store original + installed names in SSM (non-fatal)
+  aws ssm put-parameter --name "/loki/original-account-name" \
+    --value "$current_name" --type String --overwrite \
+    --region "$DEPLOY_REGION" >/dev/null 2>&1 || \
+    warn "Could not store original account name in SSM (non-fatal)"
+  aws ssm put-parameter --name "/loki/installed-account-name" \
+    --value "$final_name" --type String --overwrite \
+    --region "$DEPLOY_REGION" >/dev/null 2>&1 || \
+    warn "Could not store installed account name in SSM (non-fatal)"
+}
+
+# ============================================================================
 # Main
 # ============================================================================
 run_config_and_review() {
@@ -2611,6 +2867,7 @@ main() {
   run_config_and_review  # steps 2-4 (config → review)
   _telem_pack_selected 2>/dev/null || true
   _telem_method_selected 2>/dev/null || true
+  maybe_rename_account 2>/dev/null || true
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
