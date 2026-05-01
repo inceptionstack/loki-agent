@@ -63,29 +63,25 @@ _telem_event "install.account_renamed" "$props" 2>/dev/null || true
 
 ## Proposed Flow
 
-Call `maybe_rename_account()` inside `run_config_and_review()`, **before**
-`show_summary()`. This ensures `DEPLOY_REGION` is set (needed for SSM writes)
-and the user has gone through configuration but hasn't yet confirmed
-deployment. The rename prompt appears as the last config step before the
-"Ready to deploy?" confirmation.
+Call `maybe_rename_account()` from `main()`, **after** `preflight_checks()`
+and **before** the config wizard (`run_config_and_review()`). Account rename
+is an account-level operation, not a deployment-level one, so it should
+happen before the user configures packs, profiles, and deploy settings.
 
-Placing it inside `preflight_checks` would risk renaming the account before
-the user confirms deployment in simple mode (where `preflight_checks` has no
-deploy confirmation). Placing it in `main()` before the config wizard would
-leave `DEPLOY_REGION` unset.
+SSM writes inside the rename helpers use `${DEPLOY_REGION:-$REGION}` to
+fall back to the preflight-detected `$REGION` when `$DEPLOY_REGION` hasn't
+been set yet by the config wizard.
 
 ```
+choose_install_mode()          ← simple or advanced (needed before preflight)
 preflight_checks()
   → verify_aws_credentials()
   → Display Account/Region/Branch info
   → if normal mode: warn + confirm + check_permissions
   → else (simple): ok "Using current account and region"
-collect_config()
-run_config_and_review()
-  → build_deploy_params
-  → **maybe_rename_account()**   ← before show_summary
-  → show_summary               ← user confirms deploy here
-deploy()                     → including console-deploy early-exit path
+**maybe_rename_account()**     ← account-level, before config wizard
+run_config_and_review()       → config wizard + show_summary + deploy confirm
+deploy()                      → including console-deploy early-exit path
 ```
 
 Note: `maybe_rename_account()` must be placed **before** the console-deploy
@@ -97,7 +93,7 @@ All deploy paths — CFN console, CFN CLI, Terraform — get the rename.
 **Safety invariant:** Nothing in this function may abort the install.
 All AWS API calls (`aws account`, `aws ssm`) and all telemetry calls
 must be guarded with `2>/dev/null || true` or wrapped in `if` blocks.
-The function itself is called from `run_config_and_review()` as:
+The function itself is called from `main()` as:
 ```bash
 maybe_rename_account || true
 ```
@@ -250,13 +246,13 @@ DISABLE_ACCOUNT_RENAME=false
 
 ## Uninstall Approach (Hybrid)
 
-During install, store state in SSM Parameter Store (using `--region "$DEPLOY_REGION"`
-for consistency with existing SSM usage in the installer):
+During install, store state in SSM Parameter Store (using `${DEPLOY_REGION:-$REGION}`
+to support the call site before the config wizard sets `$DEPLOY_REGION`):
 ```bash
 aws ssm put-parameter --name "/loki/original-account-name" \
-  --value "$current_name" --type String --overwrite --region "$DEPLOY_REGION"
+  --value "$current_name" --type String --overwrite --region "${DEPLOY_REGION:-$REGION}"
 aws ssm put-parameter --name "/loki/installed-account-name" \
-  --value "$final_name" --type String --overwrite --region "$DEPLOY_REGION"
+  --value "$final_name" --type String --overwrite --region "${DEPLOY_REGION:-$REGION}"
 ```
 
 During uninstall (`maybe_restore_account_name()`):
@@ -428,7 +424,7 @@ Checklist of files/repos that need changes:
 ### `inceptionstack/lowkey` (this repo)
 - [x] `install.sh`: Add `maybe_rename_account()`, `_emit_rename_telemetry()`,
       flag parsing (`--auto-rename-account-enabled`, `--disable-account-rename`),
-      call site in `run_config_and_review()` before `show_summary`
+      call site in `main()` after `preflight_checks`, before config wizard
 - [x] `install.sh`: Add `account_rename_enabled` field to `_telem_send_install_beacon`
 - [x] `install.sh` `--help` text: Document new flags
 - [x] `docs/reference/telemetry-v1.schema.json`: Add `account_rename_enabled` to beacon,

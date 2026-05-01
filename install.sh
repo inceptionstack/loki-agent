@@ -2764,15 +2764,15 @@ _account_already_prefixed() {
     # Note: stripped_original is a best-guess — if account was manually named
     # "LOKI-Foo", we store "Foo" but the true pre-Loki original is unknown.
     if ! aws ssm get-parameter --name "/loki/original-account-name" \
-        --region "$DEPLOY_REGION" --output text >/dev/null 2>&1; then
+        --region "${DEPLOY_REGION:-$REGION}" --output text >/dev/null 2>&1; then
       local stripped_original="${current_name:5}"  # strip 5-char prefix (Loki-)
       [[ -n "$stripped_original" ]] || stripped_original="$ACCOUNT_ID"
       aws ssm put-parameter --name "/loki/original-account-name" \
         --value "$stripped_original" --type String --overwrite \
-        --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+        --region "${DEPLOY_REGION:-$REGION}" >/dev/null 2>&1 || true
       aws ssm put-parameter --name "/loki/installed-account-name" \
         --value "$current_name" --type String --overwrite \
-        --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+        --region "${DEPLOY_REGION:-$REGION}" >/dev/null 2>&1 || true
     fi
     _emit_rename_telemetry false false "already_prefixed"
     return 0
@@ -2924,11 +2924,11 @@ _apply_account_rename() {
   # Store original + installed names in SSM (non-fatal)
   aws ssm put-parameter --name "/loki/original-account-name" \
     --value "$current_name" --type String --overwrite \
-    --region "$DEPLOY_REGION" >/dev/null 2>&1 || \
+    --region "${DEPLOY_REGION:-$REGION}" >/dev/null 2>&1 || \
     warn "Could not store original account name in SSM (non-fatal)"
   aws ssm put-parameter --name "/loki/installed-account-name" \
     --value "$final_name" --type String --overwrite \
-    --region "$DEPLOY_REGION" >/dev/null 2>&1 || \
+    --region "${DEPLOY_REGION:-$REGION}" >/dev/null 2>&1 || \
     warn "Could not store installed account name in SSM (non-fatal)"
 }
 
@@ -2956,7 +2956,6 @@ run_config_and_review() {
   fi
 
   build_deploy_params
-  maybe_rename_account || true
   show_summary || {
     # User chose "Change settings" → re-run in advanced mode with current values as preselects
     PRESELECT_PACK="$PACK_NAME"
@@ -2989,6 +2988,7 @@ main() {
   choose_install_mode    # simple (default) or advanced — needed before preflight
   _TELEM_CURRENT_STEP="preflight"
   preflight_checks       # step 1
+  maybe_rename_account || true  # account-level, before config wizard
   _TELEM_CURRENT_STEP="config"
   run_config_and_review  # steps 2-4 (config → review)
   _telem_pack_selected 2>/dev/null || true

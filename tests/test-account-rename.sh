@@ -458,25 +458,25 @@ echo ""
 echo "── call site ──"
 # ============================================================================
 
-test_rename_in_config_and_review() {
-  assert_contains "maybe_rename_account called in run_config_and_review()" "maybe_rename_account" "$(sed -n '/^run_config_and_review()/,/^}/p' "$INSTALL_SH")"
-}; test_rename_in_config_and_review
+test_rename_in_main() {
+  assert_contains "maybe_rename_account called in main()" "maybe_rename_account" "$(sed -n '/^main()/,/^}/p' "$INSTALL_SH")"
+}; test_rename_in_main
 
-test_rename_before_show_summary() {
-  # Verify maybe_rename_account is called BEFORE show_summary in run_config_and_review()
+test_rename_before_config_wizard() {
+  # Verify maybe_rename_account is called BEFORE run_config_and_review in main()
   local body
-  body=$(sed -n '/^run_config_and_review()/,/^}/p' "$INSTALL_SH")
-  local rename_line summary_line
+  body=$(sed -n '/^main()/,/^}/p' "$INSTALL_SH")
+  local rename_line config_line
   rename_line=$(echo "$body" | grep -n "maybe_rename_account" | head -1 | cut -d: -f1)
-  summary_line=$(echo "$body" | grep -n "show_summary" | head -1 | cut -d: -f1)
-  if [[ -n "$rename_line" && -n "$summary_line" && "$rename_line" -lt "$summary_line" ]]; then
-    echo "  ✓ maybe_rename_account before show_summary"; PASS=$((PASS + 1))
+  config_line=$(echo "$body" | grep -n "run_config_and_review" | head -1 | cut -d: -f1)
+  if [[ -n "$rename_line" && -n "$config_line" && "$rename_line" -lt "$config_line" ]]; then
+    echo "  ✓ maybe_rename_account before run_config_and_review"; PASS=$((PASS + 1))
   else
-    echo "  ✗ maybe_rename_account should be before show_summary"
-    echo "    rename_line=$rename_line summary_line=$summary_line"
+    echo "  ✗ maybe_rename_account should be before run_config_and_review"
+    echo "    rename_line=$rename_line config_line=$config_line"
     FAIL=$((FAIL + 1))
   fi
-}; test_rename_before_show_summary
+}; test_rename_before_config_wizard
 
 test_main_rename_guarded() {
   # Verify the call is guarded with || true (no 2>/dev/null — gum needs stderr)
