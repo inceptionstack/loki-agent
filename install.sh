@@ -2809,12 +2809,16 @@ _resolve_final_name() {
     echo ""
     info "Current account name: $(printf '%s' "$current_name")"
     info "Proposed name: $(printf '%s' "$proposed")"
+    echo ""
+    info "Renaming your account with the 'Loki-' prefix is highly recommended."
+    info "It enables governance, cost tracking, and organization-wide visibility"
+    info "of Lowkey-managed accounts."
     info "This name appears in the AWS console account switcher and billing."
     echo ""
 
     local choice
     choice=$($GUM choose --header "Rename AWS account?" \
-      "Rename to $proposed" "Edit name" "Skip" 2>/dev/null || echo "Skip")
+      "Rename to $proposed" "Edit name" "Skip" < /dev/tty 2>/dev/null) || choice="Skip"
 
     # Use if/elif instead of case to avoid glob pattern matching on $proposed
     # (account names may contain ?, [], which are bash glob characters)
@@ -2830,7 +2834,7 @@ _resolve_final_name() {
             return 1
           fi
           _RENAME_FINAL_NAME=$($GUM input --placeholder "Enter account name (1-50 chars)" \
-            --value "$proposed" 2>/dev/null || echo "")
+            --value "$proposed" < /dev/tty 2>/dev/null) || _RENAME_FINAL_NAME=""
           # Validate against SAFE_NAME_PATTERN — reject (don't silently mutate)
           local sanitized_check
           sanitized_check=$(_sanitize_account_name "$_RENAME_FINAL_NAME")
