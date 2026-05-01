@@ -436,9 +436,14 @@ _telem_send_install_beacon() {
   [[ -n "$failure_step"  ]] && fs_json=",\"failure_step\":\"${failure_step}\""
   [[ -n "$failure_class" ]] && fc_json=",\"failure_class\":\"${failure_class}\""
 
+  # account_prefix: first 5 digits of AWS account ID (omitted if unavailable)
+  local ap_json=""
+  local ap="$(_telem_account_prefix "${ACCOUNT_ID:-}")"
+  [[ -n "$ap" ]] && ap_json=",\"account_prefix\":\"${ap}\""
+
   local body
   body=$(cat <<EOF
-{"schema":"lowkey.install.v1","sent_at":"$(_telem_iso)","install_id":"${_TELEM_INSTALL_ID}","machine_id":"${_TELEM_MACHINE_ID}","agent":{"version":"$(_telem_norm_version)","channel":"stable","os":"${os_name}","arch":"${arch_name}","os_version":"${os_ver}"},"install_method":"${install_method}","outcome":"${outcome}","duration_ms":${duration_ms},"is_test":${TEST_MODE:-false},"account_rename_enabled":${AUTO_RENAME_ACCOUNT:-false}${fs_json}${fc_json}}
+{"schema":"lowkey.install.v1","sent_at":"$(_telem_iso)","install_id":"${_TELEM_INSTALL_ID}","machine_id":"${_TELEM_MACHINE_ID}","agent":{"version":"$(_telem_norm_version)","channel":"stable","os":"${os_name}","arch":"${arch_name}","os_version":"${os_ver}"},"install_method":"${install_method}","outcome":"${outcome}","duration_ms":${duration_ms},"is_test":${TEST_MODE:-false},"account_rename_enabled":${AUTO_RENAME_ACCOUNT:-false}${ap_json}${fs_json}${fc_json}}
 EOF
   )
   _telem_post "/v1/install" "$body"
@@ -543,9 +548,9 @@ _telem_aws_region() {
 }
 
 # Return $1 only if it matches AWS 12-digit account ID pattern, else empty.
-_telem_account_id() {
+_telem_account_prefix() {
   local v="${1:-}"
-  [[ "$v" =~ ^[0-9]{12}$ ]] && printf '%s' "$v"
+  [[ "$v" =~ ^[0-9]{12}$ ]] && printf '%s' "${v:0:5}"
 }
 
 # Return $1 only if it's a valid InstallPack enum value, else empty.
@@ -619,7 +624,7 @@ _telem_deploy_completed() {
 _telem_bootstrap_completed() {
   local props
   props="$(_telem_props \
-    "$(_telem_kv account_id "$(_telem_account_id "${ACCOUNT_ID:-}")")")"
+    "$(_telem_kv account_prefix "$(_telem_account_prefix "${ACCOUNT_ID:-}")")")"
   _telem_event "install.bootstrap_completed" "$props"
 }
 
