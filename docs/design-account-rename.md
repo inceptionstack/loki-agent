@@ -424,7 +424,7 @@ Checklist of files/repos that need changes:
 ### `inceptionstack/lowkey` (this repo)
 - [x] `install.sh`: Add `maybe_rename_account()`, `_emit_rename_telemetry()`,
       flag parsing (`--auto-rename-account-enabled`, `--disable-account-rename`),
-      call site in `main()` after `run_config_and_review()`
+      call site in `run_config_and_review()` before `show_summary`
 - [x] `install.sh`: Add `account_rename_enabled` field to `_telem_send_install_beacon`
 - [x] `install.sh` `--help` text: Document new flags
 - [x] `docs/reference/telemetry-v1.schema.json`: Add `account_rename_enabled` to beacon,

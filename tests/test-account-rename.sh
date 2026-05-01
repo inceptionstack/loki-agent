@@ -370,28 +370,28 @@ test_flag_defaults() {
 
 # ============================================================================
 echo ""
-echo "── main() call site ──"
+echo "── call site ──"
 # ============================================================================
 
-test_main_calls_maybe_rename() {
-  assert_contains "maybe_rename_account called in main()" "maybe_rename_account" "$(sed -n '/^main()/,/^}/p' "$INSTALL_SH")"
-}; test_main_calls_maybe_rename
+test_rename_in_config_and_review() {
+  assert_contains "maybe_rename_account called in run_config_and_review()" "maybe_rename_account" "$(sed -n '/^run_config_and_review()/,/^}/p' "$INSTALL_SH")"
+}; test_rename_in_config_and_review
 
-test_main_rename_before_console_deploy() {
-  # Verify maybe_rename_account is called BEFORE the console deploy early-exit
-  local main_body
-  main_body=$(sed -n '/^main()/,/^}/p' "$INSTALL_SH")
-  local rename_line console_line
-  rename_line=$(echo "$main_body" | grep -n "maybe_rename_account" | head -1 | cut -d: -f1)
-  console_line=$(echo "$main_body" | grep -n "DEPLOY_CFN_CONSOLE" | head -1 | cut -d: -f1)
-  if [[ -n "$rename_line" && -n "$console_line" && "$rename_line" -lt "$console_line" ]]; then
-    echo "  ✓ maybe_rename_account before console deploy"; PASS=$((PASS + 1))
+test_rename_before_show_summary() {
+  # Verify maybe_rename_account is called BEFORE show_summary
+  local body
+  body=$(sed -n '/^run_config_and_review()/,/^}/p' "$INSTALL_SH")
+  local rename_line summary_line
+  rename_line=$(echo "$body" | grep -n "maybe_rename_account" | head -1 | cut -d: -f1)
+  summary_line=$(echo "$body" | grep -n "show_summary" | head -1 | cut -d: -f1)
+  if [[ -n "$rename_line" && -n "$summary_line" && "$rename_line" -lt "$summary_line" ]]; then
+    echo "  ✓ maybe_rename_account before show_summary"; PASS=$((PASS + 1))
   else
-    echo "  ✗ maybe_rename_account should be before console deploy"
-    echo "    rename_line=$rename_line console_line=$console_line"
+    echo "  ✗ maybe_rename_account should be before show_summary"
+    echo "    rename_line=$rename_line summary_line=$summary_line"
     FAIL=$((FAIL + 1))
   fi
-}; test_main_rename_before_console_deploy
+}; test_rename_before_show_summary
 
 test_main_rename_guarded() {
   # Verify the call is guarded with 2>/dev/null || true
