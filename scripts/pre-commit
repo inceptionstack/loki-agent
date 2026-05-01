@@ -31,6 +31,20 @@ echo ""
 printf "${BOLD}Pre-commit: running tests...${NC}\n"
 echo ""
 
+# Run git-secrets scan on staged files (if available)
+if command -v git-secrets &>/dev/null; then
+  printf "${CYAN}▸${NC} Scanning for secrets..."
+  if git secrets --pre_commit_hook; then
+    printf " ${GREEN}✓${NC}\n"
+  else
+    printf " ${RED}✗${NC}\n"
+    echo ""
+    printf "${RED}✗ git-secrets found prohibited patterns — commit blocked.${NC}\n"
+    printf "  See output above. Use .gitallowed for false positives.\n\n"
+    exit 1
+  fi
+fi
+
 # Discover and run all test scripts (same as CI)
 while IFS= read -r test_script; do
   [[ -f "$test_script" ]] && run_test "$test_script"
