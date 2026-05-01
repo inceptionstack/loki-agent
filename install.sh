@@ -882,7 +882,7 @@ prompt() {
     return
   fi
   local value
-  value=$($GUM input --header "$text" --value "$default" --placeholder "$text" < /dev/tty) || value="$default"
+  _gum_or_die value $GUM input --header "$text" --value "$default" --placeholder "$text" || value="$default"
   printf -v "$var" '%s' "${value:-$default}"
 }
 
@@ -895,6 +895,7 @@ confirm() {
   else
     $GUM confirm "$text" < /dev/tty || rc=$?
   fi
+  [[ $rc -eq 130 ]] && { echo ""; cleanup_on_interrupt; }
   return $rc
 }
 
@@ -914,6 +915,23 @@ toggle() {
 }
 
 require_cmd() { command -v "$1" &>/dev/null || fail "$2"; }
+
+# Run a gum command; if it exits with 130 (SIGINT/Ctrl-C), abort the installer.
+# Usage: _gum_or_die result_var gum_command [args...]
+#   On success: sets result_var to gum's stdout, returns 0
+#   On Ctrl-C (exit 130): exits the installer immediately
+#   On other failure (Escape, etc): returns 1 (caller handles fallback)
+_gum_or_die() {
+  local __var="$1"; shift
+  local __out __rc=0
+  __out=$("$@" < /dev/tty) || __rc=$?
+  if [[ $__rc -eq 130 ]]; then
+    echo ""
+    cleanup_on_interrupt
+  fi
+  printf -v "$__var" '%s' "$__out"
+  return $__rc
+}
 
 # Confirm or exit cleanly
 confirm_or_abort() { confirm "$@" || { echo "Aborted."; exit 0; }; }
@@ -1344,7 +1362,10 @@ check_existing_deployments() {
         chosen_vpc="${vpc_ids[0]}"
         info "Using VPC: ${chosen_vpc}"
       else
-        chosen_vpc=$(printf '%s\n' "${vpc_ids[@]}" | $GUM choose --header "Select a VPC to reuse")
+        local __rc=0
+        chosen_vpc=$(printf '%s\n' "${vpc_ids[@]}" | $GUM choose --header "Select a VPC to reuse") || __rc=$?
+        [[ $__rc -eq 130 ]] && { echo ""; cleanup_on_interrupt; }
+        [[ $__rc -ne 0 ]] && fail "VPC selection cancelled"
         info "Selected VPC: ${chosen_vpc}"
       fi
 
@@ -1462,10 +1483,10 @@ choose_deploy_method() {
     ok "Deploy method pre-selected: ${method_name}"
   else
   local method_choice
-  method_choice=$($GUM choose --header "Deployment method" --selected "CloudFormation CLI" \
+  _gum_or_die method_choice $GUM choose --header "Deployment method" --selected "CloudFormation CLI" \
     "CloudFormation CLI" \
     "CloudFormation Console" \
-    "Terraform" < /dev/tty)
+    "Terraform"
   case "$method_choice" in
     "CloudFormation CLI")     DEPLOY_METHOD="$DEPLOY_CFN_CLI" ;;
     "CloudFormation Console") DEPLOY_METHOD="$DEPLOY_CFN_CONSOLE" ;;
@@ -1521,10 +1542,11 @@ choose_profile() {
 
   # Interactive: show menu
   local profile_choice
-  profile_choice=$($GUM choose --header "Permission profile" --selected "builder — Full AWS admin access" \
+  _gum_or_die profile_choice $GUM choose --header "Permission profile" --selected "builder — Full AWS admin access" \
     "builder — Full AWS admin access" \
     "account_assistant — Read-only AWS access" \
-    "personal_assistant — Bedrock only, no AWS access" < /dev/tty)
+    "personal_assistant — Bedrock only, no AWS access" \
+    || profile_choice="builder — Full AWS admin access"
   PROFILE_NAME="${profile_choice%% —*}"
 
   ok "Profile selected: ${PROFILE_NAME}"
@@ -1572,10 +1594,10 @@ choose_install_mode() {
     return
   fi
   local mode_choice
-  mode_choice=$($GUM choose --header "Install mode" \
+  _gum_or_die mode_choice $GUM choose --header "Install mode" \
     --selected "Simple — quick setup, smart defaults" \
     "Simple — quick setup, smart defaults" \
-    "Advanced — full control over all settings" < /dev/tty) || mode_choice=""
+    "Advanced — full control over all settings" || mode_choice=""
   case "$mode_choice" in
     Simple*) INSTALL_MODE="simple" ;;
     *)       INSTALL_MODE="advanced" ;;
@@ -1625,9 +1647,10 @@ choose_pack() {
   done
   local pack_choice
   local header="${1:-Agent to deploy}"
-  pack_choice=$($GUM choose --header "$header" \
+  _gum_or_die pack_choice $GUM choose --header "$header" \
     ${default_item:+--selected "$default_item"} \
-    "${gum_items[@]}" < /dev/tty)
+    "${gum_items[@]}" \
+    || { fail "Pack selection is required"; }
   PACK_NAME="${pack_choice%% —*}"
   for i in "${!PACK_NAMES[@]}"; do
     if [[ "${PACK_NAMES[$i]}" == "$PACK_NAME" && "${PACK_EXPERIMENTAL[$i]}" == "true" ]]; then
@@ -1776,11 +1799,11 @@ collect_config() {
   case "$default_size_choice" in 1) default_type="t4g.medium" ;; 2) default_type="t4g.large" ;; esac
 
   local size_choice
-  size_choice=$($GUM choose --header "Instance size" \
+  _gum_or_die size_choice $GUM choose --header "Instance size" \
     --selected "${default_type}  — recommended" \
     "t4g.medium  — 2 vCPU,  4GB  ~\$25/mo   light use" \
     "t4g.large   — 2 vCPU,  8GB  ~\$50/mo   regular use" \
-    "t4g.xlarge  — 4 vCPU, 16GB  ~\$100/mo  recommended" < /dev/tty) || size_choice=""
+    "t4g.xlarge  — 4 vCPU, 16GB  ~\$100/mo  recommended" || size_choice=""
   INSTANCE_TYPE="${size_choice%%  *}"
   [[ -z "$INSTANCE_TYPE" ]] && INSTANCE_TYPE="$default_type"
 
@@ -1802,14 +1825,14 @@ collect_security_config() {
   # Multi-select: user picks which to enable
   echo ""
   local selected
-  selected=$($GUM choose --no-limit \
+  _gum_or_die selected $GUM choose --no-limit \
     --header "Select services to enable (space to toggle, enter to confirm)" \
     --selected "AWS Security Hub,Amazon GuardDuty,Amazon Inspector,IAM Access Analyzer,AWS Config Recorder" \
     "AWS Security Hub" \
     "Amazon GuardDuty" \
     "Amazon Inspector" \
     "IAM Access Analyzer" \
-    "AWS Config Recorder" < /dev/tty) || selected=""
+    "AWS Config Recorder" || selected=""
 
   SECURITY_HUB="false"; GUARDDUTY="false"; INSPECTOR="false"
   ACCESS_ANALYZER="false"; CONFIG_RECORDER="false"
@@ -1965,9 +1988,9 @@ show_summary() {
   # In simple mode, offer "Change settings" to switch to advanced
   if [[ "$INSTALL_MODE" == "simple" && "$AUTO_YES" != true ]]; then
     local action
-    action=$($GUM choose --header "Ready to deploy?" \
+    _gum_or_die action $GUM choose --header "Ready to deploy?" \
       "Deploy" \
-      "Change settings (advanced mode)" < /dev/tty) || action="Deploy"
+      "Change settings (advanced mode)" || action="Deploy"
     if [[ "$action" == *"Change settings"* ]]; then
       INSTALL_MODE="advanced"
       return 1  # signal to re-run config in advanced mode
@@ -2817,8 +2840,8 @@ _resolve_final_name() {
     echo ""
 
     local choice
-    choice=$($GUM choose --header "Rename AWS account?" \
-      "Rename to $proposed" "Edit name" "Skip" < /dev/tty) || choice="Skip"
+    _gum_or_die choice $GUM choose --header "Rename AWS account?" \
+      "Rename to $proposed" "Edit name" "Skip" || choice="Skip"
 
     # Use if/elif instead of case to avoid glob pattern matching on $proposed
     # (account names may contain ?, [], which are bash glob characters)
@@ -2833,8 +2856,8 @@ _resolve_final_name() {
             _emit_rename_telemetry false false "user_declined"
             return 1
           fi
-          _RENAME_FINAL_NAME=$($GUM input --placeholder "Enter account name (1-50 chars)" \
-            --value "$proposed" < /dev/tty) || _RENAME_FINAL_NAME=""
+          _gum_or_die _RENAME_FINAL_NAME $GUM input --placeholder "Enter account name (1-50 chars)" \
+            --value "$proposed" || _RENAME_FINAL_NAME=""
           # Validate against SAFE_NAME_PATTERN — reject (don't silently mutate)
           local sanitized_check
           sanitized_check=$(_sanitize_account_name "$_RENAME_FINAL_NAME")
@@ -2920,7 +2943,7 @@ run_config_and_review() {
   fi
 
   build_deploy_params
-  maybe_rename_account 2>/dev/null || true
+  maybe_rename_account || true
   show_summary || {
     # User chose "Change settings" → re-run in advanced mode with current values as preselects
     PRESELECT_PACK="$PACK_NAME"

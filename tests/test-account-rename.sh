@@ -479,8 +479,8 @@ test_rename_before_show_summary() {
 }; test_rename_before_show_summary
 
 test_main_rename_guarded() {
-  # Verify the call is guarded with 2>/dev/null || true
-  assert_contains "guarded call" "maybe_rename_account 2>/dev/null || true" "$(cat "$INSTALL_SH")"
+  # Verify the call is guarded with || true (no 2>/dev/null — gum needs stderr)
+  assert_contains "guarded call" "maybe_rename_account || true" "$(cat "$INSTALL_SH")"
 }; test_main_rename_guarded
 
 # ============================================================================
