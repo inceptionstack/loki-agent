@@ -1101,6 +1101,97 @@ show_banner() {
   fi
 }
 
+# Minimum AWS CLI version — aws account subcommand requires 2.8+.
+MIN_AWS_CLI_MAJOR=2
+MIN_AWS_CLI_MINOR=8
+_AWS_CLI_MAJOR=""
+_AWS_CLI_MINOR=""
+
+# Parse AWS CLI version string → sets _AWS_CLI_MAJOR, _AWS_CLI_MINOR.
+_parse_aws_cli_version() {
+  local ver_str
+  ver_str=$(aws --version 2>&1 | head -1)
+  # "aws-cli/2.33.15 Python/..." → "2.33.15"
+  local ver
+  ver=$(printf '%s' "$ver_str" | sed -n 's|^aws-cli/\([0-9][0-9.]*\).*|\1|p')
+  _AWS_CLI_MAJOR=$(printf '%s' "$ver" | cut -d. -f1)
+  _AWS_CLI_MINOR=$(printf '%s' "$ver" | cut -d. -f2)
+}
+
+# Check if current AWS CLI meets the minimum version.
+_aws_cli_is_current() {
+  _parse_aws_cli_version
+  [[ -n "$_AWS_CLI_MAJOR" && -n "$_AWS_CLI_MINOR" ]] || return 1
+  if [[ $_AWS_CLI_MAJOR -gt $MIN_AWS_CLI_MAJOR ]]; then return 0; fi
+  if [[ $_AWS_CLI_MAJOR -eq $MIN_AWS_CLI_MAJOR && $_AWS_CLI_MINOR -ge $MIN_AWS_CLI_MINOR ]]; then return 0; fi
+  return 1
+}
+
+# Update AWS CLI v2 in-place. Supports Linux and macOS.
+_update_aws_cli() {
+  local os
+  os=$(uname -s)
+  info "Updating AWS CLI..."
+  case "$os" in
+    Linux)
+      local tmp_dir
+      tmp_dir=$(mktemp -d)
+      if curl -sfL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "$tmp_dir/awscliv2.zip"; then
+        ( cd "$tmp_dir" && unzip -oq awscliv2.zip && sudo ./aws/install --update 2>/dev/null ) || {
+          # Try without sudo (user installs, CloudShell)
+          ( cd "$tmp_dir" && ./aws/install --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin" 2>/dev/null ) || true
+        }
+      fi
+      rm -rf "$tmp_dir"
+      ;;
+    Darwin)
+      # macOS: download .pkg and install
+      local tmp_pkg
+      tmp_pkg=$(mktemp /tmp/AWSCLIV2-XXXXXX.pkg)
+      if curl -sfL "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o "$tmp_pkg"; then
+        sudo installer -pkg "$tmp_pkg" -target / 2>/dev/null || true
+      fi
+      rm -f "$tmp_pkg"
+      ;;
+    *)
+      warn "Auto-update not supported on $os — update manually: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+      return 1
+      ;;
+  esac
+  # Re-hash so bash picks up the new binary
+  hash -r 2>/dev/null || true
+}
+
+# Ensure AWS CLI is at minimum version, offer to update if not.
+ensure_aws_cli_current() {
+  if _aws_cli_is_current; then
+    return 0
+  fi
+  _parse_aws_cli_version
+  warn "AWS CLI ${_AWS_CLI_MAJOR:-?}.${_AWS_CLI_MINOR:-?} is below minimum ${MIN_AWS_CLI_MAJOR}.${MIN_AWS_CLI_MINOR}"
+  if [[ "$AUTO_YES" == "true" ]]; then
+    _update_aws_cli || true
+  else
+    echo ""
+    echo "  Lowkey requires AWS CLI ${MIN_AWS_CLI_MAJOR}.${MIN_AWS_CLI_MINOR}+ for all features."
+    echo "  Current version: ${_AWS_CLI_MAJOR:-?}.${_AWS_CLI_MINOR:-?}"
+    echo ""
+    if confirm "Update AWS CLI now?"; then
+      _update_aws_cli || true
+    else
+      warn "Continuing with older AWS CLI — some features (e.g. account rename) may be unavailable"
+      return 0
+    fi
+  fi
+  # Verify update worked
+  if _aws_cli_is_current; then
+    _parse_aws_cli_version
+    ok "AWS CLI updated to ${_AWS_CLI_MAJOR}.${_AWS_CLI_MINOR}"
+  else
+    warn "AWS CLI update may have failed — continuing with current version"
+  fi
+}
+
 # ============================================================================
 # Phase: Pre-flight checks
 # ============================================================================
@@ -1117,6 +1208,7 @@ preflight_checks() {
   ok "gum UI: $($GUM --version 2>/dev/null || echo installed)"
 
   require_cmd aws "AWS CLI not found. Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  ensure_aws_cli_current
   ok "AWS CLI: $(aws --version 2>&1 | head -1)"
 
   require_cmd jq "jq is required but not found. Install: https://jqlang.github.io/jq/download/"
@@ -2607,14 +2699,7 @@ maybe_rename_account() {
     return 0
   fi
 
-  # Step 2: Check aws account subcommand availability
-  if ! aws account help >/dev/null 2>&1; then
-    info "Account rename requires AWS CLI v2.8+, skipping"
-    _emit_rename_telemetry false false "cli_missing"
-    return 0
-  fi
-
-  # Step 3: Read current account name
+  # Step 2: Read current account name
   local account_info current_name
   if ! account_info=$(aws account get-account-information --output json 2>&1); then
     warn "Could not read account name"
@@ -2623,23 +2708,23 @@ maybe_rename_account() {
   fi
   current_name=$(printf '%s' "$account_info" | jq -r '.AccountName // ""' 2>/dev/null || printf '')
 
-  # Step 4: Already prefixed?
+  # Step 3: Already prefixed?
   if _account_already_prefixed "$current_name"; then
     return 0
   fi
 
-  # Step 5-7: Build proposed name (sets _RENAME_PROPOSED, _RENAME_WAS_TRUNCATED)
+  # Step 4: Build proposed name (sets _RENAME_PROPOSED, _RENAME_WAS_TRUNCATED)
   _build_proposed_name "$current_name"
   local proposed="$_RENAME_PROPOSED"
   local was_truncated="$_RENAME_WAS_TRUNCATED"
 
-  # Step 8-11: Resolve final name (headless or interactive)
+  # Step 5: Resolve final name (headless or interactive)
   # Sets _RENAME_FINAL_NAME or returns 0 with telemetry emitted on skip.
   if ! _resolve_final_name "$proposed" "$current_name" "$was_truncated"; then
     return 0  # user skipped or headless without opt-in (telemetry already emitted)
   fi
 
-  # Step 12-13: Apply rename via AWS API
+  # Step 6: Apply rename via AWS API
   _apply_account_rename "$_RENAME_FINAL_NAME" "$current_name"
 }
 

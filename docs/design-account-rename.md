@@ -126,18 +126,14 @@ _emit_rename_telemetry() {
    → _emit_rename_telemetry false false "disabled_flag"
    → return
 
-2. Check `aws account` command is available (older CLI may lack it)
-   → If not: info "Account rename requires AWS CLI v2.8+, skipping"
-   → _emit_rename_telemetry false false "cli_missing"
-   → return
-
-3. current_name = aws account get-account-information → .AccountName
+2. current_name = aws account get-account-information → .AccountName
+   (CLI version ≥ 2.8 enforced by preflight `ensure_aws_cli_current`)
    → If fails: warn "Could not read account name"
    → _emit_rename_telemetry false false "api_error"
    → return
 
-4. If current_name already starts with "Loki-" (case-insensitive via
-   lowercase comparison, e.g. `${current_name,,}` starts with "loki-"):
+3. If current_name already starts with "Loki-" (case-insensitive via
+   lowercase comparison, e.g. `tr '[:upper:]' '[:lower:]'` starts with "loki-"):
    → ok (using printf '%s' with tr -d '\000-\037'): "Account already named for Loki: <current_name>"
    → If SSM param `/loki/original-account-name` doesn't exist yet:
      → Strip "Loki-" prefix (case-insensitive) to get the original name
@@ -150,34 +146,34 @@ _emit_rename_telemetry() {
    → return (skip — do not re-sanitize or modify existing Loki-prefixed names,
      even if they contain characters outside SAFE_NAME_PATTERN)
 
-5. proposed = "Loki-" + sanitize(current_name)
+4. proposed = "Loki-" + sanitize(current_name)
    → Sanitize the original name FIRST (against `SAFE_NAME_PATTERN`),
      then prepend "Loki-" to avoid corrupting the prefix
    → If current_name is empty: proposed = "Loki-<account_id>"
      (always 17 chars for 12-digit account IDs — well within 50-char limit)
 
-6. If sanitized name is empty after stripping: fallback to "Loki-<account_id>"
+5. If sanitized name is empty after stripping: fallback to "Loki-<account_id>"
 
-7. If proposed > 50 chars: truncate to 50 chars
+6. If proposed > 50 chars: truncate to 50 chars
    (Sanitization in step 5 guarantees ASCII-only, so no multi-byte split risk)
    → Strip trailing hyphens or spaces from the truncated result
    → If result length < 6 (i.e., no meaningful suffix after "Loki-"): fallback to "Loki-<account_id>"
 
-8. If --non-interactive / -y (headless):
+7. If --non-interactive / -y (headless):
    → If --auto-rename-account-enabled is NOT set:
      → info "Headless mode: account rename skipped (pass --auto-rename-account-enabled to enable)"
      → _emit_rename_telemetry false false "headless_no_opt_in"
      → return
    → Auto-apply proposed name (no prompt)
-   → If name was truncated in step 7: warn "Account name truncated to 50 chars: <proposed>"
-   → Jump to step 12 (pass final name to AWS CLI)
+   → If name was truncated in step 6: warn "Account name truncated to 50 chars: <proposed>"
+   → Jump to step 11 (pass final name to AWS CLI)
 
-9. If name was truncated in step 7: info "Name truncated to 50 chars"
+8. If name was truncated in step 6: info "Name truncated to 50 chars"
 
-10. Show current name, proposed name, and explain:
+9. Show current name, proposed name, and explain:
    "This name appears in the AWS console account switcher and billing."
 
-11. Prompt with gum choose: "Rename to <proposed>" / "Edit name" / "Skip"
+10. Prompt with gum choose: "Rename to <proposed>" / "Edit name" / "Skip"
     → Rename: use proposed name
     → Edit: prompt for custom name, validate against `SAFE_NAME_PATTERN`,
       1–50 char length, and non-empty/non-whitespace. Loop if invalid. The "Loki-" prefix is NOT enforced —
@@ -187,11 +183,11 @@ _emit_rename_telemetry() {
      → _emit_rename_telemetry false false "user_declined"
      → return
 
-12. Pass final name to AWS CLI using double-quoted variable: --account-name "$final_name"
+11. Pass final name to AWS CLI using double-quoted variable: --account-name "$final_name"
     (No printf '%q' escaping — double-quoting is correct and sufficient;
     dangerous characters like $, ", `, \ are excluded by the validation pattern)
 
-13. aws account put-account-name --account-name "$final_name"
+12. aws account put-account-name --account-name "$final_name"
     → On 429 (TooManyRequestsException): retry once after 2s sleep
     → On success:
       → ok (using printf '%s' for safety): "Account renamed to <final_name>"
@@ -219,7 +215,7 @@ _emit_rename_telemetry() {
 | `--test` mode | Not applicable — installer exits before rename is reached |
 | API call fails (permissions/SCP) | warn + continue — non-fatal |
 | `get-account-information` fails | warn + skip |
-| `aws account` command missing | info + skip (old CLI) |
+| `aws account` command missing | Handled by preflight `ensure_aws_cli_current` (auto-updates CLI) |
 | Empty account name from API | Fallback to "Loki-<account-id>" |
 | Name contains non-ASCII chars | Strip to printable ASCII before prefixing |
 | User input via Edit exceeds 50 chars | Reject and re-prompt |
@@ -350,7 +346,7 @@ Props:
 - `allowed`: boolean — did the user allow the rename?
   - Interactive: true if user chose "Rename" or "Edit", false if "Skip"
   - Headless: true if `--auto-rename-account-enabled` was passed
-  - false for all other skip paths (disabled_flag, cli_missing, api_error, already_prefixed)
+  - false for all other skip paths (disabled_flag, api_error, already_prefixed)
 - `auto_rename_enabled`: boolean — was `--auto-rename-account-enabled` passed?
 - `skipped_reason`: one of (only when renamed=false):
   - `"already_prefixed"` — account already starts with "Loki-"
@@ -358,7 +354,6 @@ Props:
   - `"disabled_flag"` — `--disable-account-rename` was passed
   - `"headless_no_opt_in"` — headless mode without `--auto-rename-account-enabled`
   - `"api_error"` — AWS API call failed
-  - `"cli_missing"` — `aws account` subcommand not available
 
 ### Backend Changes Required (loki-dashboard)
 
@@ -377,7 +372,7 @@ backend before the installer starts emitting it. Changes needed in
 # Add allowed skipped_reason values:
 ALLOWED_ACCOUNT_RENAME_SKIP = {
     "already_prefixed", "user_declined", "disabled_flag",
-    "headless_no_opt_in", "api_error", "cli_missing",
+    "headless_no_opt_in", "api_error",
 }
 
 # Add to _PROP_VALIDATORS:
