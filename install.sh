@@ -2839,10 +2839,10 @@ _resolve_final_name() {
     safe_current=$(printf '%s' "$current_name")
     safe_proposed=$(printf '%s' "$proposed")
     printf '%s\n' \
-      "AWS Account Name" \
+      "🏷️  AWS ACCOUNT NAME" \
       "" \
-      "Current name:   ${safe_current}" \
-      "Proposed name:  ${safe_proposed}" \
+      "Current AWS account name:   ${safe_current}" \
+      "Proposed AWS account name:  ${safe_proposed}" \
       "" \
       "Adding the 'Loki-' prefix is highly recommended." \
       "It enables:" \
@@ -2858,7 +2858,7 @@ _resolve_final_name() {
     echo ""
 
     local choice
-    _gum_or_die choice $GUM choose --header "Rename AWS account?" \
+    _gum_or_die choice $GUM choose --header "Rename this AWS account?" \
       "Rename to $proposed" "Edit name" "Skip" || choice="Skip"
 
     # Use if/elif instead of case to avoid glob pattern matching on $proposed
