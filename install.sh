@@ -2831,6 +2831,7 @@ run_config_and_review() {
   fi
 
   build_deploy_params
+  maybe_rename_account 2>/dev/null || true
   show_summary || {
     # User chose "Change settings" → re-run in advanced mode with current values as preselects
     PRESELECT_PACK="$PACK_NAME"
@@ -2867,7 +2868,6 @@ main() {
   run_config_and_review  # steps 2-4 (config → review)
   _telem_pack_selected 2>/dev/null || true
   _telem_method_selected 2>/dev/null || true
-  maybe_rename_account 2>/dev/null || true
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
