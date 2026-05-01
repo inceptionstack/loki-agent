@@ -123,6 +123,107 @@ sed -n '/^_apply_account_rename() {/,/^}/p' "$INSTALL_SH" >> "$TMPDIR/functions.
 sed -n '/^maybe_rename_account() {/,/^}/p' "$INSTALL_SH" >> "$TMPDIR/functions.sh"
 
 # ============================================================================
+echo "── AWS CLI version checks ──"
+# ============================================================================
+
+# Extract version-check functions
+sed -n '/^MIN_AWS_CLI_MAJOR=/,/^_AWS_CLI_MINOR=/p' "$INSTALL_SH" >> "$TMPDIR/functions.sh"
+sed -n '/^_parse_aws_cli_version() {/,/^}/p' "$INSTALL_SH" >> "$TMPDIR/functions.sh"
+sed -n '/^_aws_cli_is_current() {/,/^}/p' "$INSTALL_SH" >> "$TMPDIR/functions.sh"
+
+test_parse_version_v2() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/2.33.15 Python/3.9.25 Linux/6.1 source/aarch64"; }
+  _parse_aws_cli_version
+  assert_eq "major" "2" "$_AWS_CLI_MAJOR"
+  assert_eq "minor" "33" "$_AWS_CLI_MINOR"
+}; test_parse_version_v2
+
+test_parse_version_v1() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/1.27.5 Python/3.8.10 Linux/5.15"; }
+  _parse_aws_cli_version
+  assert_eq "major" "1" "$_AWS_CLI_MAJOR"
+  assert_eq "minor" "27" "$_AWS_CLI_MINOR"
+}; test_parse_version_v1
+
+test_parse_version_min() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/2.8.0 Python/3.9"; }
+  _parse_aws_cli_version
+  assert_eq "major" "2" "$_AWS_CLI_MAJOR"
+  assert_eq "minor" "8" "$_AWS_CLI_MINOR"
+}; test_parse_version_min
+
+test_parse_version_garbled() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "not-aws-cli output"; }
+  _parse_aws_cli_version
+  assert_eq "major empty" "" "$_AWS_CLI_MAJOR"
+  assert_eq "minor empty" "" "$_AWS_CLI_MINOR"
+}; test_parse_version_garbled
+
+test_is_current_v2_33() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/2.33.15 Python/3.9"; }
+  if _aws_cli_is_current; then
+    echo "  ✓ v2.33 is current"; PASS=$((PASS + 1))
+  else
+    echo "  ✗ v2.33 should be current"; FAIL=$((FAIL + 1))
+  fi
+}; test_is_current_v2_33
+
+test_is_current_v2_8() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/2.8.0 Python/3.9"; }
+  if _aws_cli_is_current; then
+    echo "  ✓ v2.8 is current (exactly minimum)"; PASS=$((PASS + 1))
+  else
+    echo "  ✗ v2.8 should be current"; FAIL=$((FAIL + 1))
+  fi
+}; test_is_current_v2_8
+
+test_is_current_v2_7_not() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/2.7.99 Python/3.9"; }
+  if _aws_cli_is_current; then
+    echo "  ✗ v2.7 should NOT be current"; FAIL=$((FAIL + 1))
+  else
+    echo "  ✓ v2.7 correctly not current"; PASS=$((PASS + 1))
+  fi
+}; test_is_current_v2_7_not
+
+test_is_current_v1_not() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/1.27.5 Python/3.8"; }
+  if _aws_cli_is_current; then
+    echo "  ✗ v1.x should NOT be current"; FAIL=$((FAIL + 1))
+  else
+    echo "  ✓ v1.x correctly not current"; PASS=$((PASS + 1))
+  fi
+}; test_is_current_v1_not
+
+test_is_current_garbled_not() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "garbage"; }
+  if _aws_cli_is_current; then
+    echo "  ✗ garbled should NOT be current"; FAIL=$((FAIL + 1))
+  else
+    echo "  ✓ garbled correctly not current"; PASS=$((PASS + 1))
+  fi
+}; test_is_current_garbled_not
+
+test_is_current_v3() {
+  source "$TMPDIR/functions.sh"
+  aws() { echo "aws-cli/3.0.0 Python/3.12"; }
+  if _aws_cli_is_current; then
+    echo "  ✓ v3.x is current (major > min)"; PASS=$((PASS + 1))
+  else
+    echo "  ✗ v3.x should be current"; FAIL=$((FAIL + 1))
+  fi
+}; test_is_current_v3
+
+# ============================================================================
 echo "── _sanitize_account_name ──"
 # ============================================================================
 
@@ -211,22 +312,6 @@ test_disabled_flag() {
   assert_contains "info message" "Account rename disabled" "$_OUTPUT"
   assert_contains "telemetry skipped_reason" '"disabled_flag"' "${_TELEM_EVENTS[0]}"
 }; test_disabled_flag
-
-test_cli_missing() {
-  source "$TMPDIR/functions.sh"
-  DISABLE_ACCOUNT_RENAME=false
-  # Override aws to fail on 'account help'
-  aws() {
-    case "$1 $2" in
-      "account help") return 1 ;;
-      *) return 0 ;;
-    esac
-  }
-  _OUTPUT="" _TELEM_EVENTS=()
-  maybe_rename_account
-  assert_contains "info message" "AWS CLI v2.8+" "$_OUTPUT"
-  assert_contains "telemetry skipped_reason" '"cli_missing"' "${_TELEM_EVENTS[0]}"
-}; test_cli_missing
 
 test_api_error_on_get() {
   source "$TMPDIR/functions.sh"
