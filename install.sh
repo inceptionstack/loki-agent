@@ -2834,6 +2834,8 @@ _resolve_final_name() {
     safe_current=$(printf '%s' "$current_name")
     safe_proposed=$(printf '%s' "$proposed")
     printf '%s\n' \
+      "AWS Account Name" \
+      "" \
       "Current name:   ${safe_current}" \
       "Proposed name:  ${safe_proposed}" \
       "" \
