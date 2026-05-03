@@ -2761,7 +2761,7 @@ _account_already_prefixed() {
   local current_name="$1"
   local lower_name
   lower_name=$(printf '%s' "$current_name" | tr '[:upper:]' '[:lower:]')
-  if [[ "$lower_name" == loki-* ]]; then
+  if [[ "$lower_name" == loki* ]]; then
     local display_name
     display_name=$(printf '%s' "$current_name" | tr -d '\000-\037')
     ok "Account already named for Loki: $(printf '%s' "$display_name")"

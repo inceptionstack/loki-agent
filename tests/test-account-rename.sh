@@ -345,6 +345,26 @@ test_already_prefixed_case_insensitive() {
   assert_contains "detects case-insensitive prefix" "already named for Loki" "$_OUTPUT"
 }; test_already_prefixed_case_insensitive
 
+test_already_prefixed_loki_variant() {
+  source "$TMPDIR/functions.sh"
+  DISABLE_ACCOUNT_RENAME=false
+  _AWS_ACCOUNT_INFO_EXIT=0
+  _AWS_ACCOUNT_INFO_RESULT='{"AccountName":"loki1-MyAccount"}'
+  _OUTPUT="" _TELEM_EVENTS=()
+  maybe_rename_account
+  assert_contains "detects loki1- as already prefixed" "already named for Loki" "$_OUTPUT"
+}; test_already_prefixed_loki_variant
+
+test_already_prefixed_lokidev() {
+  source "$TMPDIR/functions.sh"
+  DISABLE_ACCOUNT_RENAME=false
+  _AWS_ACCOUNT_INFO_EXIT=0
+  _AWS_ACCOUNT_INFO_RESULT='{"AccountName":"LokiDev-SomeAccount"}'
+  _OUTPUT="" _TELEM_EVENTS=()
+  maybe_rename_account
+  assert_contains "detects LokiDev- as already prefixed" "already named for Loki" "$_OUTPUT"
+}; test_already_prefixed_lokidev
+
 test_headless_no_opt_in() {
   source "$TMPDIR/functions.sh"
   DISABLE_ACCOUNT_RENAME=false
