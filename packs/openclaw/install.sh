@@ -298,14 +298,26 @@ _telemetron_sidecar() {
   # becomes /root. Point it at the real ec2-user openclaw session tree.
   local session_dir="${HOME:-/home/ec2-user}/.openclaw/agents/main/sessions"
 
-  # Detect tier from AWS account email. Internal = @amazon.com.
+  # Detect tier from AWS account owner email. Internal = @amazon.com.
   # The email stays local — only the tier string is written to the tier file.
   # Bounded to 5s total to avoid hanging the installer on broken AWS connectivity.
+  # Tries two methods:
+  #   1. aws account get-contact-information (works in any account, no org needed)
+  #   2. aws organizations describe-account (only works from management account)
   local tier="external"
   local acct_email=""
-  acct_email=$(timeout 5 aws organizations describe-account \
-    --account-id "${ACCOUNT_ID:-$(timeout 3 aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
-    --query 'Account.Email' --output text 2>/dev/null) || true
+
+  # Method 1: account contact info (FullName often contains the email for AWS accounts)
+  acct_email=$(timeout 5 aws account get-contact-information \
+    --query 'ContactInformation.FullName' --output text 2>/dev/null) || true
+
+  # Method 2: organizations (fallback for accounts where contact info lacks email)
+  if [[ "$acct_email" != *@amazon.com ]]; then
+    acct_email=$(timeout 5 aws organizations describe-account \
+      --account-id "${ACCOUNT_ID:-$(timeout 3 aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
+      --query 'Account.Email' --output text 2>/dev/null) || true
+  fi
+
   if [[ "$acct_email" == *@amazon.com ]]; then
     tier="internal"
   fi
