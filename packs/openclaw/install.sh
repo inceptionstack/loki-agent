@@ -31,6 +31,7 @@ PACK_ARG_LITELLM_URL="$(pack_config_get litellm_url "")"
 PACK_ARG_LITELLM_KEY="$(pack_config_get litellm_key "")"
 PACK_ARG_LITELLM_MODEL="$(pack_config_get litellm_model "claude-opus-4-6")"
 PACK_ARG_PROVIDER_KEY="$(pack_config_get provider_key "")"
+PACK_ARG_SKIP_TELEMETRON="$(pack_config_get skip_telemetron "false")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -49,6 +50,7 @@ Options:
   --litellm-key    LiteLLM API key  (litellm mode)
   --litellm-model  LiteLLM model ID (litellm mode, default: claude-opus-4-6)
   --provider-key   Anthropic API key (provider-key mode)
+  --skip-telemetron  Skip the telemetron metrics sidecar (default: false)
   --help           Show this help message
 
 Examples:
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --litellm-key|--litellm-api-key)     PACK_ARG_LITELLM_KEY="$2";     shift 2 ;;
     --litellm-model)  PACK_ARG_LITELLM_MODEL="$2";   shift 2 ;;
     --provider-key|--provider-api-key)   PACK_ARG_PROVIDER_KEY="$2";    shift 2 ;;
+    --skip-telemetron)                   PACK_ARG_SKIP_TELEMETRON="true"; shift ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
   esac
 done
@@ -237,6 +240,90 @@ if systemctl --user is-active openclaw-gateway.service &>/dev/null; then
 else
   warn "Gateway service may not be active yet — check: systemctl --user status openclaw-gateway.service"
 fi
+
+
+# ── Telemetron sidecar (silent, log-only) ────────────────────────────────────
+# Install telemetron and let it anonymously enroll against the Loki telemetry
+# backend. DELIBERATELY SILENT on both stdout and stderr: all output — success,
+# failure, skip reason — goes to the install log only. Telemetron failure never
+# blocks, warns, or prints anything in the user-visible install flow.
+#
+# Assumptions (true for lowkey today, asserted here):
+#   - The whole lowkey installer runs as root, so no sudo probing.
+#   - curl is a hard prerequisite of the lowkey installer itself.
+#
+# A hard outer timeout (30s) bounds the total blast radius: even if GitHub is
+# down, the telemetron release download hangs, or `telemetron setup` stalls, we
+# give up and continue the pack install.
+install_telemetron() {
+  # Outer `|| true` + subshell ensures the pack's `set -euo pipefail` cannot
+  # be tripped by anything inside, including edge-case failures before the
+  # exec-redirect takes effect.
+  (
+    set +e
+    # Self-contained log path. Do NOT expand $INSTALL_LOG under set -u without
+    # a default; the pack runs with `set -euo pipefail` and INSTALL_LOG is not
+    # exported from the top-level installer.
+    local install_log="${INSTALL_LOG:-/tmp/loki-install.log}"
+    exec >>"$install_log" 2>&1
+    printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    # Guard 1: pack-specific skip (short-circuits explicit operator intent).
+    if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
+      printf '[telemetron] skip: --skip-telemetron\n'; exit 0
+    fi
+    # Guard 2: non-Linux (no systemd auto-setup path).
+    if [[ "$(uname -s)" != "Linux" ]]; then
+      printf '[telemetron] skip: non-Linux\n'; exit 0
+    fi
+    # Guard 3: lowkey telemetry opt-out.
+    if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
+       || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
+       || [[ -f "${HOME}/.lowkey/telemetry-off" ]]; then
+      printf '[telemetron] skip: lowkey telemetry opt-out\n'; exit 0
+    fi
+    # Guard 4: needs systemd (anonymous enrollment wires a systemd unit).
+    if ! command -v systemctl >/dev/null 2>&1; then
+      printf '[telemetron] skip: systemctl not found\n'; exit 0
+    fi
+
+    local version="v0.3.1"
+    local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
+    local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
+
+    printf '[telemetron] installing %s from %s (timeout=30s)\n' "$version" "$url"
+    # Hard outer timeout wraps the entire sidecar path: curl fetch, GitHub
+    # release download, checksum verification, binary install, and
+    # `telemetron setup`. If any piece hangs, we abandon the sidecar and
+    # the pack install continues.
+    #
+    # pipefail is critical: without it, `curl ... | bash` returns the
+    # right-hand `bash`'s exit code (0 on empty stdin) and a curl
+    # failure would be silently reported as success. (Codex v3 finding.)
+    if timeout 30 bash -o pipefail -c '
+      curl --fail --silent --show-error --location \
+        --connect-timeout 5 --max-time 25 \
+        "'"$url"'" \
+      | TELEMETRON_ENDPOINT="'"$endpoint"'" \
+        TELEMETRON_VERSION="'"$version"'" \
+        bash
+    '
+    then
+      printf '[telemetron] installed and enrolled\n'
+    else
+      local rc=$?
+      if [[ $rc -eq 124 ]]; then
+        printf '[telemetron] install aborted: 30s outer timeout reached\n'
+      else
+        printf '[telemetron] install failed (rc=%s); see log above for details\n' "$rc"
+      fi
+    fi
+    printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    exit 0
+  ) || true
+}
+
+install_telemetron
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "openclaw"
