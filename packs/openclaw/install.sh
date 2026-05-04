@@ -299,14 +299,12 @@ _telemetron_sidecar() {
   local session_dir="${HOME:-/home/ec2-user}/.openclaw/agents/main/sessions"
 
   # Detect tier from AWS account email. Internal = @amazon.com.
-  # The email stays local — only the tier string is written to the info file.
-  # organizations:DescribeAccount works with AdminAccess (builder profile),
-  # which all internal accounts use. Customer accounts with limited IAM
-  # fail gracefully → tier stays "production" (correct default).
+  # The email stays local — only the tier string is written to the tier file.
+  # Bounded to 5s total to avoid hanging the installer on broken AWS connectivity.
   local tier="production"
   local acct_email=""
-  acct_email=$(aws organizations describe-account \
-    --account-id "${ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
+  acct_email=$(timeout 5 aws organizations describe-account \
+    --account-id "${ACCOUNT_ID:-$(timeout 3 aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
     --query 'Account.Email' --output text 2>/dev/null) || true
   if [[ "$acct_email" == *@amazon.com ]]; then
     tier="internal"
