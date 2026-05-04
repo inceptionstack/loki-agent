@@ -159,7 +159,7 @@ run_optional_sidecar() {
 
     local sudo_prefix=""
     if [[ "$use_sudo" -eq 1 ]] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-      sudo_prefix="sudo -E"
+      sudo_prefix="sudo -n -E"
     fi
 
     timeout "$secs" env "${env_args[@]}" bash -o pipefail -c '

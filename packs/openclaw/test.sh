@@ -321,6 +321,85 @@ else
   pass "SIDECAR_USE_SUDO no-sudo: SIDECAR_USE_SUDO not leaked to inner env"
 fi
 
+# (c) SIDECAR_USE_SUDO=1 with passwordless sudo stub → sudo prefix inserted
+D="${SC_TMP}/withsudo"; mk_sc_path "$D"
+rm -f "${D}/curl" "${D}/sudo"
+# Stub sudo that succeeds for -n true and -n -E bash, recording invocation
+cat > "${D}/sudo" <<'SUDO'
+#!/bin/sh
+case "$*" in
+  "-n true") exit 0 ;;
+  "-n -E bash"*)
+    # Shift past -n -E and exec bash with remaining args
+    shift 2  # drop -n -E
+    exec "$@"
+    ;;
+  *) exit 1 ;;
+esac
+SUDO
+chmod +x "${D}/sudo"
+cat > "${D}/curl" <<'CURL'
+#!/bin/sh
+printf 'echo INNER_SUDO_RAN; exit 0\n'
+exit 0
+CURL
+chmod +x "${D}/curl"
+SC_LOG="${SC_TMP}/log.withsudo.$$"; : > "$SC_LOG"
+SC_STDOUT="${SC_TMP}/out.withsudo.$$"; SC_STDERR="${SC_TMP}/err.withsudo.$$"
+: > "$SC_STDOUT"; : > "$SC_STDERR"
+set +e
+env -i PATH="${D}" HOME="${SC_TMP}/home" BASH_ENV= ENV= \
+  bash --noprofile --norc -c "set -euo pipefail
+           source '${COMMON}'
+           run_optional_sidecar telemetron https://example/install.sh 10 '${SC_LOG}' FOO=bar SIDECAR_USE_SUDO=1
+           echo AFTER_OK" \
+  >"$SC_STDOUT" 2>"$SC_STDERR"
+SC_RC=$?
+set -e
+sc_assert_silent   "SIDECAR_USE_SUDO with-sudo"
+sc_assert_sentinel "SIDECAR_USE_SUDO with-sudo"
+sc_assert_log      "SIDECAR_USE_SUDO with-sudo" "INNER_SUDO_RAN"
+sc_assert_log      "SIDECAR_USE_SUDO with-sudo" "[telemetron] installed and enrolled"
+
+# (d) SIDECAR_USE_SUDO=1 with sudo that rejects the real command → fails cleanly
+D="${SC_TMP}/sudofail"; mk_sc_path "$D"
+rm -f "${D}/curl" "${D}/sudo"
+# Stub sudo: probe succeeds, real command fails immediately (non-interactive)
+cat > "${D}/sudo" <<'SUDO'
+#!/bin/sh
+case "$*" in
+  "-n true") exit 0 ;;
+  *) echo "sudo: a password is required" >&2; exit 1 ;;
+esac
+SUDO
+chmod +x "${D}/sudo"
+cat > "${D}/curl" <<'CURL'
+#!/bin/sh
+printf 'echo SHOULD_NOT_RUN; exit 0\n'
+exit 0
+CURL
+chmod +x "${D}/curl"
+SC_LOG="${SC_TMP}/log.sudofail.$$"; : > "$SC_LOG"
+SC_STDOUT="${SC_TMP}/out.sudofail.$$"; SC_STDERR="${SC_TMP}/err.sudofail.$$"
+: > "$SC_STDOUT"; : > "$SC_STDERR"
+SECONDS=0
+set +e
+env -i PATH="${D}" HOME="${SC_TMP}/home" BASH_ENV= ENV= \
+  bash --noprofile --norc -c "set -euo pipefail
+           source '${COMMON}'
+           run_optional_sidecar telemetron https://example/install.sh 5 '${SC_LOG}' FOO=bar SIDECAR_USE_SUDO=1
+           echo AFTER_OK" \
+  >"$SC_STDOUT" 2>"$SC_STDERR"
+SC_RC=$?
+ELAPSED=$SECONDS
+set -e
+sc_assert_silent   "SIDECAR_USE_SUDO sudo-rejects"
+sc_assert_sentinel "SIDECAR_USE_SUDO sudo-rejects"
+[[ $ELAPSED -lt 4 ]] \
+  && pass "SIDECAR_USE_SUDO sudo-rejects: returned in ${ELAPSED}s (no hang)" \
+  || fail "SIDECAR_USE_SUDO sudo-rejects: took ${ELAPSED}s — sudo -n should fail immediately"
+sc_assert_log      "SIDECAR_USE_SUDO sudo-rejects" "[telemetron] install failed"
+
 # I1b. Unwritable log — "silent" contract holds even when log cannot be opened.
 # Engine must fall back to /dev/null, not leak to caller's stdout/stderr.
 D="${SC_TMP}/unwritable"; mk_sc_path "$D"
