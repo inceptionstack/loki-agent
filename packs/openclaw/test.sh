@@ -324,15 +324,19 @@ fi
 # (c) SIDECAR_USE_SUDO=1 with passwordless sudo stub → sudo prefix inserted
 D="${SC_TMP}/withsudo"; mk_sc_path "$D"
 rm -f "${D}/curl" "${D}/sudo"
-# Stub sudo that succeeds for -n true and -n -E bash, recording invocation
-cat > "${D}/sudo" <<'SUDO'
+SUDO_MARKER="${SC_TMP}/sudo-marker-withsudo"
+rm -f "$SUDO_MARKER"
+# Stub sudo that succeeds for -n true and -n -E bash, recording invocation.
+# Use a heredoc WITHOUT single-quoting the delimiter so ${SUDO_MARKER} is
+# expanded at generation time (baked into the stub script as a literal path).
+cat > "${D}/sudo" <<SUDO
 #!/bin/sh
-case "$*" in
+case "\$*" in
   "-n true") exit 0 ;;
   "-n -E bash"*)
-    # Shift past -n -E and exec bash with remaining args
-    shift 2  # drop -n -E
-    exec "$@"
+    echo "SUDO_INVOKED" >> "${SUDO_MARKER}"
+    shift 2
+    exec "\$@"
     ;;
   *) exit 1 ;;
 esac
@@ -340,7 +344,12 @@ SUDO
 chmod +x "${D}/sudo"
 cat > "${D}/curl" <<'CURL'
 #!/bin/sh
-printf 'echo INNER_SUDO_RAN; exit 0\n'
+# Emit installer that checks env vars survived the chain
+cat <<'INNER'
+echo INNER_SUDO_RAN
+[ -n "$FOO" ] && echo "ENV_FOO=$FOO"
+exit 0
+INNER
 exit 0
 CURL
 chmod +x "${D}/curl"
@@ -360,6 +369,18 @@ sc_assert_silent   "SIDECAR_USE_SUDO with-sudo"
 sc_assert_sentinel "SIDECAR_USE_SUDO with-sudo"
 sc_assert_log      "SIDECAR_USE_SUDO with-sudo" "INNER_SUDO_RAN"
 sc_assert_log      "SIDECAR_USE_SUDO with-sudo" "[telemetron] installed and enrolled"
+# Prove sudo was actually invoked (not just curl|bash)
+if [[ -f "$SUDO_MARKER" ]]; then
+  pass "SIDECAR_USE_SUDO with-sudo: sudo stub was invoked"
+else
+  fail "SIDECAR_USE_SUDO with-sudo: sudo stub was NOT invoked — fell back to unprivileged path"
+fi
+# Prove env vars survive the env→bash -c→sudo -E chain
+if grep -q 'ENV_FOO=bar' "$SC_LOG"; then
+  pass "SIDECAR_USE_SUDO with-sudo: env vars preserved through sudo -E"
+else
+  fail "SIDECAR_USE_SUDO with-sudo: env vars NOT preserved (FOO=bar missing from log)"
+fi
 
 # (d) SIDECAR_USE_SUDO=1 with sudo that rejects the real command → fails cleanly
 D="${SC_TMP}/sudofail"; mk_sc_path "$D"
