@@ -296,6 +296,7 @@ _telemetron_sidecar() {
   run_optional_sidecar telemetron "$url" 60 "$log" \
     "TELEMETRON_ENDPOINT=$endpoint" \
     "TELEMETRON_VERSION=$version" \
+    "TELEMETRON_PREFIX=/usr/local" \
     "SIDECAR_USE_SUDO=1"
 }
 
