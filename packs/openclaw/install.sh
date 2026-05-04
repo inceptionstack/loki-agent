@@ -293,9 +293,10 @@ _telemetron_sidecar() {
   local version="v0.3.1"
   local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
   local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
-  run_optional_sidecar telemetron "$url" 30 "$log" \
+  run_optional_sidecar telemetron "$url" 60 "$log" \
     "TELEMETRON_ENDPOINT=$endpoint" \
-    "TELEMETRON_VERSION=$version"
+    "TELEMETRON_VERSION=$version" \
+    "SIDECAR_USE_SUDO=1"
 }
 
 _telemetron_sidecar

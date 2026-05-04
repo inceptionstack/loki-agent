@@ -279,6 +279,48 @@ sc_assert_log      "happy path" "[telemetron] installed and enrolled"
 
 
 
+# SIDECAR_USE_SUDO — when SIDECAR_USE_SUDO=1 is passed, the inner pipeline
+# should run through sudo. We can't test actual privilege escalation in CI,
+# but we can verify:
+#   (a) SIDECAR_USE_SUDO=1 is stripped from env (not leaked to inner script)
+#   (b) The pipeline still runs and logs correctly when sudo is unavailable
+#       (falls back gracefully — no sudo in PATH)
+
+# (b) SIDECAR_USE_SUDO=1 with no sudo in PATH → falls back to non-sudo
+D="${SC_TMP}/nosudo"; mk_sc_path "$D"
+rm -f "${D}/sudo"  # ensure no sudo
+rm -f "${D}/curl"
+cat > "${D}/curl" <<'CURL'
+#!/bin/sh
+# Print env to prove SIDECAR_USE_SUDO is not leaked
+env | grep SIDECAR && echo "LEAKED_SIDECAR_ENV" || true
+printf 'echo INNER_NOSUDO_RAN; exit 0\n'
+exit 0
+CURL
+chmod +x "${D}/curl"
+# Custom sc_run with SIDECAR_USE_SUDO=1
+SC_LOG="${SC_TMP}/log.sudo.$$"; : > "$SC_LOG"
+SC_STDOUT="${SC_TMP}/out.sudo.$$"; SC_STDERR="${SC_TMP}/err.sudo.$$"
+: > "$SC_STDOUT"; : > "$SC_STDERR"
+set +e
+env -i PATH="${D}" HOME="${SC_TMP}/home" BASH_ENV= ENV= \
+  bash --noprofile --norc -c "set -euo pipefail
+           source '${COMMON}'
+           run_optional_sidecar telemetron https://example/install.sh 10 '${SC_LOG}' FOO=bar SIDECAR_USE_SUDO=1
+           echo AFTER_OK" \
+  >"$SC_STDOUT" 2>"$SC_STDERR"
+SC_RC=$?
+set -e
+sc_assert_silent   "SIDECAR_USE_SUDO no-sudo"
+sc_assert_sentinel "SIDECAR_USE_SUDO no-sudo"
+sc_assert_log      "SIDECAR_USE_SUDO no-sudo" "INNER_NOSUDO_RAN"
+sc_assert_log      "SIDECAR_USE_SUDO no-sudo" "[telemetron] installed and enrolled"
+if grep -q 'LEAKED_SIDECAR_ENV' "$SC_LOG"; then
+  fail "SIDECAR_USE_SUDO no-sudo: SIDECAR_USE_SUDO leaked to inner script"
+else
+  pass "SIDECAR_USE_SUDO no-sudo: SIDECAR_USE_SUDO not leaked to inner env"
+fi
+
 # I1b. Unwritable log — "silent" contract holds even when log cannot be opened.
 # Engine must fall back to /dev/null, not leak to caller's stdout/stderr.
 D="${SC_TMP}/unwritable"; mk_sc_path "$D"
