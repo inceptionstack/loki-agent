@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # packs/openclaw/test.sh — Unit tests for the OpenClaw pack
 #
-# Validates manifest, install.sh --help/arg-parsing interface, and the
-# telemetron sidecar block's observable contract. The sidecar tests
-# exercise the block by sourcing it under an isolated PATH with stubbed
-# binaries (curl, systemctl, uname, timeout) — not by grep'ing source
-# text. No network, no sudo, no systemd, no OpenClaw required.
+# Tests target three boundaries, in order of abstraction:
+#
+#   1. manifest.yaml structure + install.sh --help interface
+#   2. should_run_telemetron() — the pack's policy decision function
+#   3. run_optional_sidecar()  — common.sh's silent/bounded/pipefail
+#      bootstrap engine, exercised via PATH-hijacked curl/timeout stubs
+#
+# No network, no sudo, no systemd, no OpenClaw required.
 #
 # Usage: bash packs/openclaw/test.sh
 # Exit:  0 if all tests pass, 1 otherwise.
@@ -14,31 +17,29 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACK_DIR="${SCRIPT_DIR}"
+PACKS_DIR="${SCRIPT_DIR}/.."
+INSTALL="${PACK_DIR}/install.sh"
+MANIFEST="${PACK_DIR}/manifest.yaml"
+COMMON="${PACKS_DIR}/common.sh"
 
 # ── Test harness ──────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
-
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 PASS=0; FAIL=0; SKIP=0
 pass()   { printf "${GREEN}  ✓${NC} %s\n" "$1"; PASS=$((PASS+1)); }
 fail()   { printf "${RED}  ✗${NC} %s\n" "$1"; FAIL=$((FAIL+1)); }
 skip()   { printf "${YELLOW}  ○${NC} %s (skipped)\n" "$1"; SKIP=$((SKIP+1)); }
 header() { printf "\n${BOLD}${CYAN}%s${NC}\n" "$1"; }
 
-INSTALL="${PACK_DIR}/install.sh"
-MANIFEST="${PACK_DIR}/manifest.yaml"
-
-# ── Test: manifest.yaml structure ─────────────────────────────────────────────
+# ── Test: manifest.yaml ───────────────────────────────────────────────────────
 header "Test: manifest.yaml"
 
 [[ -f "${MANIFEST}" ]] && pass "manifest.yaml exists" || fail "manifest.yaml missing"
 
 if command -v python3 &>/dev/null && python3 -c "import yaml" 2>/dev/null; then
-  python3 - "${MANIFEST}" <<'PY' && pass "manifest.yaml is valid YAML and has required keys + skip-telemetron" || fail "manifest.yaml structure invalid"
+  python3 - "${MANIFEST}" <<'PY' \
+    && pass "manifest.yaml: valid YAML, required keys, skip-telemetron param" \
+    || fail "manifest.yaml structure invalid"
 import sys, yaml
 data = yaml.safe_load(open(sys.argv[1]))
 required = ["name","version","type","description","deps","params","health_check","provides"]
@@ -52,186 +53,171 @@ else
   skip "manifest.yaml YAML tests: python3 or pyyaml not available"
 fi
 
-# ── Test: install.sh interface ────────────────────────────────────────────────
-header "Test: install.sh interface"
+# ── Test: install.sh --help ───────────────────────────────────────────────────
+header "Test: install.sh --help"
 
 [[ -f "${INSTALL}" ]] && pass "install.sh exists" || fail "install.sh missing"
-[[ "$(head -1 "${INSTALL}")" = "#!/usr/bin/env bash" ]] && pass "install.sh has correct shebang" || fail "install.sh has wrong shebang"
-bash -n "${INSTALL}" 2>/dev/null && pass "install.sh passes bash -n" || fail "install.sh has syntax errors"
+[[ "$(head -1 "${INSTALL}")" = "#!/usr/bin/env bash" ]] && pass "shebang" || fail "wrong shebang"
+bash -n "${INSTALL}" 2>/dev/null && pass "bash -n clean" || fail "syntax errors"
 
-# --help exits 0 and mentions every user-facing flag
-HELP_OUT="$(bash "${INSTALL}" --help 2>&1)" && HELP_RC=0 || HELP_RC=$?
-[[ "${HELP_RC}" -eq 0 ]] && pass "install.sh --help exits 0" || fail "install.sh --help exits ${HELP_RC}"
-
+HELP_OUT="$(bash "${INSTALL}" --help 2>&1)" && pass "--help exits 0" || fail "--help exits nonzero"
 for flag in --region --model --port --model-mode --skip-telemetron --help; do
   printf '%s' "${HELP_OUT}" | grep -q -- "${flag}" \
-    && pass "install.sh --help mentions ${flag}" \
-    || fail "install.sh --help missing ${flag}"
+    && pass "--help mentions ${flag}" \
+    || fail "--help missing ${flag}"
 done
-
-# --skip-telemetron actually sets PACK_ARG_SKIP_TELEMETRON when parsed.
-# We prove this by invoking install.sh with --help AFTER --skip-telemetron —
-# arg parsing runs first, then help short-circuits. This catches the case
-# where --skip-telemetron is in help text but not actually wired to the
-# arg loop. (If arg parsing rejected --skip-telemetron, we'd get rc != 0.)
 bash "${INSTALL}" --skip-telemetron --help >/dev/null 2>&1 \
-  && pass "install.sh accepts --skip-telemetron in arg stream" \
-  || fail "install.sh rejects --skip-telemetron"
+  && pass "--skip-telemetron accepted as an arg (not rejected by parser)" \
+  || fail "--skip-telemetron rejected by parser"
 
-# ── Test: telemetron sidecar contract (behavior, not text) ────────────────────
-# Invariants we prove by running the block with stubbed binaries:
-#
-#   I1. Silent:   zero bytes on stdout AND stderr, regardless of outcome.
-#   I2. Logged:   every outcome writes a tagged line to $INSTALL_LOG.
-#   I3. Bounded:  a real curl failure surfaces as non-zero rc in the log
-#                 (proves pipefail: without it, rc would always be 0).
-#   I4. Capped:   a hanging inner step is killed via the outer timeout.
-#   I5. Safe:     the block never trips the caller's `set -euo pipefail`.
-#   I6. Opt-outs: every documented opt-out skips cleanly (4 paths).
-header "Test: telemetron sidecar contract (behavior)"
+# ── Test: should_run_telemetron() decisions ───────────────────────────────────
+# The pack's *policy* layer. Pure function — given env/PATH, returns one of:
+#   yes | skip: --skip-telemetron | skip: non-Linux
+#   skip: lowkey telemetry opt-out | skip: systemctl not found
+# We source install.sh with the `_telemetron_sidecar` call short-circuited so
+# sourcing doesn't actually run any network or install work.
+header "Test: should_run_telemetron() — pack policy decisions"
 
-TEL_TMP="$(mktemp -d)"
-trap 'rm -rf "$TEL_TMP"' EXIT
+DEC_TMP="$(mktemp -d)"
+# Patched install.sh that defines functions but skips the final invocation
+# and the rest of the pack install. We extract only up to the `_telemetron_sidecar`
+# invocation, and stop there.
+sed '/^_telemetron_sidecar$/,$d' "${INSTALL}" > "${DEC_TMP}/install-patched.sh"
+# The patched file sources common.sh and then runs the entire pack install.
+# That's fine for function definitions, but we also need to neutralize the
+# install logic so tests don't try to `npm install` etc. Strategy: source only
+# the common.sh + the last two function definitions (should_run_telemetron,
+# _telemetron_sidecar) by extracting them explicitly.
 
-# Extract the telemetron function into a standalone sourceable file.
-# Anchors: `# ── Telemetron sidecar` header → `install_telemetron` invocation.
-TEL_FN="${TEL_TMP}/telemetron.fn.sh"
-sed -n '/^# ── Telemetron sidecar/,/^install_telemetron$/p' "${INSTALL}" > "${TEL_FN}"
-if grep -q '^install_telemetron() {' "${TEL_FN}" && grep -q '^install_telemetron$' "${TEL_FN}"; then
-  pass "telemetron block is extractable"
+# Extract should_run_telemetron from install.sh.
+awk '
+  /^should_run_telemetron\(\) \{/ { p=1 }
+  p
+  p && /^\}/ { p=0 }
+' "${INSTALL}" > "${DEC_TMP}/should_run.sh"
+if grep -q '^should_run_telemetron() {' "${DEC_TMP}/should_run.sh" \
+   && grep -q '^}$' "${DEC_TMP}/should_run.sh"; then
+  pass "extracted should_run_telemetron()"
 else
-  fail "telemetron block extraction failed — anchors moved?"
+  fail "could not extract should_run_telemetron"
   exit 1
 fi
 
-# mk_fakes: populate a directory with passthrough symlinks to real coreutils
-# + a stub systemctl (present + exit 0). Callers override individual bins.
-mk_fakes() {
-  local dir="$1"
-  mkdir -p "${dir}"
-  # Comprehensive coreutils list — PATH is strict (only this dir).
-  local needed=(date printf uname timeout bash sh grep sed cat rm mkdir touch
-                env awk sleep chmod tr head tail sort uniq wc cut mktemp dirname
-                basename id whoami tee xargs)
+# Helper: run should_run_telemetron under an isolated PATH + env, compare output.
+dec_run() { # args: ENV_KV... -- PATH_DIR — prints decision
+  local envs=() path_dir=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" = "--" ]]; then shift; path_dir="$1"; shift; break
+    else envs+=("$1"); shift; fi
+  done
+  env -i HOME="${DEC_TMP}/home" PATH="${path_dir}" BASH_ENV= ENV= "${envs[@]}" \
+    bash --noprofile --norc -c "set -euo pipefail; source '${DEC_TMP}/should_run.sh'; should_run_telemetron"
+}
+
+mk_path() { # args: dir — pre-populate a PATH dir with common coreutils
+  local dir="$1"; mkdir -p "$dir"
+  local needed=(uname bash sh printf echo grep sed cat rm mkdir touch env date)
   for b in "${needed[@]}"; do
     local src; src="$(command -v "$b" 2>/dev/null || true)"
     [[ -n "$src" ]] && ln -sf "$src" "${dir}/$b"
   done
-  # systemctl stub: present + no-op. The block only uses `command -v systemctl`.
+  # systemctl present by default.
   printf '#!/bin/sh\nexit 0\n' > "${dir}/systemctl"; chmod +x "${dir}/systemctl"
 }
 
-# tel_run: execute the block under an isolated env. Captures stdout/stderr
-# separately so we can assert I1 (silent) and I2 (logged).
-#
-# Usage: tel_run <ENV_KV...> -- <PATH_dir_with_fakes>
-# Result: $TEL_STDOUT (file), $TEL_STDERR (file), $TEL_RC (int), $TEL_LOG (file).
-tel_run() {
-  local envs=() fake_path=""
-  while [[ $# -gt 0 ]]; do
-    if [[ "$1" = "--" ]]; then shift; fake_path="$1"; shift; break
-    else envs+=("$1"); shift; fi
-  done
-  TEL_LOG="${TEL_TMP}/log.$$.$RANDOM"
-  TEL_STDOUT="${TEL_TMP}/out.$$.$RANDOM"
-  TEL_STDERR="${TEL_TMP}/err.$$.$RANDOM"
-  : > "${TEL_LOG}"; : > "${TEL_STDOUT}"; : > "${TEL_STDERR}"
-  mkdir -p "${TEL_TMP}/home"
-  # Run under strict mode to prove the block cannot leak non-zero exit.
-  # Print AFTER_OK on a successful fall-through to prove I5.
+assert_decision() { # args: scenario expected <env_and_path>
+  local label="$1" expected="$2"; shift 2
+  local actual; actual="$(dec_run "$@")"
+  if [[ "$actual" = "$expected" ]]; then
+    pass "${label}: \"${actual}\""
+  else
+    fail "${label}: expected \"${expected}\", got \"${actual}\""
+  fi
+}
+
+P="${DEC_TMP}/path.default"; mk_path "$P"
+mkdir -p "${DEC_TMP}/home"
+
+assert_decision "no flags → yes"                 "yes"                             -- "$P"
+assert_decision "--skip-telemetron → skip"       "skip: --skip-telemetron"         PACK_ARG_SKIP_TELEMETRON=true -- "$P"
+assert_decision "LOWKEY_TELEMETRY=0 → opt-out"   "skip: lowkey telemetry opt-out"  LOWKEY_TELEMETRY=0 -- "$P"
+assert_decision "DO_NOT_TRACK=1 → opt-out"       "skip: lowkey telemetry opt-out"  DO_NOT_TRACK=1 -- "$P"
+
+mkdir -p "${DEC_TMP}/home/.lowkey"; touch "${DEC_TMP}/home/.lowkey/telemetry-off"
+assert_decision "telemetry-off file → opt-out"   "skip: lowkey telemetry opt-out"  -- "$P"
+rm -f "${DEC_TMP}/home/.lowkey/telemetry-off"
+
+P_DARWIN="${DEC_TMP}/path.darwin"; mk_path "$P_DARWIN"
+rm -f "${P_DARWIN}/uname"; printf '#!/bin/sh\necho Darwin\n' > "${P_DARWIN}/uname"; chmod +x "${P_DARWIN}/uname"
+assert_decision "Darwin → non-Linux"             "skip: non-Linux"                 -- "$P_DARWIN"
+
+P_NOSYSD="${DEC_TMP}/path.nosysd"; mk_path "$P_NOSYSD"; rm -f "${P_NOSYSD}/systemctl"
+assert_decision "no systemctl → skip"            "skip: systemctl not found"       -- "$P_NOSYSD"
+
+# Decision precedence: explicit --skip wins over everything.
+assert_decision "--skip beats opt-out env"       "skip: --skip-telemetron" \
+  PACK_ARG_SKIP_TELEMETRON=true LOWKEY_TELEMETRY=0 DO_NOT_TRACK=1 -- "$P"
+
+# ── Test: run_optional_sidecar() — common.sh engine contract ──────────────────
+# Invariants proven by running the helper with stubbed curl/timeout:
+#   I1. Silent:   zero stdout/stderr to the caller.
+#   I2. Logged:   every outcome writes a tagged `[NAME] ...` line.
+#   I3. Pipefail: curl failure surfaces a non-zero rc (proves -o pipefail).
+#   I4. Timeout:  a hanging inner step returns within bounds.
+#   I5. Safe:     never trips the caller's `set -euo pipefail`.
+header "Test: run_optional_sidecar() — common.sh engine"
+
+SC_TMP="$(mktemp -d)"
+trap 'rm -rf "$DEC_TMP" "$SC_TMP"' EXIT
+
+# Helper: run a scenario. Writes $SC_STDOUT, $SC_STDERR, $SC_LOG, $SC_RC.
+# All env passed to the sidecar is inside the bash -c command line as args.
+sc_run() { # args: <PATH_DIR> <NAME> <URL> <TIMEOUT_SECS>
+  local path_dir="$1" name="$2" url="$3" secs="$4"
+  SC_LOG="${SC_TMP}/log.$$.$RANDOM"; : > "$SC_LOG"
+  SC_STDOUT="${SC_TMP}/out.$$.$RANDOM"; : > "$SC_STDOUT"
+  SC_STDERR="${SC_TMP}/err.$$.$RANDOM"; : > "$SC_STDERR"
   set +e
-  env -i HOME="${TEL_TMP}/home" PATH="${fake_path}" \
-    INSTALL_LOG="${TEL_LOG}" "${envs[@]}" \
-    bash -c "set -euo pipefail; source '${TEL_FN}'; echo AFTER_OK" \
-    >"${TEL_STDOUT}" 2>"${TEL_STDERR}"
-  TEL_RC=$?
+  # --noprofile --norc prevents bash from reading /etc/profile.d or ~/.bashrc,
+  # which could silently prepend system paths and defeat the PATH hijack.
+  env -i PATH="${path_dir}" HOME="${SC_TMP}/home" BASH_ENV= ENV= \
+    bash --noprofile --norc -c "set -euo pipefail
+             source '${COMMON}'
+             run_optional_sidecar '$name' '$url' $secs '$SC_LOG' FOO=bar
+             echo AFTER_OK" \
+    >"$SC_STDOUT" 2>"$SC_STDERR"
+  SC_RC=$?
   set -e
-  return 0
 }
 
-assert_silent() { # $1 = scenario label
-  # Only allowed stdout line is the post-source sentinel `AFTER_OK`.
+sc_assert_silent() { # $1 = label
   local leak
-  leak="$(grep -v '^AFTER_OK$' "${TEL_STDOUT}" || true)"
-  if [[ -z "${leak}" ]]; then
-    pass "$1: zero user-visible stdout (AFTER_OK sentinel only)"
-  else
-    fail "$1: stdout leaked: $(printf %q "${leak}")"
-  fi
-  if [[ ! -s "${TEL_STDERR}" ]]; then
-    pass "$1: zero user-visible stderr"
-  else
-    fail "$1: stderr leaked: $(printf %q "$(cat "${TEL_STDERR}")")"
-  fi
+  leak="$(grep -v '^AFTER_OK$' "$SC_STDOUT" || true)"
+  [[ -z "$leak" ]] && pass "$1: zero stdout" || fail "$1: stdout leaked: $(printf %q "$leak")"
+  [[ ! -s "$SC_STDERR" ]] && pass "$1: zero stderr" || fail "$1: stderr leaked: $(printf %q "$(cat "$SC_STDERR")")"
 }
-assert_sentinel() { # $1 = scenario label
-  if grep -q '^AFTER_OK$' "${TEL_STDOUT}"; then
-    pass "$1: caller continues (set -euo pipefail not tripped)"
-  else
-    fail "$1: caller aborted (rc=${TEL_RC}, stderr=$(cat "${TEL_STDERR}"))"
-  fi
+sc_assert_sentinel() { # $1 = label
+  grep -q '^AFTER_OK$' "$SC_STDOUT" \
+    && pass "$1: set -euo pipefail not tripped" \
+    || fail "$1: caller aborted (rc=$SC_RC, stderr=$(cat "$SC_STDERR"))"
 }
-assert_log_has() { # $1 = scenario, $2 = substring
-  if grep -qF -- "$2" "${TEL_LOG}"; then
-    pass "$1: log contains \"$2\""
-  else
-    fail "$1: log missing \"$2\" (log=$(tr '\n' '|' < "${TEL_LOG}"))"
-  fi
+sc_assert_log() { # $1 = label, $2 = substring
+  grep -qF -- "$2" "$SC_LOG" \
+    && pass "$1: log contains \"$2\"" \
+    || fail "$1: log missing \"$2\" ($(tr '\n' '|' < "$SC_LOG"))"
 }
 
-# ── I6a. --skip-telemetron ────────────────────────────────────────────────────
-D="${TEL_TMP}/fakes.skip"; mk_fakes "$D"
-tel_run PACK_ARG_SKIP_TELEMETRON=true -- "$D"
-assert_silent   "skip-telemetron=true"
-assert_sentinel "skip-telemetron=true"
-assert_log_has  "skip-telemetron=true" "skip: --skip-telemetron"
+mk_sc_path() { # $1 = dir
+  local dir="$1"; mkdir -p "$dir"
+  local needed=(bash sh env printf echo date timeout grep sed cat rm mkdir chmod sleep head tail)
+  for b in "${needed[@]}"; do
+    local src; src="$(command -v "$b" 2>/dev/null || true)"
+    [[ -n "$src" ]] && ln -sf "$src" "${dir}/$b"
+  done
+}
 
-# ── I6b. LOWKEY_TELEMETRY=0 ───────────────────────────────────────────────────
-D="${TEL_TMP}/fakes.lowkey"; mk_fakes "$D"
-tel_run LOWKEY_TELEMETRY=0 PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "LOWKEY_TELEMETRY=0"
-assert_sentinel "LOWKEY_TELEMETRY=0"
-assert_log_has  "LOWKEY_TELEMETRY=0" "lowkey telemetry opt-out"
-
-# ── I6c. DO_NOT_TRACK=1 ───────────────────────────────────────────────────────
-D="${TEL_TMP}/fakes.dnt"; mk_fakes "$D"
-tel_run DO_NOT_TRACK=1 PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "DO_NOT_TRACK=1"
-assert_sentinel "DO_NOT_TRACK=1"
-assert_log_has  "DO_NOT_TRACK=1" "lowkey telemetry opt-out"
-
-# ── I6d. ~/.lowkey/telemetry-off file ─────────────────────────────────────────
-D="${TEL_TMP}/fakes.file"; mk_fakes "$D"
-mkdir -p "${TEL_TMP}/home/.lowkey"; touch "${TEL_TMP}/home/.lowkey/telemetry-off"
-tel_run PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "telemetry-off file"
-assert_sentinel "telemetry-off file"
-assert_log_has  "telemetry-off file" "lowkey telemetry opt-out"
-rm -f "${TEL_TMP}/home/.lowkey/telemetry-off"
-
-# ── I6e. Non-Linux short-circuit ──────────────────────────────────────────────
-D="${TEL_TMP}/fakes.mac"; mk_fakes "$D"
-rm -f "${D}/uname"
-printf '#!/bin/sh\necho Darwin\n' > "${D}/uname"; chmod +x "${D}/uname"
-tel_run PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "non-Linux"
-assert_sentinel "non-Linux"
-assert_log_has  "non-Linux" "skip: non-Linux"
-
-# ── I6f. Missing systemctl ────────────────────────────────────────────────────
-D="${TEL_TMP}/fakes.nosysd"; mk_fakes "$D"
-rm -f "${D}/systemctl"
-tel_run PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "no systemctl"
-assert_sentinel "no systemctl"
-assert_log_has  "no systemctl" "skip: systemctl not found"
-
-# ── I3. Real curl failure — proves pipefail ───────────────────────────────────
-# Without `bash -o pipefail`, the right-hand `bash` exits 0 on empty stdin and
-# the block would log "installed and enrolled" despite curl failing. This is
-# the regression that motivated v3 of the plan review.
-D="${TEL_TMP}/fakes.curlfail"; mk_fakes "$D"
-rm -f "${D}/curl"
+# I3. curl fails — pipefail must surface the non-zero rc to the log.
+D="${SC_TMP}/curlfail"; mk_sc_path "$D"
 cat > "${D}/curl" <<'CURL'
 #!/bin/sh
 echo "MOCK_CURL_STDOUT_NOT_A_SCRIPT"
@@ -239,54 +225,57 @@ echo "MOCK_CURL_STDERR_ERROR" >&2
 exit 7
 CURL
 chmod +x "${D}/curl"
-tel_run PACK_ARG_SKIP_TELEMETRON=false -- "$D"
-assert_silent   "curl fails (rc=7)"
-assert_sentinel "curl fails (rc=7)"
-# The log must record a non-zero rc. If pipefail is broken, the log would say
-# "installed and enrolled" — that's the exact regression we're guarding.
-if grep -qE '\[telemetron\] install failed \(rc=[1-9]' "${TEL_LOG}"; then
-  pass "curl fails (rc=7): pipefail surfaces non-zero rc"
-elif grep -q '\[telemetron\] installed and enrolled' "${TEL_LOG}"; then
-  fail "curl fails (rc=7): PIPEFAIL HOLE — log claims success despite curl rc=7"
-else
-  fail "curl fails (rc=7): unexpected log state ($(tr '\n' '|' < "${TEL_LOG}"))"
-fi
-# Inner pipeline's stderr must land in log, not caller stderr.
-assert_log_has "curl fails (rc=7)" "MOCK_CURL_STDERR_ERROR"
 
-# ── I4. Outer timeout actually fires within budget ────────────────────────────
-# Fake a hanging curl and shim `timeout` to clamp to 3s so we don't add 30s
-# of real-time wait to CI. This proves the block actually invokes `timeout`
-# around the pipeline and honors its exit code (rc 124 for SIGTERM).
-D="${TEL_TMP}/fakes.hang"; mk_fakes "$D"
-rm -f "${D}/curl" "${D}/timeout"
-cat > "${D}/curl" <<'CURL'
+sc_run "$D" telemetron https://example/install.sh 10
+sc_assert_silent   "curl fails"
+sc_assert_sentinel "curl fails"
+if grep -qE '\[telemetron\] install failed \(rc=[1-9]' "$SC_LOG"; then
+  pass "curl fails: pipefail surfaces non-zero rc (not masked)"
+elif grep -q '\[telemetron\] installed and enrolled' "$SC_LOG"; then
+  fail "curl fails: PIPEFAIL HOLE — log claims success despite curl exit 7"
+else
+  fail "curl fails: unexpected log state ($(tr '\n' '|' < "$SC_LOG"))"
+fi
+sc_assert_log "curl fails" "MOCK_CURL_STDERR_ERROR"
+sc_assert_log "curl fails" "[telemetron] begin"
+sc_assert_log "curl fails" "[telemetron] end"
+
+# I4. Hanging curl — outer timeout must fire.
+D="${SC_TMP}/hang"; mk_sc_path "$D"
+rm -f "${D}/curl"; cat > "${D}/curl" <<'CURL'
 #!/bin/sh
 sleep 60
 CURL
 chmod +x "${D}/curl"
-cat > "${D}/timeout" <<'TO'
-#!/bin/sh
-# Ignore the caller's duration; clamp to 3s for CI speed. Re-exec real timeout.
-shift
-exec /usr/bin/timeout 3 "$@"
-TO
-chmod +x "${D}/timeout"
 SECONDS=0
-tel_run PACK_ARG_SKIP_TELEMETRON=false -- "$D"
+sc_run "$D" telemetron https://example/install.sh 3
 ELAPSED=$SECONDS
-assert_silent   "hanging curl (timeout fires)"
-assert_sentinel "hanging curl (timeout fires)"
-if [[ $ELAPSED -lt 10 ]]; then
-  pass "hanging curl: block returned in ${ELAPSED}s (<10s CI budget)"
-else
-  fail "hanging curl: block took ${ELAPSED}s — timeout not firing?"
-fi
-if grep -qE '\[telemetron\] install (aborted|failed \(rc=(124|143))' "${TEL_LOG}"; then
+sc_assert_silent   "hanging curl"
+sc_assert_sentinel "hanging curl"
+[[ $ELAPSED -lt 10 ]] \
+  && pass "hanging curl: returned in ${ELAPSED}s (<10s)" \
+  || fail "hanging curl: took ${ELAPSED}s — timeout not firing"
+if grep -qE '\[telemetron\] install (aborted|failed \(rc=(124|137|143))' "$SC_LOG"; then
   pass "hanging curl: log records timeout-class outcome"
 else
-  fail "hanging curl: log missing timeout outcome ($(tr '\n' '|' < "${TEL_LOG}"))"
+  fail "hanging curl: log missing timeout outcome ($(tr '\n' '|' < "$SC_LOG"))"
 fi
+
+# Happy path — stubbed curl that emits a tiny installer to bash.
+D="${SC_TMP}/happy"; mk_sc_path "$D"
+rm -f "${D}/curl"
+cat > "${D}/curl" <<'CURL'
+#!/bin/sh
+# Emit a trivial installer that prints to stdout (should land in log only).
+printf 'echo INNER_INSTALL_RAN; exit 0\n'
+exit 0
+CURL
+chmod +x "${D}/curl"
+sc_run "$D" telemetron https://example/install.sh 10
+sc_assert_silent   "happy path"
+sc_assert_sentinel "happy path"
+sc_assert_log      "happy path" "INNER_INSTALL_RAN"
+sc_assert_log      "happy path" "[telemetron] installed and enrolled"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 header "Summary"

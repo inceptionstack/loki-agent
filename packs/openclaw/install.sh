@@ -242,89 +242,56 @@ else
 fi
 
 
-# ── Telemetron sidecar (silent, log-only) ────────────────────────────────────
-# Install telemetron and let it anonymously enroll against the Loki telemetry
-# backend. DELIBERATELY SILENT on both stdout and stderr: all output — success,
-# failure, skip reason — goes to the install log only. Telemetron failure never
-# blocks, warns, or prints anything in the user-visible install flow.
-#
-# Assumptions (true for lowkey today, asserted here):
-#   - The whole lowkey installer runs as root, so no sudo probing.
-#   - curl is a hard prerequisite of the lowkey installer itself.
-#
-# A hard outer timeout (30s) bounds the total blast radius: even if GitHub is
-# down, the telemetron release download hangs, or `telemetron setup` stalls, we
-# give up and continue the pack install.
-install_telemetron() {
-  # Outer `|| true` + subshell ensures the pack's `set -euo pipefail` cannot
-  # be tripped by anything inside, including edge-case failures before the
-  # exec-redirect takes effect.
-  (
-    set +e
-    # Self-contained log path. Do NOT expand $INSTALL_LOG under set -u without
-    # a default; the pack runs with `set -euo pipefail` and INSTALL_LOG is not
-    # exported from the top-level installer.
-    local install_log="${INSTALL_LOG:-/tmp/loki-install.log}"
-    exec >>"$install_log" 2>&1
-    printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-    # Guard 1: pack-specific skip (short-circuits explicit operator intent).
-    if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
-      printf '[telemetron] skip: --skip-telemetron\n'; exit 0
-    fi
-    # Guard 2: non-Linux (no systemd auto-setup path).
-    if [[ "$(uname -s)" != "Linux" ]]; then
-      printf '[telemetron] skip: non-Linux\n'; exit 0
-    fi
-    # Guard 3: lowkey telemetry opt-out.
-    if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
-       || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
-       || [[ -f "${HOME}/.lowkey/telemetry-off" ]]; then
-      printf '[telemetron] skip: lowkey telemetry opt-out\n'; exit 0
-    fi
-    # Guard 4: needs systemd (anonymous enrollment wires a systemd unit).
-    if ! command -v systemctl >/dev/null 2>&1; then
-      printf '[telemetron] skip: systemctl not found\n'; exit 0
-    fi
-
-    local version="v0.3.1"
-    local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
-    local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
-
-    printf '[telemetron] installing %s from %s (timeout=30s)\n' "$version" "$url"
-    # Hard outer timeout wraps the entire sidecar path: curl fetch, GitHub
-    # release download, checksum verification, binary install, and
-    # `telemetron setup`. If any piece hangs, we abandon the sidecar and
-    # the pack install continues.
-    #
-    # pipefail is critical: without it, `curl ... | bash` returns the
-    # right-hand `bash`'s exit code (0 on empty stdin) and a curl
-    # failure would be silently reported as success. (Codex v3 finding.)
-    if timeout 30 bash -o pipefail -c '
-      curl --fail --silent --show-error --location \
-        --connect-timeout 5 --max-time 25 \
-        "'"$url"'" \
-      | TELEMETRON_ENDPOINT="'"$endpoint"'" \
-        TELEMETRON_VERSION="'"$version"'" \
-        bash
-    '
-    then
-      printf '[telemetron] installed and enrolled\n'
-    else
-      local rc=$?
-      if [[ $rc -eq 124 ]]; then
-        printf '[telemetron] install aborted: 30s outer timeout reached\n'
-      else
-        printf '[telemetron] install failed (rc=%s); see log above for details\n' "$rc"
-      fi
-    fi
-    printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    exit 0
-  ) || true
-}
-
-install_telemetron
-
 # ── Done ──────────────────────────────────────────────────────────────────────
+# Mark the pack done and show the success banner BEFORE optional sidecars.
+# The user should not wait on best-effort work to see that their install
+# succeeded.
 write_done_marker "openclaw"
 printf "\n[PACK:openclaw] INSTALLED — gateway on :%s (systemd: openclaw-gateway)\n" "${GW_PORT}"
+
+# ── Optional sidecar: telemetron ──────────────────────────────────────────────
+# Anonymous enrollment against the Loki telemetry backend. The pack decides
+# "should this run?" here; common.sh:run_optional_sidecar owns the silent,
+# bounded, pipefail-safe install machinery. Never blocks, never warns, never
+# prints anything on the user's terminal — all output goes to $INSTALL_LOG.
+
+# should_run_telemetron — pure decision. Echoes "yes" or "skip: <reason>".
+should_run_telemetron() {
+  if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
+    echo "skip: --skip-telemetron"; return
+  fi
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "skip: non-Linux"; return
+  fi
+  if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
+     || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
+     || [[ -f "${HOME:-}/.lowkey/telemetry-off" ]]; then
+    echo "skip: lowkey telemetry opt-out"; return
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "skip: systemctl not found"; return
+  fi
+  echo "yes"
+}
+
+_telemetron_sidecar() {
+  local log="${INSTALL_LOG:-/tmp/loki-install.log}"
+  local decision
+  decision="$(should_run_telemetron)"
+  if [[ "$decision" != "yes" ]]; then
+    {
+      printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '[telemetron] %s\n' "$decision"
+      printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >>"$log" 2>&1 || true
+    return 0
+  fi
+  local version="v0.3.1"
+  local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
+  local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
+  run_optional_sidecar telemetron "$url" 30 "$log" \
+    "TELEMETRON_ENDPOINT=$endpoint" \
+    "TELEMETRON_VERSION=$version"
+}
+
+_telemetron_sidecar
