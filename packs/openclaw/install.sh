@@ -31,6 +31,7 @@ PACK_ARG_LITELLM_URL="$(pack_config_get litellm_url "")"
 PACK_ARG_LITELLM_KEY="$(pack_config_get litellm_key "")"
 PACK_ARG_LITELLM_MODEL="$(pack_config_get litellm_model "claude-opus-4-6")"
 PACK_ARG_PROVIDER_KEY="$(pack_config_get provider_key "")"
+PACK_ARG_SKIP_TELEMETRON="$(pack_config_get "skip-telemetron" "false")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -49,6 +50,7 @@ Options:
   --litellm-key    LiteLLM API key  (litellm mode)
   --litellm-model  LiteLLM model ID (litellm mode, default: claude-opus-4-6)
   --provider-key   Anthropic API key (provider-key mode)
+  --skip-telemetron  Skip the telemetron metrics sidecar (default: false)
   --help           Show this help message
 
 Examples:
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
     --litellm-key|--litellm-api-key)     PACK_ARG_LITELLM_KEY="$2";     shift 2 ;;
     --litellm-model)  PACK_ARG_LITELLM_MODEL="$2";   shift 2 ;;
     --provider-key|--provider-api-key)   PACK_ARG_PROVIDER_KEY="$2";    shift 2 ;;
+    --skip-telemetron)                   PACK_ARG_SKIP_TELEMETRON="true"; shift ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
   esac
 done
@@ -238,6 +241,61 @@ else
   warn "Gateway service may not be active yet — check: systemctl --user status openclaw-gateway.service"
 fi
 
+
 # ── Done ──────────────────────────────────────────────────────────────────────
+# Mark the pack done and show the success banner BEFORE optional sidecars.
+# The user should not wait on best-effort work to see that their install
+# succeeded.
 write_done_marker "openclaw"
 printf "\n[PACK:openclaw] INSTALLED — gateway on :%s (systemd: openclaw-gateway)\n" "${GW_PORT}"
+
+# ── Optional sidecar: telemetron ──────────────────────────────────────────────
+# Anonymous enrollment against the Loki telemetry backend. The pack decides
+# "should this run?" here; common.sh:run_optional_sidecar owns the silent,
+# bounded, pipefail-safe install machinery. Never blocks, never warns, never
+# prints anything on the user's terminal — all output goes to $INSTALL_LOG.
+
+# should_run_telemetron — pure decision. Echoes "yes" or "skip: <reason>".
+should_run_telemetron() {
+  if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
+    echo "skip: --skip-telemetron"; return
+  fi
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "skip: non-Linux"; return
+  fi
+  if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
+     || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
+     || [[ -f "${HOME:-}/.lowkey/telemetry-off" ]]; then
+    echo "skip: lowkey telemetry opt-out"; return
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "skip: systemctl not found"; return
+  fi
+  echo "yes"
+}
+
+_telemetron_sidecar() {
+  # Resolve the log path once. Fall back to /dev/null if not writable
+  # so the "never prints on the user's terminal" contract holds even when
+  # INSTALL_LOG points at an unwritable or nonexistent path.
+  local _raw_log="${INSTALL_LOG:-/tmp/loki-install.log}"
+  local log; { >> "$_raw_log"; } 2>/dev/null && log="$_raw_log" || log=/dev/null
+  local decision
+  decision="$(should_run_telemetron)"
+  if [[ "$decision" != "yes" ]]; then
+    {
+      printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '[telemetron] %s\n' "$decision"
+      printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >>"$log" || true
+    return 0
+  fi
+  local version="v0.3.1"
+  local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
+  local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
+  run_optional_sidecar telemetron "$url" 30 "$log" \
+    "TELEMETRON_ENDPOINT=$endpoint" \
+    "TELEMETRON_VERSION=$version"
+}
+
+_telemetron_sidecar

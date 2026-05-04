@@ -87,3 +87,72 @@ pack_banner() {
   printf "${_CLR_CYAN}  [PACK:%s] %s${_CLR_NC}\n" "$name" "$action"
   printf "${_CLR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${_CLR_NC}\n\n"
 }
+
+# run_optional_sidecar — best-effort bootstrap of an optional install-time
+# companion (metrics agent, diagnostics daemon, etc.) with the following
+# hard invariants:
+#
+#   - Silent:  zero bytes on caller's stdout/stderr. Every line (begin,
+#              outcome, transcript of the inner installer, end) goes to
+#              LOG_FILE only.
+#   - Logged:  every outcome writes a tagged `[NAME] ...` line.
+#   - Bounded: wall clock is capped by TIMEOUT_SECS via coreutils `timeout`.
+#   - Piped:   the `curl | bash` pipeline runs under `bash -o pipefail`
+#              so a curl failure cannot be masked by the RHS bash exit code.
+#   - Safe:    returns 0 to the caller under any outcome. The caller's
+#              `set -euo pipefail` is never tripped by a sidecar failure.
+#
+# Usage: run_optional_sidecar NAME URL TIMEOUT_SECS LOG_FILE [KEY=VAL ...]
+#   NAME          human-readable tag, e.g. "telemetron"
+#   URL           HTTPS URL serving the sidecar's install.sh on stdout
+#   TIMEOUT_SECS  outer wall-clock cap, e.g. 30
+#   LOG_FILE      absolute path for outcome + install transcript
+#   KEY=VAL...    env vars exported into the install script
+run_optional_sidecar() {
+  local name="${1:?usage: run_optional_sidecar NAME URL TIMEOUT_SECS LOG_FILE [ENV...]}"
+  local url="${2:?sidecar URL required}"
+  local secs="${3:?sidecar timeout required}"
+  local log="${4:?sidecar log path required}"
+  shift 4
+
+  # Subshell + outer `|| true` ensures nothing in here can propagate
+  # a non-zero exit to the caller — not even a failed exec-redirect.
+  (
+    set +e
+    # Redirect all output to the log. Test writability first so the
+    # "silent" contract holds even if the log path is unwritable or its
+    # parent directory does not exist. The test-open uses a subshell so
+    # any shell diagnostic stays invisible before we commit to a dest.
+    if ( >> "$log" ) 2>/dev/null; then
+      exec >>"$log" 2>&1
+    else
+      exec >/dev/null 2>&1
+    fi
+    printf '\n[%s] begin %s\n' "$name" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '[%s] installing from %s (timeout=%ss)\n' "$name" "$url" "$secs"
+
+    # Inner curl caps budget well under the outer wall-clock so network
+    # hangs return crisply. connect 5s, transfer = outer - 5s.
+    local connect_to=5
+    local max_to=$(( secs > 5 ? secs - 5 : secs ))
+
+    # Positional args (not quote-splicing) so the command reads cleanly.
+    # pipefail must apply to the pipeline, so it's set on the bash -c
+    # subshell, not the outer shell.
+    timeout "$secs" env "$@" bash -o pipefail -c '
+      curl --fail --silent --show-error --location \
+        --connect-timeout "$2" --max-time "$3" \
+        "$1" \
+      | bash
+    ' _ "$url" "$connect_to" "$max_to"
+    local rc=$?
+
+    case "$rc" in
+      0)          printf '[%s] installed and enrolled\n' "$name" ;;
+      124|137|143) printf '[%s] install aborted: %ss outer timeout reached (rc=%s)\n' "$name" "$secs" "$rc" ;;
+      *)          printf '[%s] install failed (rc=%s); see log above\n' "$name" "$rc" ;;
+    esac
+    printf '[%s] end %s\n' "$name" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    exit 0
+  ) || true
+}
