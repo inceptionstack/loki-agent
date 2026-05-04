@@ -123,6 +123,7 @@ LITELLM_URL=""
 LITELLM_KEY=""
 LITELLM_MODEL=""
 PROVIDER_KEY=""
+SKIP_TELEMETRON="false"
 # Pack-specific: optional Secrets Manager id/arn to resolve at install time
 # into KIRO_API_KEY inside the kiro-cli pack (and potentially others later).
 # The raw key is NEVER written to CFN state, UserData, or bootstrap logs.
@@ -194,6 +195,10 @@ while [[ $# -gt 0 ]]; do
       PROVIDER_KEY="$2"
       shift 2
       ;;
+    --skip-telemetron)
+      SKIP_TELEMETRON="true"
+      shift
+      ;;
     --kiro-from-secret)
       [[ $# -gt 1 ]] || { echo "ERROR: --kiro-from-secret requires a value" >&2; exit 1; }
       KIRO_FROM_SECRET="$2"
@@ -236,12 +241,14 @@ jq -n \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_key "$PROVIDER_KEY" \
   --arg from_secret "$KIRO_FROM_SECRET" \
+  --arg skip_telemetron "$SKIP_TELEMETRON" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
     hermes_model:$hermes_model, litellm_url:$litellm_url,
     litellm_key:$litellm_key, litellm_model:$litellm_model,
     provider_key:$provider_key,
-    "from-secret":$from_secret}' > "${PACK_CONFIG}"
+    "from-secret":$from_secret,
+    "skip-telemetron":$skip_telemetron}' > "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"
 chown ec2-user:ec2-user "${PACK_CONFIG}"
 export PACK_CONFIG
