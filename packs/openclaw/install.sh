@@ -290,7 +290,7 @@ _telemetron_sidecar() {
     } >>"$log" || true
     return 0
   fi
-  local version="v0.3.1"
+  local version="v0.3.3"
   local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
   local enroll_endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/enroll"
   local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
