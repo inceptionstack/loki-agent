@@ -599,7 +599,7 @@ for dep in "${DEPS[@]}"; do
   fi
   info "Installing dependency: ${dep}"
   # Run as ec2-user with mise/node on PATH; PACK_CONFIG is auto-detected by packs
-  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
+  sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LOWKEY_TELEMETRY,DO_NOT_TRACK bash -c '
     export PATH="/home/ec2-user/.local/bin:$PATH"
     eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
     NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
@@ -619,7 +619,7 @@ if [[ ! -f "$PACK_INSTALL" ]]; then
   exit 1
 fi
 info "Installing pack: ${PACK_NAME}"
-sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS bash -c '
+sudo -u ec2-user --preserve-env=PACK_CONFIG,AWS_DEFAULT_REGION,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LOWKEY_TELEMETRY,DO_NOT_TRACK bash -c '
   export PATH="/home/ec2-user/.local/bin:$PATH"
   eval "$(/home/ec2-user/.local/bin/mise activate bash 2>/dev/null)" 2>/dev/null || true
   NODE_PREFIX=$(npm prefix -g 2>/dev/null || true)
