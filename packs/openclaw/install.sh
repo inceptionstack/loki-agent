@@ -275,7 +275,11 @@ should_run_telemetron() {
 }
 
 _telemetron_sidecar() {
-  local log="${INSTALL_LOG:-/tmp/loki-install.log}"
+  # Resolve the log path once. Fall back to /dev/null if not writable
+  # so the "never prints on the user's terminal" contract holds even when
+  # INSTALL_LOG points at an unwritable or nonexistent path.
+  local _raw_log="${INSTALL_LOG:-/tmp/loki-install.log}"
+  local log; { >> "$_raw_log"; } 2>/dev/null && log="$_raw_log" || log=/dev/null
   local decision
   decision="$(should_run_telemetron)"
   if [[ "$decision" != "yes" ]]; then
@@ -283,7 +287,7 @@ _telemetron_sidecar() {
       printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       printf '[telemetron] %s\n' "$decision"
       printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    } >>"$log" 2>&1 || true
+    } >>"$log" || true
     return 0
   fi
   local version="v0.3.1"

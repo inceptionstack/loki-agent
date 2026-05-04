@@ -119,7 +119,15 @@ run_optional_sidecar() {
   # a non-zero exit to the caller — not even a failed exec-redirect.
   (
     set +e
-    exec >>"$log" 2>&1
+    # Redirect all output to the log. Test writability first so the
+    # "silent" contract holds even if the log path is unwritable or its
+    # parent directory does not exist. The test-open uses a subshell so
+    # any shell diagnostic stays invisible before we commit to a dest.
+    if ( >> "$log" ) 2>/dev/null; then
+      exec >>"$log" 2>&1
+    else
+      exec >/dev/null 2>&1
+    fi
     printf '\n[%s] begin %s\n' "$name" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf '[%s] installing from %s (timeout=%ss)\n' "$name" "$url" "$secs"
 

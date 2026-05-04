@@ -277,6 +277,42 @@ sc_assert_sentinel "happy path"
 sc_assert_log      "happy path" "INNER_INSTALL_RAN"
 sc_assert_log      "happy path" "[telemetron] installed and enrolled"
 
+
+
+# I1b. Unwritable log — "silent" contract holds even when log cannot be opened.
+# Engine must fall back to /dev/null, not leak to caller's stdout/stderr.
+D="${SC_TMP}/unwritable"; mk_sc_path "$D"
+rm -f "${D}/curl"
+cat > "${D}/curl" <<'CURL'
+#!/bin/sh
+exit 7
+CURL
+chmod +x "${D}/curl"
+sc_run "$D" telemetron https://example/x.sh 3 # uses SC_LOG from sc_run = nonexistent path
+
+# Override SC_LOG to a path with nonexistent parent, then run
+SC_LOG="${SC_TMP}/no/such/dir/log.txt"
+SC_STDOUT="${SC_TMP}/out_unwr"; SC_STDERR="${SC_TMP}/err_unwr"; : > "$SC_STDOUT"; : > "$SC_STDERR"
+set +e
+env -i PATH="${D}" HOME="${SC_TMP}/home" BASH_ENV= ENV= \
+  bash --noprofile --norc -c "
+    set -euo pipefail
+    source \"${COMMON}\"
+    run_optional_sidecar telemetron https://example/x.sh 3 \"${SC_TMP}/no/such/dir/log.txt\" FOO=bar
+    echo AFTER_OK
+  " >"$SC_STDOUT" 2>"$SC_STDERR"
+set -e
+leak_out="$(grep -v '^AFTER_OK$' "$SC_STDOUT" || true)"
+[[ -z "$leak_out" ]] \
+  && pass "unwritable log (engine): zero stdout" \
+  || fail "unwritable log (engine): stdout leaked: $(printf %q "$leak_out")"
+[[ ! -s "$SC_STDERR" ]] \
+  && pass "unwritable log (engine): zero stderr" \
+  || fail "unwritable log (engine): stderr leaked: $(printf %q "$(cat "$SC_STDERR")")"
+grep -q '^AFTER_OK$' "$SC_STDOUT" \
+  && pass "unwritable log (engine): set -euo pipefail not tripped" \
+  || fail "unwritable log (engine): caller aborted"
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 header "Summary"
 printf "  ${GREEN}Passed:${NC}  %d\n" "$PASS"
