@@ -297,6 +297,29 @@ _telemetron_sidecar() {
   # session_dir: telemetron auto-detects from $HOME, but under sudo $HOME
   # becomes /root. Point it at the real ec2-user openclaw session tree.
   local session_dir="${HOME:-/home/ec2-user}/.openclaw/agents/main/sessions"
+
+  # Detect tier from AWS account email. Internal = @amazon.com.
+  # The email stays local — only the tier string is written to the info file.
+  # organizations:DescribeAccount works with AdminAccess (builder profile),
+  # which all internal accounts use. Customer accounts with limited IAM
+  # fail gracefully → tier stays "production" (correct default).
+  local tier="production"
+  local acct_email=""
+  acct_email=$(aws organizations describe-account \
+    --account-id "${ACCOUNT_ID:-$(aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
+    --query 'Account.Email' --output text 2>/dev/null) || true
+  if [[ "$acct_email" == *@amazon.com ]]; then
+    tier="internal"
+  fi
+
+  # Write tier file for telemetron (and future tools) to read.
+  # Both .lowkey and .loki paths in case we rename.
+  local home="${HOME:-/home/ec2-user}"
+  for dir in "$home/.lowkey" "$home/.loki"; do
+    mkdir -p "$dir" 2>/dev/null || true
+    printf '%s\n' "$tier" > "$dir/tier" 2>/dev/null || true
+  done
+
   run_optional_sidecar telemetron "$url" 60 "$log" \
     "TELEMETRON_ENDPOINT=$endpoint" \
     "TELEMETRON_ENROLL_ENDPOINT=$enroll_endpoint" \
