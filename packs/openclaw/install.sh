@@ -292,9 +292,11 @@ _telemetron_sidecar() {
   fi
   local version="v0.3.1"
   local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
+  local enroll_endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/enroll"
   local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
   run_optional_sidecar telemetron "$url" 60 "$log" \
     "TELEMETRON_ENDPOINT=$endpoint" \
+    "TELEMETRON_ENROLL_ENDPOINT=$enroll_endpoint" \
     "TELEMETRON_VERSION=$version" \
     "TELEMETRON_PREFIX=/usr/local" \
     "SIDECAR_USE_SUDO=1"
