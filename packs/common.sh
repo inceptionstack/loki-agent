@@ -108,6 +108,12 @@ pack_banner() {
 #   TIMEOUT_SECS  outer wall-clock cap, e.g. 30
 #   LOG_FILE      absolute path for outcome + install transcript
 #   KEY=VAL...    env vars exported into the install script
+#
+# If the env var SIDECAR_USE_SUDO=1 is present in the KEY=VAL list,
+# the inner `curl | bash` pipeline runs under `sudo -E` so that sidecar
+# installers requiring root (e.g. telemetron setup writing /etc/* and
+# installing systemd units) succeed in the bootstrap context where the
+# pack install script runs as ec2-user with passwordless sudo.
 run_optional_sidecar() {
   local name="${1:?usage: run_optional_sidecar NAME URL TIMEOUT_SECS LOG_FILE [ENV...]}"
   local url="${2:?sidecar URL required}"
@@ -139,11 +145,28 @@ run_optional_sidecar() {
     # Positional args (not quote-splicing) so the command reads cleanly.
     # pipefail must apply to the pipeline, so it's set on the bash -c
     # subshell, not the outer shell.
-    timeout "$secs" env "$@" bash -o pipefail -c '
+    # Check if the caller requested privileged execution via SIDECAR_USE_SUDO=1.
+    # Filter it out of the env vars passed to the inner script — it's a
+    # control flag, not something the sidecar installer needs.
+    local use_sudo=0
+    local env_args=()
+    for _arg in "$@"; do
+      case "$_arg" in
+        SIDECAR_USE_SUDO=1) use_sudo=1 ;;
+        *) env_args+=("$_arg") ;;
+      esac
+    done
+
+    local sudo_prefix=""
+    if [[ "$use_sudo" -eq 1 ]] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+      sudo_prefix="sudo -n -E"
+    fi
+
+    timeout "$secs" env "${env_args[@]}" bash -o pipefail -c '
       curl --fail --silent --show-error --location \
         --connect-timeout "$2" --max-time "$3" \
         "$1" \
-      | bash
+      | '"${sudo_prefix}"' bash
     ' _ "$url" "$connect_to" "$max_to"
     local rc=$?
 
