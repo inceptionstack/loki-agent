@@ -301,7 +301,7 @@ _telemetron_sidecar() {
   # Detect tier from AWS account email. Internal = @amazon.com.
   # The email stays local — only the tier string is written to the tier file.
   # Bounded to 5s total to avoid hanging the installer on broken AWS connectivity.
-  local tier="production"
+  local tier="external"
   local acct_email=""
   acct_email=$(timeout 5 aws organizations describe-account \
     --account-id "${ACCOUNT_ID:-$(timeout 3 aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
