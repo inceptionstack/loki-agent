@@ -704,6 +704,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       KIRO_FROM_SECRET="$2"; shift 2 ;;
+    --telegram-bot-token)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --telegram-bot-token requires a token value" >&2
+        exit 1
+      fi
+      TELEGRAM_BOT_TOKEN_RAW="$2"; shift 2 ;;
     --telegram-bot-token-secret)
       if [[ $# -lt 2 || "$2" == --* ]]; then
         echo -e "\033[0;31m✗\033[0m --telegram-bot-token-secret requires a Secrets Manager id or arn" >&2
@@ -738,9 +744,11 @@ Options:
   --method <cfn|terraform|tf>    Deploy method (default: cfn)
   --kiro-from-secret <id|arn>    Secrets Manager id/arn for Kiro API key
                                  (kiro-cli headless mode)
+  --telegram-bot-token <token>  Telegram bot token (roundhouse pack;
+                                 saved to Secrets Manager automatically)
   --telegram-bot-token-secret <id|arn>
                                  Secrets Manager id/arn for Telegram bot token
-                                 (roundhouse pack)
+                                 (roundhouse pack, advanced/pre-created)
   --telegram-user <username>     Telegram username for bot pairing
                                  (roundhouse pack, without @)
   --debug-in-repo                Dev-only: run installer from cwd
@@ -906,6 +914,17 @@ prompt() {
   fi
   local value
   _gum_or_die value $GUM input --header "$text" --value "$default" --placeholder "$text" || value="$default"
+  printf -v "$var" '%s' "${value:-$default}"
+}
+
+prompt_secret() {
+  local text="$1" var="$2" default="${3:-}"
+  if [[ "$AUTO_YES" == true && -n "$default" ]]; then
+    printf -v "$var" '%s' "$default"
+    return
+  fi
+  local value
+  _gum_or_die value $GUM input --password --header "$text" --placeholder "$text" || value="$default"
   printf -v "$var" '%s' "${value:-$default}"
 }
 
@@ -2985,14 +3004,42 @@ run_config_and_review() {
   # Pack-specific parameter collection (after build_deploy_params so we can amend)
   if [[ "${PACK_NAME:-}" == "roundhouse" ]]; then
     if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
-      echo ""
-      echo -e "  ${BOLD}Roundhouse requires a Telegram bot token.${NC}"
-      echo -e "  Store it in AWS Secrets Manager and provide the secret id/arn."
-      echo ""
-      prompt "Secrets Manager id for Telegram bot token" TELEGRAM_BOT_TOKEN_SECRET ""
-      if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
-        fail "Telegram bot token secret is required for roundhouse pack"
+      local rh_bot_token="${TELEGRAM_BOT_TOKEN_RAW:-}"
+      if [[ -z "$rh_bot_token" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Roundhouse connects to Telegram.${NC}"
+        echo -e "  Create a bot via @BotFather and paste the token below."
+        echo ""
+        prompt_secret "Telegram bot token" rh_bot_token ""
       fi
+      if [[ -z "$rh_bot_token" ]]; then
+        fail "Telegram bot token is required for roundhouse pack"
+      fi
+      # Validate token format
+      if [[ ! "$rh_bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        fail "Invalid Telegram bot token format (expected: 123456:ABC-DEF...)"
+      fi
+      # Save to Secrets Manager with auto-generated name
+      local secret_name="/lowkey/${ENV_NAME}/telegram-bot-token"
+      local sm_err=""
+      info "Storing bot token in Secrets Manager: ${secret_name}"
+      # Restore if in pending-deletion state
+      aws secretsmanager restore-secret --secret-id "$secret_name" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+      if sm_err=$(aws secretsmanager create-secret \
+        --name "$secret_name" \
+        --secret-string "$rh_bot_token" \
+        --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
+        --region "$DEPLOY_REGION" 2>&1); then
+        ok "Token saved to Secrets Manager"
+      elif sm_err=$(aws secretsmanager put-secret-value \
+        --secret-id "$secret_name" \
+        --secret-string "$rh_bot_token" \
+        --region "$DEPLOY_REGION" 2>&1); then
+        ok "Token updated in Secrets Manager"
+      else
+        fail "Failed to save bot token to Secrets Manager: ${sm_err}"
+      fi
+      TELEGRAM_BOT_TOKEN_SECRET="$secret_name"
     fi
     if [[ -z "${TELEGRAM_USER:-}" ]]; then
       prompt "Telegram username (without @)" TELEGRAM_USER ""
