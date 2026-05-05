@@ -3004,42 +3004,24 @@ run_config_and_review() {
   # Pack-specific parameter collection (after build_deploy_params so we can amend)
   if [[ "${PACK_NAME:-}" == "roundhouse" ]]; then
     if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
-      local rh_bot_token="${TELEGRAM_BOT_TOKEN_RAW:-}"
-      if [[ -z "$rh_bot_token" ]]; then
+      _RH_BOT_TOKEN="${TELEGRAM_BOT_TOKEN_RAW:-}"
+      if [[ -z "$_RH_BOT_TOKEN" ]]; then
         echo ""
         echo -e "  ${BOLD}Roundhouse connects to Telegram.${NC}"
         echo -e "  Create a bot via @BotFather and paste the token below."
         echo ""
-        prompt_secret "Telegram bot token" rh_bot_token ""
+        prompt_secret "Telegram bot token" _RH_BOT_TOKEN ""
       fi
-      if [[ -z "$rh_bot_token" ]]; then
+      if [[ -z "$_RH_BOT_TOKEN" ]]; then
         fail "Telegram bot token is required for roundhouse pack"
       fi
       # Validate token format
-      if [[ ! "$rh_bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+      if [[ ! "$_RH_BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
         fail "Invalid Telegram bot token format (expected: 123456:ABC-DEF...)"
       fi
-      # Save to Secrets Manager with auto-generated name
-      local secret_name="/lowkey/${ENV_NAME}/telegram-bot-token"
-      local sm_err=""
-      info "Storing bot token in Secrets Manager: ${secret_name}"
-      # Restore if in pending-deletion state
-      aws secretsmanager restore-secret --secret-id "$secret_name" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
-      if sm_err=$(aws secretsmanager create-secret \
-        --name "$secret_name" \
-        --secret-string "$rh_bot_token" \
-        --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
-        --region "$DEPLOY_REGION" 2>&1); then
-        ok "Token saved to Secrets Manager"
-      elif sm_err=$(aws secretsmanager put-secret-value \
-        --secret-id "$secret_name" \
-        --secret-string "$rh_bot_token" \
-        --region "$DEPLOY_REGION" 2>&1); then
-        ok "Token updated in Secrets Manager"
-      else
-        fail "Failed to save bot token to Secrets Manager: ${sm_err}"
-      fi
-      TELEGRAM_BOT_TOKEN_SECRET="$secret_name"
+      # Secret name determined now; actual write deferred until after user confirms
+      _RH_SECRET_NAME="/lowkey/${ENV_NAME}/telegram-bot-token"
+      TELEGRAM_BOT_TOKEN_SECRET="$_RH_SECRET_NAME"
     fi
     if [[ -z "${TELEGRAM_USER:-}" ]]; then
       prompt "Telegram username (without @)" TELEGRAM_USER ""
@@ -3087,6 +3069,35 @@ main() {
   run_config_and_review  # steps 2-4 (config → review)
   _telem_pack_selected 2>/dev/null || true
   _telem_method_selected 2>/dev/null || true
+
+  # Roundhouse: save bot token to Secrets Manager (deferred until after user confirmation)
+  if [[ -n "${_RH_BOT_TOKEN:-}" && -n "${_RH_SECRET_NAME:-}" ]]; then
+    info "Storing bot token in Secrets Manager: ${_RH_SECRET_NAME}"
+    local token_file
+    token_file=$(mktemp /tmp/lowkey-rh-token.XXXXXX)
+    chmod 600 "$token_file"
+    printf '%s' "$_RH_BOT_TOKEN" > "$token_file"
+    # Restore if in pending-deletion state
+    aws secretsmanager restore-secret --secret-id "$_RH_SECRET_NAME" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    local sm_err=""
+    if sm_err=$(aws secretsmanager create-secret \
+      --name "$_RH_SECRET_NAME" \
+      --secret-string "file://${token_file}" \
+      --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
+      --region "$DEPLOY_REGION" 2>&1); then
+      ok "Token saved to Secrets Manager"
+    elif sm_err=$(aws secretsmanager put-secret-value \
+      --secret-id "$_RH_SECRET_NAME" \
+      --secret-string "file://${token_file}" \
+      --region "$DEPLOY_REGION" 2>&1); then
+      ok "Token updated in Secrets Manager"
+    else
+      rm -f "$token_file"
+      fail "Failed to save bot token to Secrets Manager: ${sm_err}"
+    fi
+    rm -f "$token_file"
+    unset _RH_BOT_TOKEN
+  fi
 
   # Console deploy exits early (no clone, no bootstrap wait)
   if [[ "$DEPLOY_METHOD" == "$DEPLOY_CFN_CONSOLE" ]]; then
