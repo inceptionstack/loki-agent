@@ -705,11 +705,37 @@ while [[ $# -gt 0 ]]; do
       fi
       KIRO_FROM_SECRET="$2"; shift 2 ;;
     --telegram-bot-token)
+      # REMOVED: passing the raw token as a CLI value leaked it through ps/proc
+      # and shell history / CI logs. Use one of these instead:
+      #   LOWKEY_TELEGRAM_BOT_TOKEN=... (env var)
+      #   --telegram-bot-token-file <path>  (locked file, one line)
+      #   --telegram-bot-token-stdin        (read token from stdin)
+      #   --telegram-bot-token-secret <id|arn>  (pre-existing SM secret)
+      echo -e "\033[0;31m✗\033[0m --telegram-bot-token <value> is no longer accepted (token in argv is insecure)" >&2
+      echo "    Use one of: LOWKEY_TELEGRAM_BOT_TOKEN env var," >&2
+      echo "               --telegram-bot-token-file <path>," >&2
+      echo "               --telegram-bot-token-stdin (read from stdin), or" >&2
+      echo "               --telegram-bot-token-secret <id|arn> (pre-existing secret)" >&2
+      exit 1 ;;
+    --telegram-bot-token-file)
       if [[ $# -lt 2 || "$2" == --* ]]; then
-        echo -e "\033[0;31m✗\033[0m --telegram-bot-token requires a token value" >&2
+        echo -e "\033[0;31m✗\033[0m --telegram-bot-token-file requires a file path" >&2
         exit 1
       fi
-      TELEGRAM_BOT_TOKEN_RAW="$2"; shift 2 ;;
+      if [[ ! -r "$2" ]]; then
+        echo -e "\033[0;31m✗\033[0m --telegram-bot-token-file: cannot read '$2'" >&2
+        exit 1
+      fi
+      # Trim trailing newline; do not export the value.
+      TELEGRAM_BOT_TOKEN_RAW=$(tr -d '\n' < "$2")
+      shift 2 ;;
+    --telegram-bot-token-stdin)
+      if [[ -t 0 ]]; then
+        echo -e "\033[0;31m✗\033[0m --telegram-bot-token-stdin: stdin is a TTY; pipe the token in" >&2
+        exit 1
+      fi
+      TELEGRAM_BOT_TOKEN_RAW=$(tr -d '\n')
+      shift ;;
     --telegram-bot-token-secret)
       if [[ $# -lt 2 || "$2" == --* ]]; then
         echo -e "\033[0;31m✗\033[0m --telegram-bot-token-secret requires a Secrets Manager id or arn" >&2
@@ -744,11 +770,16 @@ Options:
   --method <cfn|terraform|tf>    Deploy method (default: cfn)
   --kiro-from-secret <id|arn>    Secrets Manager id/arn for Kiro API key
                                  (kiro-cli headless mode)
-  --telegram-bot-token <token>  Telegram bot token (roundhouse pack;
-                                 saved to Secrets Manager automatically)
+  --telegram-bot-token-file <path>
+                                 Read Telegram bot token from a local file
+                                 (roundhouse pack; file should be chmod 600)
+  --telegram-bot-token-stdin     Read Telegram bot token from stdin
+                                 (roundhouse pack; use with pipe)
   --telegram-bot-token-secret <id|arn>
                                  Secrets Manager id/arn for Telegram bot token
                                  (roundhouse pack, advanced/pre-created)
+                                 Env: LOWKEY_TELEGRAM_BOT_TOKEN (CI secret store;
+                                 never pass tokens as CLI argv)
   --telegram-user <username>     Telegram username for bot pairing
                                  (roundhouse pack, without @)
   --debug-in-repo                Dev-only: run installer from cwd
@@ -3004,7 +3035,12 @@ run_config_and_review() {
   # Pack-specific parameter collection (after build_deploy_params so we can amend)
   if [[ "${PACK_NAME:-}" == "roundhouse" ]]; then
     if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
-      local rh_bot_token="${TELEGRAM_BOT_TOKEN_RAW:-}"
+      # Accept the raw token from, in order of precedence:
+      #   1) TELEGRAM_BOT_TOKEN_RAW (already set by --telegram-bot-token-file
+      #      or --telegram-bot-token-stdin above),
+      #   2) LOWKEY_TELEGRAM_BOT_TOKEN env var (CI secret store path),
+      #   3) interactive prompt_secret.
+      local rh_bot_token="${TELEGRAM_BOT_TOKEN_RAW:-${LOWKEY_TELEGRAM_BOT_TOKEN:-}}"
       if [[ -z "$rh_bot_token" ]]; then
         echo ""
         echo -e "  ${BOLD}Roundhouse connects to Telegram.${NC}"
