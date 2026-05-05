@@ -3019,26 +3019,38 @@ run_config_and_review() {
       if [[ ! "$rh_bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
         fail "Invalid Telegram bot token format (expected: 123456:ABC-DEF...)"
       fi
-      # Save to Secrets Manager with auto-generated name
+      # Save to Secrets Manager with auto-generated name.
+      # Avoid passing the token as an argv value — 'ps'/proc would expose it.
+      # Write to a locked temp file and pass via file:// instead.
       local secret_name="/lowkey/${ENV_NAME}/telegram-bot-token"
       local sm_err=""
+      local token_file
+      token_file=$(mktemp /tmp/lowkey-rh-token.XXXXXX)
+      # Restrict before writing (umask race-safe via explicit chmod).
+      chmod 600 "$token_file"
+      printf '%s' "$rh_bot_token" > "$token_file"
+      # Clean up on any exit from this function path.
+      trap 'rm -f "$token_file"' RETURN
       info "Storing bot token in Secrets Manager: ${secret_name}"
       # Restore if in pending-deletion state
       aws secretsmanager restore-secret --secret-id "$secret_name" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
       if sm_err=$(aws secretsmanager create-secret \
         --name "$secret_name" \
-        --secret-string "$rh_bot_token" \
+        --secret-string "file://${token_file}" \
         --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
         --region "$DEPLOY_REGION" 2>&1); then
         ok "Token saved to Secrets Manager"
       elif sm_err=$(aws secretsmanager put-secret-value \
         --secret-id "$secret_name" \
-        --secret-string "$rh_bot_token" \
+        --secret-string "file://${token_file}" \
         --region "$DEPLOY_REGION" 2>&1); then
         ok "Token updated in Secrets Manager"
       else
+        rm -f "$token_file"
         fail "Failed to save bot token to Secrets Manager: ${sm_err}"
       fi
+      rm -f "$token_file"
+      trap - RETURN
       TELEGRAM_BOT_TOKEN_SECRET="$secret_name"
     fi
     if [[ -z "${TELEGRAM_USER:-}" ]]; then
