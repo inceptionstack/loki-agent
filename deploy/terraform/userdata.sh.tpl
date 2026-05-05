@@ -11,6 +11,8 @@ export LITELLM_API_KEY="${litellm_api_key}"
 export LITELLM_MODEL="${litellm_model}"
 export PROVIDER_API_KEY="${provider_api_key}"
 export KIRO_FROM_SECRET="${kiro_from_secret}"
+export TELEGRAM_BOT_TOKEN_SECRET="${telegram_bot_token_secret}"
+export TELEGRAM_USER="${telegram_user}"
 export PACK_NAME="${pack_name}"
 export PROFILE_NAME="${profile_name}"
 
@@ -47,4 +49,6 @@ bash /tmp/loki-agent/deploy/bootstrap.sh \
   --litellm-api-key "$LITELLM_API_KEY" \
   --litellm-model "$LITELLM_MODEL" \
   --provider-api-key "$PROVIDER_API_KEY" \
-  --kiro-from-secret "$KIRO_FROM_SECRET"
+  --kiro-from-secret "$KIRO_FROM_SECRET" \
+  --telegram-bot-token-secret "$TELEGRAM_BOT_TOKEN_SECRET" \
+  --telegram-user "$TELEGRAM_USER"

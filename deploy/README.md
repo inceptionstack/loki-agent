@@ -39,7 +39,7 @@ All three methods create the same architecture:
 | `BedrockRegion` | `us-east-1` | Region for Bedrock API calls |
 | `SSHAllowedCidr` | `127.0.0.1/32` | SSH access CIDR (disabled by default — use SSM) |
 | `LiteLLMBaseUrl` | *(empty)* | LiteLLM proxy URL (only when `ModelMode=litellm`) |
-| `PackName` | `openclaw` | Agent pack to deploy (`openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw`, `nemoclaw`, `kiro-cli`, `codex-cli`) |
+| `PackName` | `openclaw` | Agent pack to deploy (`openclaw`, `claude-code`, `hermes`, `pi`, `ironclaw`, `nemoclaw`, `kiro-cli`, `codex-cli`, `roundhouse`) |
 | `EnableSecurityHub` | `true` | AWS Security Hub aggregates security findings. (~$0.001 per finding/month) |
 | `EnableGuardDuty` | `true` | Amazon GuardDuty threat detection via CloudTrail, VPC Flow Logs, DNS. (~$4/million events) |
 | `EnableInspector` | `true` | Amazon Inspector vulnerability scanning. (~$0.01-$1.25 per resource/month) |

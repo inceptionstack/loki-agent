@@ -617,21 +617,23 @@ resource "aws_instance" "main" {
   }
 
   user_data_base64 = base64encode(templatefile("${path.module}/userdata.sh.tpl", {
-    acct_id          = data.aws_caller_identity.current.account_id
-    region           = data.aws_region.current.name
-    environment_name = var.environment_name
-    pack_name        = var.pack_name
-    profile_name     = var.profile_name
-    default_model    = var.default_model
-    bedrock_region   = var.bedrock_region
-    gw_port          = var.openclaw_gateway_port
-    model_mode       = var.model_mode
-    litellm_base_url = var.litellm_base_url
-    litellm_api_key  = var.litellm_api_key
-    litellm_model    = var.litellm_model
-    provider_api_key = var.provider_api_key
-    kiro_from_secret = var.kiro_from_secret
-    repo_branch      = var.repo_branch
+    acct_id                   = data.aws_caller_identity.current.account_id
+    region                    = data.aws_region.current.name
+    environment_name          = var.environment_name
+    pack_name                 = var.pack_name
+    profile_name              = var.profile_name
+    default_model             = var.default_model
+    bedrock_region            = var.bedrock_region
+    gw_port                   = var.openclaw_gateway_port
+    model_mode                = var.model_mode
+    litellm_base_url          = var.litellm_base_url
+    litellm_api_key           = var.litellm_api_key
+    litellm_model             = var.litellm_model
+    provider_api_key          = var.provider_api_key
+    kiro_from_secret          = var.kiro_from_secret
+    telegram_bot_token_secret = var.telegram_bot_token_secret
+    telegram_user             = var.telegram_user
+    repo_branch               = var.repo_branch
   }))
 
   tags = merge(local.loki_tags, {
