@@ -23,6 +23,9 @@ Metadata:
           - LiteLLMApiKey
           - LiteLLMModel
           - ProviderApiKey
+          - KiroFromSecret
+          - TelegramBotTokenSecret
+          - TelegramUser
           - RequestQuotaIncreases
       - Label:
           default: "🛡️ Security Services"
@@ -123,7 +126,8 @@ Parameters:
       - nemoclaw
       - kiro-cli
       - codex-cli
-    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'hermes' is the NousResearch CLI agent (lighter). 'pi', 'ironclaw', 'kiro-cli', and 'codex-cli' are experimental."
+      - roundhouse
+    Description: "Agent pack to deploy. 'openclaw' is the stateful AI agent with 24/7 gateway (recommended). 'roundhouse' is the pi-based agent with Telegram. 'hermes' is the NousResearch CLI agent (lighter). 'pi', 'ironclaw', 'kiro-cli', and 'codex-cli' are experimental."
 
   ProfileName:
     Type: String
@@ -252,6 +256,16 @@ Parameters:
     Type: String
     Default: ''
     Description: "AWS Secrets Manager secret id/arn whose SecretString is the Kiro API key (kiro-cli pack only, headless mode). The raw key is NOT stored in this template — the instance resolves the secret at install time via its IAM role."
+
+  TelegramBotTokenSecret:
+    Type: String
+    Default: ''
+    Description: "AWS Secrets Manager secret id/arn containing the Telegram bot token (roundhouse pack only). The instance resolves the secret at install time via its IAM role."
+
+  TelegramUser:
+    Type: String
+    Default: ''
+    Description: "Telegram username for bot pairing (roundhouse pack only, without @ prefix)."
 
   EnableBedrockForm:
     Type: String
@@ -1087,6 +1101,8 @@ Resources:
           export LITELLM_MODEL="${LiteLLMModel}"
           export PROVIDER_API_KEY="${ProviderApiKey}"
           export KIRO_FROM_SECRET="${KiroFromSecret}"
+          export TELEGRAM_BOT_TOKEN_SECRET="${TelegramBotTokenSecret}"
+          export TELEGRAM_USER="${TelegramUser}"
           export PACK_NAME="${PackName}"
           export PROFILE_NAME="${ProfileName}"
           # Publish failure to SSM and signal CFN on any error
@@ -1128,7 +1144,9 @@ Resources:
             --litellm-api-key "$LITELLM_API_KEY" \
             --litellm-model "$LITELLM_MODEL" \
             --provider-api-key "$PROVIDER_API_KEY" \
-            --kiro-from-secret "$KIRO_FROM_SECRET"
+            --kiro-from-secret "$KIRO_FROM_SECRET" \
+            --telegram-bot-token-secret "$TELEGRAM_BOT_TOKEN_SECRET" \
+            --telegram-user "$TELEGRAM_USER"
           # Signal CFN success — defense-in-depth: bootstrap.sh also signals,
           # but this catches edge cases where bootstrap.sh signal fails silently.
           # CFN ignores duplicate signals, so double-fire is safe.

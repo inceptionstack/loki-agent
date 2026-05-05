@@ -1,0 +1,38 @@
+name: roundhouse
+version: "1.0.0"
+type: agent
+description: "Roundhouse — AI coding agent with Telegram channel (pi-based)"
+
+deps: []
+
+requirements:
+  arch:
+    - arm64
+    - amd64
+  os:
+    - al2023
+    - ubuntu2204
+  min_instance_type: t4g.medium
+
+params:
+  - name: telegram_bot_token_secret
+    description: "AWS Secrets Manager secret id/arn containing the Telegram bot token"
+    default: ""
+    required: true
+  - name: telegram_user
+    description: "Telegram username for bot pairing (without @ prefix)"
+    default: ""
+    required: true
+  - name: model
+    description: "AI model ID for the agent"
+    default: "us.anthropic.claude-opus-4-6-v1"
+
+health_check:
+  command: "roundhouse --version"
+  timeout: 10
+
+provides:
+  commands:
+    - roundhouse
+  services:
+    - roundhouse.service

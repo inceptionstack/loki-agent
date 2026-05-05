@@ -128,6 +128,8 @@ SKIP_TELEMETRON="false"
 # into KIRO_API_KEY inside the kiro-cli pack (and potentially others later).
 # The raw key is NEVER written to CFN state, UserData, or bootstrap logs.
 KIRO_FROM_SECRET=""
+TELEGRAM_BOT_TOKEN_SECRET="${TELEGRAM_BOT_TOKEN_SECRET:-}"
+TELEGRAM_USER="${TELEGRAM_USER:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -204,6 +206,16 @@ while [[ $# -gt 0 ]]; do
       KIRO_FROM_SECRET="$2"
       shift 2
       ;;
+    --telegram-bot-token-secret)
+      [[ $# -gt 1 ]] || { echo "ERROR: --telegram-bot-token-secret requires a value" >&2; exit 1; }
+      TELEGRAM_BOT_TOKEN_SECRET="$2"
+      shift 2
+      ;;
+    --telegram-user)
+      [[ $# -gt 1 ]] || { echo "ERROR: --telegram-user requires a value" >&2; exit 1; }
+      TELEGRAM_USER="$2"
+      shift 2
+      ;;
     --*)
       # Skip unknown options (with optional value)
       if [[ $# -gt 1 ]] && [[ "$2" != --* ]]; then
@@ -241,6 +253,8 @@ jq -n \
   --arg litellm_model "$LITELLM_MODEL" \
   --arg provider_key "$PROVIDER_KEY" \
   --arg from_secret "$KIRO_FROM_SECRET" \
+  --arg telegram_bot_token_secret "$TELEGRAM_BOT_TOKEN_SECRET" \
+  --arg telegram_user "$TELEGRAM_USER" \
   --arg skip_telemetron "$SKIP_TELEMETRON" \
   '{pack:$pack, profile:$profile, region:$region, model:$model, gw_port:$gw_port,
     model_mode:$model_mode, bedrockify_port:$bedrockify_port,
@@ -248,6 +262,8 @@ jq -n \
     litellm_key:$litellm_key, litellm_model:$litellm_model,
     provider_key:$provider_key,
     "from-secret":$from_secret,
+    telegram_bot_token_secret:$telegram_bot_token_secret,
+    telegram_user:$telegram_user,
     "skip-telemetron":$skip_telemetron}' > "${PACK_CONFIG}"
 chmod 600 "${PACK_CONFIG}"
 chown ec2-user:ec2-user "${PACK_CONFIG}"

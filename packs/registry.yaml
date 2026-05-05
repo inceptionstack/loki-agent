@@ -127,3 +127,17 @@ packs:
     claude_code: false
     experimental: true
     requires_openai_key: true
+
+  roundhouse:
+    type: agent
+    description: "Roundhouse — AI coding agent with Telegram channel (pi-based)"
+    deps: []
+    instance_type: t4g.medium
+    root_volume_gb: 40
+    data_volume_gb: 0
+    default_model: "us.anthropic.claude-opus-4-6-v1"
+    ports: {}
+    brain: false
+    claude_code: false
+    experimental: false
+    requires_telegram_token: true

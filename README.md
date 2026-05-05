@@ -57,7 +57,7 @@ Run `curl -sfL install.lowkey.run | bash` — the installer walks you through **
 | Flag | Description |
 |------|-------------|
 | `--non-interactive` | Skip all prompts, use defaults (aliases: `--yes`, `-y`) |
-| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `nemoclaw`, `kiro-cli`, `codex-cli`, `pi`, `ironclaw` |
+| `--pack <name>` | Agent pack: `openclaw`, `claude-code`, `hermes`, `nemoclaw`, `kiro-cli`, `codex-cli`, `pi`, `ironclaw`, `roundhouse` |
 | `--profile <name>` | Permission profile: `builder`, `account_assistant`, `personal_assistant` |
 | `--method <method>` | Deploy method: `cfn` (CloudFormation), `terraform` / `tf` |
 
@@ -198,6 +198,7 @@ Lowkey uses a **pack-based architecture** for deploying different AI agent runti
 | `nemoclaw` | Agent *(experimental)* | NemoClaw — OpenClaw inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox with Landlock, seccomp, and network namespace isolation. Inference routed through bedrockify on the host (no NVIDIA API key needed). **Only compatible with `personal_assistant` profile** — the sandbox blocks all AWS API access. Requires Docker + t4g.xlarge. |
 | `kiro-cli` | Agent *(experimental)* | [Kiro CLI](https://kiro.dev/docs/cli) — AWS agentic IDE terminal client with MCP server support. Uses its own cloud inference (no Bedrock/bedrockify). Pre-installs AWS MCP servers (terraform, ecs, eks, core, docs). **Requires interactive SSO login after deploy:** `kiro-cli login --use-device-flow`. |
 | `codex-cli` | Agent *(experimental)* | [Codex CLI](https://github.com/openai/codex) — OpenAI's coding agent. Connects directly to OpenAI's API (no Bedrock/bedrockify). Configured as builder agent (danger-full-access, never prompts). **Post-install step**: SSM into the instance and run `codex login` (interactive) — auth is intentionally deferred until after deploy. |
+| `roundhouse` | Agent | [Roundhouse](https://github.com/inceptionstack/roundhouse) — Pi-based AI coding agent with Telegram channel. Uses native Bedrock SDK (no bedrockify). Requires `TelegramBotTokenSecret` and `TelegramUser` parameters. |
 
 ### How It Works
 
