@@ -299,18 +299,30 @@ _telemetron_sidecar() {
 
   # Detect tier from AWS account owner email. Internal = @amazon.com.
   # The email stays local — only the tier string is written to the tier file.
-  # Bounded to 5s total to avoid hanging the installer on broken AWS connectivity.
-  # Tries two methods:
-  #   1. aws account get-contact-information (works in any account, no org needed)
-  #   2. aws organizations describe-account (only works from management account)
+  # Bounded to 5s per method to avoid hanging the installer.
+  # Tries three methods:
+  #   1. aws account get-contact-information — checks all fields for @amazon.com
+  #   2. aws organizations describe-organization — master account email (works from member accounts)
+  #   3. aws organizations describe-account — account email (only from management account)
   local tier="external"
   local acct_email=""
 
-  # Method 1: account contact info (FullName often contains the email for AWS accounts)
-  acct_email=$(timeout 5 aws account get-contact-information \
-    --query 'ContactInformation.FullName' --output text 2>/dev/null) || true
+  # Method 1: account contact info — check ALL fields for @amazon.com
+  # FullName sometimes contains the account email on Amazon accounts, but other
+  # accounts may have a person's name there. Check the full JSON output.
+  local contact_info
+  contact_info=$(timeout 5 aws account get-contact-information --output json 2>/dev/null) || true
+  if echo "$contact_info" | grep -q '@amazon\.com"'; then
+    acct_email="internal@amazon.com"
+  fi
 
-  # Method 2: organizations (fallback for accounts where contact info lacks email)
+  # Method 2: organization master account email (works from member accounts)
+  if [[ "$acct_email" != *@amazon.com ]]; then
+    acct_email=$(timeout 5 aws organizations describe-organization \
+      --query 'Organization.MasterAccountEmail' --output text 2>/dev/null) || true
+  fi
+
+  # Method 3: organizations describe-account (only works from management account)
   if [[ "$acct_email" != *@amazon.com ]]; then
     acct_email=$(timeout 5 aws organizations describe-account \
       --account-id "${ACCOUNT_ID:-$(timeout 3 aws sts get-caller-identity --query Account --output text 2>/dev/null)}" \
