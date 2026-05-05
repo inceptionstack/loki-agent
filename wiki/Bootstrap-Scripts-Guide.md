@@ -51,9 +51,6 @@ Sets up disk monitoring, cleanup crons, and symlinks to keep the root volume lea
 ### BOOTSTRAP-DIAGRAMS.md — Architecture Diagrams
 Style guide for generating AWS architecture diagrams using draw.io with the re:Invent dark theme.
 
-### BOOTSTRAP-MODEL-CONFIG.md — Model Configuration
-Advanced model setup: configure primary/fallback models, LiteLLM proxy routing, cost optimization between Opus and Sonnet.
-
 ## Optional Bootstraps
 
 Add these based on your workflow needs.

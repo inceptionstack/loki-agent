@@ -143,7 +143,6 @@ Available essential bootstraps:
 - **BOOTSTRAP-DISK-SPACE-STRAT** — Sets up disk space management strategy
 - **BOOTSTRAP-MCPORTER** — Configures MCPorter for MCP tool management
 - **BOOTSTRAP-MEMORY-SEARCH** — Enables persistent memory search functionality
-- **BOOTSTRAP-MODEL-CONFIG** — Configures AI model settings and preferences
 - **BOOTSTRAP-PLAYWRIGHT** — Sets up Playwright browser automation
 - **BOOTSTRAP-SECRETS-AWS** — Configures AWS secrets and credential management
 - **BOOTSTRAP-SECURITY** — Establishes security protocols and guidelines

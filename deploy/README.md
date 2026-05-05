@@ -104,7 +104,6 @@ Browse the `optional/` folder for additional capabilities:
 | `BOOTSTRAP-PIPELINE-NOTIFICATIONS.md` | CI/CD pipeline alerts to Telegram |
 | `BOOTSTRAP-OUTLINE-NOTES.md` | Self-hosted Outline wiki |
 | `BOOTSTRAP-GITHUBACTION-CODE-REVIEW.md` | Automatic PR code review with Claude |
-| `BOOTSTRAP-MODEL-CONFIG.md` | Advanced model configuration |
 | `OPTIMIZE-TOO-LARGE-CONTEXT.md` | Context window optimization tips |
 
 Full details: [Bootstrap Scripts Guide](https://github.com/inceptionstack/loki-agent/wiki/Bootstrap-Scripts-Guide)

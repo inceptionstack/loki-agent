@@ -166,7 +166,7 @@ The threshold defaults to 90% but can be overridden via `DISK_WATCHDOG_THRESHOLD
 Add via OpenClaw to auto-clean on a schedule:
 
 ```
-/cron add "Nightly disk cleanup" --schedule "0 3 * * *" --session isolated --message "Run nightly disk cleanup. Log ALL output to memory/disk-cleanup-latest.log (overwrite each run).
+/cron add "Nightly disk cleanup" --cron "0 3 * * *" --session isolated --message "Run nightly disk cleanup. Log ALL output to memory/disk-cleanup-latest.log (overwrite each run).
 
 At the top of the log, write the timestamp.
 
