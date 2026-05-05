@@ -3024,7 +3024,7 @@ run_config_and_review() {
       TELEGRAM_BOT_TOKEN_SECRET="$_RH_SECRET_NAME"
     fi
     if [[ -z "${TELEGRAM_USER:-}" ]]; then
-      prompt "Telegram username (without @)" TELEGRAM_USER ""
+      prompt "Your Telegram username (without @)" TELEGRAM_USER ""
       if [[ -z "${TELEGRAM_USER:-}" ]]; then
         fail "Telegram username is required for roundhouse pack"
       fi
