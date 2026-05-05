@@ -559,7 +559,7 @@ _telem_pack() {
   case "$v" in
     builder|personal-assistant|account-assistant|essential|optional\
     |personal_assistant|account_assistant|openclaw|claude-code|codex-cli\
-    |kiro-cli|nemoclaw|hermes|pi|ironclaw)
+    |kiro-cli|nemoclaw|hermes|pi|ironclaw|roundhouse)
       printf '%s' "$v" ;;
   esac
 }
@@ -704,6 +704,18 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       KIRO_FROM_SECRET="$2"; shift 2 ;;
+    --telegram-bot-token-secret)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --telegram-bot-token-secret requires a Secrets Manager id or arn" >&2
+        exit 1
+      fi
+      TELEGRAM_BOT_TOKEN_SECRET="$2"; shift 2 ;;
+    --telegram-user)
+      if [[ $# -lt 2 || "$2" == --* ]]; then
+        echo -e "\033[0;31m✗\033[0m --telegram-user requires a Telegram username" >&2
+        exit 1
+      fi
+      TELEGRAM_USER="$2"; shift 2 ;;
     --debug-in-repo) DEBUG_IN_REPO=true; shift ;;
     --test|--dry-run) TEST_MODE=true; shift ;;
     --auto-rename-account-enabled) AUTO_RENAME_ACCOUNT=true; shift ;;
@@ -719,12 +731,18 @@ Options:
   --simple                       Force simple install mode
   --advanced                     Force advanced install mode
   --pack <name>                  Agent pack (openclaw, claude-code, codex-cli,
-                                 kiro-cli, nemoclaw, hermes, pi, ironclaw)
+                                 kiro-cli, nemoclaw, hermes, pi, ironclaw,
+                                 roundhouse)
   --profile <name>               Permission profile (builder,
                                  account_assistant, personal_assistant)
   --method <cfn|terraform|tf>    Deploy method (default: cfn)
   --kiro-from-secret <id|arn>    Secrets Manager id/arn for Kiro API key
                                  (kiro-cli headless mode)
+  --telegram-bot-token-secret <id|arn>
+                                 Secrets Manager id/arn for Telegram bot token
+                                 (roundhouse pack)
+  --telegram-user <username>     Telegram username for bot pairing
+                                 (roundhouse pack, without @)
   --debug-in-repo                Dev-only: run installer from cwd
   --test, --dry-run              Run installer end-to-end without
                                  provisioning AWS resources. Telemetry
@@ -1864,8 +1882,8 @@ collect_security_config() {
 # Parameter source-of-truth: single mapping for CFN Console, CFN CLI, Terraform
 # ============================================================================
 # ⚠ KEEP THESE THREE ARRAYS IN SYNC — same order, same count
-PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType DefaultModel ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch KiroFromSecret)
-PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type default_model model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch kiro_from_secret)
+PARAM_CFN_NAMES=(EnvironmentName PackName ProfileName InstanceType DefaultModel ModelMode BedrockRegion LokiWatermark EnableBedrockForm EnableSecurityHub EnableGuardDuty EnableInspector EnableAccessAnalyzer EnableConfigRecorder ExistingVpcId ExistingSubnetId RepoBranch KiroFromSecret TelegramBotTokenSecret TelegramUser)
+PARAM_TF_NAMES=(environment_name pack_name profile_name instance_type default_model model_mode bedrock_region loki_watermark enable_bedrock_form enable_security_hub enable_guardduty enable_inspector enable_access_analyzer enable_config_recorder existing_vpc_id existing_subnet_id repo_branch kiro_from_secret telegram_bot_token_secret telegram_user)
 PARAM_VALUES=()  # populated by build_deploy_params()
 
 # Per-pack default model (passed to CFN DefaultModel / bootstrap.sh --model).
@@ -1910,6 +1928,8 @@ build_deploy_params() {
     "${EXISTING_SUBNET_ID:-}"
     "$REPO_BRANCH"
     "${KIRO_FROM_SECRET:-}"
+    "${TELEGRAM_BOT_TOKEN_SECRET:-}"
+    "${TELEGRAM_USER:-}"
   )
   # Validate parallel arrays are in sync
   [[ ${#PARAM_CFN_NAMES[@]} -eq ${#PARAM_VALUES[@]} ]] \
@@ -2961,6 +2981,28 @@ run_config_and_review() {
   fi
 
   build_deploy_params
+
+  # Pack-specific parameter collection (after build_deploy_params so we can amend)
+  if [[ "${PACK_NAME:-}" == "roundhouse" ]]; then
+    if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
+      echo ""
+      echo -e "  ${BOLD}Roundhouse requires a Telegram bot token.${NC}"
+      echo -e "  Store it in AWS Secrets Manager and provide the secret id/arn."
+      echo ""
+      prompt "Secrets Manager id for Telegram bot token" TELEGRAM_BOT_TOKEN_SECRET ""
+      if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
+        fail "Telegram bot token secret is required for roundhouse pack"
+      fi
+    fi
+    if [[ -z "${TELEGRAM_USER:-}" ]]; then
+      prompt "Telegram username (without @)" TELEGRAM_USER ""
+      if [[ -z "${TELEGRAM_USER:-}" ]]; then
+        fail "Telegram username is required for roundhouse pack"
+      fi
+    fi
+    # Rebuild params with telegram values now set
+    build_deploy_params
+  fi
   show_summary || {
     # User chose "Change settings" → re-run in advanced mode with current values as preselects
     PRESELECT_PACK="$PACK_NAME"

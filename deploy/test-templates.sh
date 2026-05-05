@@ -64,7 +64,7 @@ echo ""
 
 # ── Terraform main.tf ────────────────────────────────────────────────────────
 echo -e "${BOLD}Terraform (deploy/terraform/main.tf)${NC}"
-check_contains "$TF_MAIN" "pack_name        = var.pack_name" "TF main: pack_name passed to userdata template"
+check_contains "$TF_MAIN" "pack_name                 = var.pack_name" "TF main: pack_name passed to userdata template"
 check_contains "$TF_MAIN" '"loki:pack"' "TF main: loki:pack in loki_tags"
 
 echo ""

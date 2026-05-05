@@ -141,3 +141,5 @@ packs:
     claude_code: false
     experimental: false
     requires_telegram_token: true
+    compatible_profiles:
+      - builder

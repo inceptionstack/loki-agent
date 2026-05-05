@@ -21,12 +21,12 @@ variable "profile_name" {
 }
 
 variable "pack_name" {
-  description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, kiro-cli, or codex-cli)"
+  description = "Agent pack to deploy (openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, kiro-cli, codex-cli, or roundhouse)"
   type        = string
   default     = "openclaw"
   validation {
-    condition     = contains(["openclaw", "claude-code", "hermes", "pi", "ironclaw", "nemoclaw", "kiro-cli", "codex-cli"], var.pack_name)
-    error_message = "pack_name must be openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, kiro-cli, or codex-cli."
+    condition     = contains(["openclaw", "claude-code", "hermes", "pi", "ironclaw", "nemoclaw", "kiro-cli", "codex-cli", "roundhouse"], var.pack_name)
+    error_message = "pack_name must be openclaw, claude-code, hermes, pi, ironclaw, nemoclaw, kiro-cli, codex-cli, or roundhouse."
   }
 }
 
@@ -167,6 +167,18 @@ variable "kiro_from_secret" {
   type        = string
   default     = ""
   description = "AWS Secrets Manager secret id/arn whose SecretString is the Kiro API key (kiro-cli pack, headless mode). The raw key is NOT stored in Terraform state — the instance resolves the secret at install time via its IAM role."
+}
+
+variable "telegram_bot_token_secret" {
+  type        = string
+  default     = ""
+  description = "AWS Secrets Manager secret id/arn containing the Telegram bot token (roundhouse pack only). The instance resolves the secret at install time via its IAM role."
+}
+
+variable "telegram_user" {
+  type        = string
+  default     = ""
+  description = "Telegram username for bot pairing (roundhouse pack only, without @ prefix)."
 }
 
 variable "request_quota_increases" {
