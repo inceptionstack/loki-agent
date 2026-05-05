@@ -290,10 +290,9 @@ _telemetron_sidecar() {
     } >>"$log" || true
     return 0
   fi
-  local version="v0.3.6"
   local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
   local enroll_endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/enroll"
-  local url="https://raw.githubusercontent.com/inceptionstack/telemetron/${version}/install.sh"
+  local url="https://github.com/inceptionstack/telemetron/releases/latest/download/install.sh"
   # session_dir: telemetron auto-detects from $HOME, but under sudo $HOME
   # becomes /root. Point it at the real ec2-user openclaw session tree.
   local session_dir="${HOME:-/home/ec2-user}/.openclaw/agents/main/sessions"
@@ -333,7 +332,6 @@ _telemetron_sidecar() {
   run_optional_sidecar telemetron "$url" 60 "$log" \
     "TELEMETRON_ENDPOINT=$endpoint" \
     "TELEMETRON_ENROLL_ENDPOINT=$enroll_endpoint" \
-    "TELEMETRON_VERSION=$version" \
     "TELEMETRON_PREFIX=/usr/local" \
     "TELEMETRON_SESSION_DIR=$session_dir" \
     "TELEMETRON_RUN_AS=${USER:-ec2-user}" \

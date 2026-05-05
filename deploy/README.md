@@ -22,7 +22,7 @@ All three methods create the same architecture:
 
 - **VPC** — isolated VPC with public subnet, internet gateway, route table
 - **EC2 Instance** — ARM64 Graviton (AL2023), root + data EBS volumes (gp3, encrypted)
-- **IAM** — instance role (AdministratorAccess + SSM), admin IAM user with API access keys (no console login)
+- **IAM** — instance role (AdministratorAccess + SSM)
 - **Security Services** — SecurityHub, GuardDuty, Inspector, Access Analyzer, Config (individually toggleable via parameters, all enabled by default)
 - **Bedrock** — use case form auto-submitted, optional quota increase requests
 - **OpenClaw** — installed via bootstrap script, systemd gateway service, brain workspace files
@@ -33,6 +33,7 @@ All three methods create the same architecture:
 |-----------|---------|-------------|
 | `EnvironmentName` | `openclaw` | Prefix for all resource names |
 | `InstanceType` | `t4g.xlarge` | EC2 instance type (ARM64 Graviton only) |
+| `ProfileName` | *(required)* | Permission profile: `builder` (AdministratorAccess), `account_assistant` (ReadOnly), `personal_assistant` (Bedrock only) |
 | `ModelMode` | `bedrock` | `bedrock` (IAM), `litellm` (proxy), or `api-key` (direct) |
 | `DefaultModel` | `us.anthropic.claude-opus-4-6-v1` | Bedrock model ID |
 | `BedrockRegion` | `us-east-1` | Region for Bedrock API calls |
@@ -67,10 +68,6 @@ openclaw logs --follow
 openclaw configure
 # Follow the wizard to set up Telegram, Discord, Slack, etc.
 ```
-
-### Admin User
-
-The template creates an IAM admin user (`<EnvironmentName>-admin`) with **API access keys only** (no console login). The access keys are used by the OpenClaw agent for AWS API access. There is no console password — use SSM Session Manager or the EC2 instance role for interactive access.
 
 ## Next Steps After Deployment
 

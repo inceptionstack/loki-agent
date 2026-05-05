@@ -346,7 +346,6 @@ Conditions:
   IsNotBuilder: !Not [!Condition IsBuilder]
   IsAccountAssistant: !Equals [!Ref ProfileName, 'account_assistant']
   IsPersonalAssistant: !Equals [!Ref ProfileName, 'personal_assistant']
-  NeedsAdminUser: !Condition IsBuilder
   RunSecurityServices: !Not [!Condition IsPersonalAssistant]
   RunBedrockForm: !Equals [!Ref EnableBedrockForm, 'true']
 
@@ -1015,98 +1014,6 @@ Resources:
       EnableAccessAnalyzer: !Ref EnableAccessAnalyzer
       EnableConfigRecorder: !Ref EnableConfigRecorder
 
-  # --------------------------------------------------------------------------
-  # Admin Console User — only for builder profile
-  # --------------------------------------------------------------------------
-  AdminUser:
-    Type: AWS::IAM::User
-    Condition: NeedsAdminUser
-    Properties:
-      UserName: !Sub '${EnvironmentName}-admin'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AdministratorAccess
-      Tags:
-        - Key: Name
-          Value: !Sub '${EnvironmentName}-admin'
-        - Key: ManagedBy
-          Value: StackSet
-        - Key: loki:managed
-          Value: 'true'
-        - Key: loki:watermark
-          Value: !Ref LokiWatermark
-        - Key: loki:deploy-method
-          Value: cloudformation
-
-  AdminAccessKey:
-    Type: AWS::IAM::AccessKey
-    Condition: NeedsAdminUser
-    Properties:
-      UserName: !Ref AdminUser
-
-  AdminSetupRole:
-    Type: AWS::IAM::Role
-    Condition: NeedsAdminUser
-    Properties:
-      RoleName: !Sub '${EnvironmentName}-admin-pw-role'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  AdminSetupFunction:
-    Type: AWS::Lambda::Function
-    Condition: NeedsAdminUser
-    Properties:
-      FunctionName: !Sub '${EnvironmentName}-admin-setup'
-      Runtime: python3.12
-      Handler: index.handler
-      Timeout: 30
-      Role: !GetAtt AdminSetupRole.Arn
-      Code:
-        ZipFile: |
-          import json, urllib.request
-
-          def send_response(event, context, status, reason='', data={}):
-              # CFN responses must be under 4096 bytes total
-              reason_str = (reason or f'See CW: {context.log_stream_name}')[:256]
-              phys_id = (context.log_stream_name or 'custom-resource')[-64:]
-              safe_data = {k: str(v)[:128] for k, v in (data or {}).items()}
-              body = json.dumps({
-                  'Status': status, 'Reason': reason_str,
-                  'PhysicalResourceId': phys_id,
-                  'StackId': event['StackId'],
-                  'RequestId': event['RequestId'],
-                  'LogicalResourceId': event['LogicalResourceId'],
-                  'Data': safe_data if len(json.dumps(safe_data)) < 1024 else {}
-              }).encode()
-              req = urllib.request.Request(event['ResponseURL'], data=body,
-                  headers={'Content-Type': 'application/json', 'Content-Length': len(body)},
-                  method='PUT')
-              urllib.request.urlopen(req)
-
-          def handler(event, context):
-              # No-op: admin user has API access keys only (no console login)
-              print(f"[INFO] Event type: {event['RequestType']}")
-              send_response(event, context, 'SUCCESS', 'No-op — admin user has API keys only')
-
-  AdminSetupCustomResource:
-    Type: Custom::AdminSetup
-    Condition: NeedsAdminUser
-    DependsOn:
-      - AdminUser
-      - AdminSetupRole
-    Properties:
-      ServiceToken: !GetAtt AdminSetupFunction.Arn
-      AccountId: !Ref 'AWS::AccountId'
-      Region: !Ref 'AWS::Region'
-      AdminUsername: !Sub '${EnvironmentName}-admin'
-
-  # --------------------------------------------------------------------------
   # SSM Session Manager Preferences (auto-login as ec2-user with welcome)
   # --------------------------------------------------------------------------
   # --------------------------------------------------------------------------

@@ -12,7 +12,7 @@ Deploy Loki using Terraform.
 ```bash
 terraform init
 terraform plan -var="environment_name=my-openclaw"
-terraform apply -var="environment_name=my-openclaw"
+terraform apply -var="environment_name=my-openclaw" -var="profile_name=builder"
 ```
 
 ## Variables
@@ -23,6 +23,7 @@ Override defaults with `-var` flags or a `terraform.tfvars` file:
 # terraform.tfvars
 environment_name   = "my-openclaw"
 instance_type      = "t4g.xlarge"
+profile_name       = "builder"
 model_mode         = "bedrock"
 bedrock_region     = "us-east-1"
 

@@ -34,6 +34,7 @@ aws cloudformation create-stack \
   --stack-name my-openclaw \
   --template-body file://template.yaml \
   --parameters ParameterKey=EnvironmentName,ParameterValue=my-openclaw \
+               ParameterKey=ProfileName,ParameterValue=builder \
   --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
 
@@ -151,6 +152,7 @@ aws cloudformation create-stack \
   --parameters \
     ParameterKey=EnvironmentName,ParameterValue=my-openclaw \
     ParameterKey=InstanceType,ParameterValue=t4g.medium \
+    ParameterKey=ProfileName,ParameterValue=builder \
   --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
 
@@ -172,7 +174,7 @@ sam deploy --guided --template-file template.yaml
 cd deploy/terraform
 terraform init
 terraform plan -var="environment_name=my-openclaw" -var="instance_type=t4g.medium"
-terraform apply -var="environment_name=my-openclaw" -var="instance_type=t4g.medium"
+terraform apply -var="environment_name=my-openclaw" -var="profile_name=builder" -var="instance_type=t4g.medium"
 ```
 
 ---
@@ -392,7 +394,6 @@ aws cloudformation describe-stack-events --stack-name my-openclaw \
 
 Common causes:
 - **VPC limit reached** — default is 5 VPCs per region. Delete unused VPCs or request a limit increase.
-- **IAM name conflict** — the admin user name already exists from a previous deployment. Delete the old stack first.
 - **Bedrock not available** — some regions don't have Bedrock. Use `us-east-1`.
 
 ### Instance is running but Loki isn't responding

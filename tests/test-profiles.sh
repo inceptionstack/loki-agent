@@ -569,11 +569,6 @@ else
   fail_test "CFN template: IsPersonalAssistant condition missing"
 fi
 
-if grep -q "NeedsAdminUser" "$CFN_TEMPLATE" 2>/dev/null; then
-  pass "CFN template: NeedsAdminUser condition found"
-else
-  fail_test "CFN template: NeedsAdminUser condition missing"
-fi
 
 if grep -q "loki:profile" "$CFN_TEMPLATE" 2>/dev/null; then
   pass "CFN template: loki:profile instance tag found"

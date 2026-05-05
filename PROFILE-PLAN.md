@@ -255,7 +255,7 @@ Conditions:
   IsNotBuilder: !Not [!Condition IsBuilder]
   IsAccountAssistant: !Equals [!Ref ProfileName, 'account_assistant']
   IsPersonalAssistant: !Equals [!Ref ProfileName, 'personal_assistant']
-  NeedsAdminUser: !Condition IsBuilder
+  # (Removed) NeedsAdminUser — admin IAM user no longer created
 
 Resources:
   InstanceRole:
@@ -309,10 +309,7 @@ Resources:
         # (Bedrock + SSM + STS policy JSON from above)
 
   # Admin user — only for builder profile
-  AdminUser:
-    Type: AWS::IAM::User
-    Condition: NeedsAdminUser
-    ...
+  # (Removed) AdminUser — see commit removing dead IAM user
 ```
 
 **Instance type default from profile:**
@@ -473,7 +470,7 @@ Add `ProfileName` to:
 | `profiles/personal_assistant.json` | **NEW** — Bedrock-only policy |
 | `profiles/bootstrap_operations.json` | **NEW** — scoped SSM + cfn-signal for bootstrap |
 | `install.sh` | Add `--profile` flag, `choose_profile()`, require profile, instance defaults |
-| `deploy/cloudformation/template.yaml` | Add `ProfileName` param, conditional IAM, conditional security services, AdminUser gated on IsBuilder |
+| `deploy/cloudformation/template.yaml` | Add `ProfileName` param, conditional IAM, conditional security services, admin IAM user removed |
 | `deploy/terraform/main.tf` | Add `profile_name` var, conditional IAM resources |
 | `deploy/terraform/variables.tf` | Add `profile_name` variable |
 | `deploy/terraform/policies/` | **NEW** — JSON policy files |

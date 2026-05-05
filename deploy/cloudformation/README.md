@@ -20,6 +20,7 @@ aws cloudformation create-stack \
   --parameters \
     ParameterKey=EnvironmentName,ParameterValue=my-openclaw \
     ParameterKey=InstanceType,ParameterValue=t4g.xlarge \
+    ParameterKey=ProfileName,ParameterValue=builder \
     ParameterKey=ModelMode,ParameterValue=bedrock \
   --capabilities CAPABILITY_NAMED_IAM \
   --region us-east-1
