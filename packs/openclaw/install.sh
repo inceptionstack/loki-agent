@@ -101,7 +101,7 @@ ok "node found: ${NODE_VERSION}"
 step "Installing OpenClaw"
 
 # Pin to tested version for stability — update deliberately, not automatically
-OPENCLAW_VERSION="2026.4.14"
+OPENCLAW_VERSION="2026.5.3-1"
 npm install -g "openclaw@${OPENCLAW_VERSION}"
 
 # Reshim if mise is available
