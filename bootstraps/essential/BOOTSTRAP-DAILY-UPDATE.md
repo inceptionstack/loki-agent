@@ -17,7 +17,7 @@ Sets up a daily cron that sends a consolidated morning briefing to the operator 
 ## Step 1: Add the Daily Update Cron
 
 ```
-/cron add "Daily morning briefing" --schedule "0 8 * * *" --tz "YOUR_TIMEZONE"
+/cron add "Daily morning briefing" --cron "0 8 * * *" --tz "YOUR_TIMEZONE"
 ```
 
 Or add it directly via OpenClaw:
@@ -25,9 +25,11 @@ Or add it directly via OpenClaw:
 ```bash
 openclaw cron add \
   --name "daily-briefing" \
-  --schedule "0 8 * * *" \
+  --cron "0 8 * * *" \
+  --tz "YOUR_TIMEZONE" \
   --session isolated \
-  --announce telegram \
+  --announce \
+  --channel telegram \
   --message "$(cat <<'EOF'
 Run the daily AWS account briefing. Be concise — this goes to Telegram so no tables, use bullet lists.
 
