@@ -3033,6 +3033,11 @@ run_config_and_review() {
   build_deploy_params
 
   # Pack-specific parameter collection (after build_deploy_params so we can amend)
+  # For roundhouse: collect + validate the raw token here, but DEFER the
+  # Secrets Manager write until after show_summary confirms, so that a user
+  # who switches to a non-roundhouse pack via "Change settings" doesn't
+  # leave an orphan secret behind in AWS.
+  local _rh_pending_token=""
   if [[ "${PACK_NAME:-}" == "roundhouse" ]]; then
     if [[ -z "${TELEGRAM_BOT_TOKEN_SECRET:-}" ]]; then
       # Accept the raw token from, in order of precedence:
@@ -3055,39 +3060,11 @@ run_config_and_review() {
       if [[ ! "$rh_bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
         fail "Invalid Telegram bot token format (expected: 123456:ABC-DEF...)"
       fi
-      # Save to Secrets Manager with auto-generated name.
-      # Avoid passing the token as an argv value — 'ps'/proc would expose it.
-      # Write to a locked temp file and pass via file:// instead.
-      local secret_name="/lowkey/${ENV_NAME}/telegram-bot-token"
-      local sm_err=""
-      local token_file
-      token_file=$(mktemp /tmp/lowkey-rh-token.XXXXXX)
-      # Restrict before writing (umask race-safe via explicit chmod).
-      chmod 600 "$token_file"
-      printf '%s' "$rh_bot_token" > "$token_file"
-      # Clean up on any exit from this function path.
-      trap 'rm -f "$token_file"' RETURN
-      info "Storing bot token in Secrets Manager: ${secret_name}"
-      # Restore if in pending-deletion state
-      aws secretsmanager restore-secret --secret-id "$secret_name" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
-      if sm_err=$(aws secretsmanager create-secret \
-        --name "$secret_name" \
-        --secret-string "file://${token_file}" \
-        --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
-        --region "$DEPLOY_REGION" 2>&1); then
-        ok "Token saved to Secrets Manager"
-      elif sm_err=$(aws secretsmanager put-secret-value \
-        --secret-id "$secret_name" \
-        --secret-string "file://${token_file}" \
-        --region "$DEPLOY_REGION" 2>&1); then
-        ok "Token updated in Secrets Manager"
-      else
-        rm -f "$token_file"
-        fail "Failed to save bot token to Secrets Manager: ${sm_err}"
-      fi
-      rm -f "$token_file"
-      trap - RETURN
-      TELEGRAM_BOT_TOKEN_SECRET="$secret_name"
+      # Stash validated token for post-confirmation upload; also pre-populate
+      # the expected secret name so build_deploy_params / show_summary can
+      # display the reference that will exist.
+      _rh_pending_token="$rh_bot_token"
+      TELEGRAM_BOT_TOKEN_SECRET="/lowkey/${ENV_NAME}/telegram-bot-token"
     fi
     if [[ -z "${TELEGRAM_USER:-}" ]]; then
       prompt "Telegram username (without @)" TELEGRAM_USER ""
@@ -3099,7 +3076,12 @@ run_config_and_review() {
     build_deploy_params
   fi
   show_summary || {
-    # User chose "Change settings" → re-run in advanced mode with current values as preselects
+    # User chose "Change settings" — re-run in advanced mode with current
+    # values as preselects. Clear the pending secret-name placeholder and
+    # token so we don't leak state into the re-entry (especially if they
+    # switch to a non-roundhouse pack on the next pass).
+    _rh_pending_token=""
+    TELEGRAM_BOT_TOKEN_SECRET=""
     PRESELECT_PACK="$PACK_NAME"
     PRESELECT_PROFILE="$PROFILE_NAME"
     PRESELECT_METHOD="terraform"
@@ -3109,6 +3091,39 @@ run_config_and_review() {
     run_config_and_review
     return
   }
+  # Post-confirmation: upload the token to Secrets Manager, but ONLY if the
+  # final pack selection is still roundhouse and we actually collected one.
+  if [[ "${PACK_NAME:-}" == "roundhouse" && -n "$_rh_pending_token" ]]; then
+    local secret_name="/lowkey/${ENV_NAME}/telegram-bot-token"
+    local sm_err=""
+    local token_file
+    token_file=$(mktemp /tmp/lowkey-rh-token.XXXXXX)
+    chmod 600 "$token_file"
+    printf '%s' "$_rh_pending_token" > "$token_file"
+    trap 'rm -f "$token_file"' RETURN
+    info "Storing bot token in Secrets Manager: ${secret_name}"
+    aws secretsmanager restore-secret --secret-id "$secret_name" --region "$DEPLOY_REGION" >/dev/null 2>&1 || true
+    if sm_err=$(aws secretsmanager create-secret \
+      --name "$secret_name" \
+      --secret-string "file://${token_file}" \
+      --description "Telegram bot token for roundhouse pack (${ENV_NAME})" \
+      --region "$DEPLOY_REGION" 2>&1); then
+      ok "Token saved to Secrets Manager"
+    elif sm_err=$(aws secretsmanager put-secret-value \
+      --secret-id "$secret_name" \
+      --secret-string "file://${token_file}" \
+      --region "$DEPLOY_REGION" 2>&1); then
+      ok "Token updated in Secrets Manager"
+    else
+      rm -f "$token_file"
+      fail "Failed to save bot token to Secrets Manager: ${sm_err}"
+    fi
+    rm -f "$token_file"
+    trap - RETURN
+    TELEGRAM_BOT_TOKEN_SECRET="$secret_name"
+    # Rebuild deploy params so the confirmed secret name is wired through.
+    build_deploy_params
+  fi
 }
 
 main() {
