@@ -275,11 +275,16 @@ _telemetron_sidecar() {
   printf '[telemetron] detect completed successfully\n' >>"$log"
 }
 
+# ── Done ──────────────────────────────────────────────────────────────────────
+# Mark install complete BEFORE running the telemetron sidecar so callers that
+# wait on the done marker aren't blocked by sidecar work (which has bounded
+# but real timeouts: 60s install + 30s detect + AWS probe waits). The sidecar
+# is optional — its success or failure must not gate pack completion.
+write_done_marker "roundhouse"
+
 (
   set +e
   _telemetron_sidecar
 ) || true
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-write_done_marker "roundhouse"
 printf "\n[PACK:roundhouse] INSTALLED — Telegram bot connected (systemd: roundhouse)\n"
