@@ -70,40 +70,25 @@ bash "${INSTALL}" --skip-telemetron --help >/dev/null 2>&1 \
   && pass "--skip-telemetron accepted as an arg (not rejected by parser)" \
   || fail "--skip-telemetron rejected by parser"
 
-# ── Test: should_run_telemetron() decisions ───────────────────────────────────
-# The pack's *policy* layer. Pure function — given env/PATH, returns one of:
+# ── Test: _telemetron_should_run() decisions ──────────────────────────────────
+# The shared policy gate from common-telemetron.sh. Pure function — given
+# env/PATH, returns one of:
 #   yes | skip: --skip-telemetron | skip: non-Linux
-#   skip: lowkey telemetry opt-out | skip: systemctl not found
-# We source install.sh with the `_telemetron_sidecar` call short-circuited so
-# sourcing doesn't actually run any network or install work.
-header "Test: should_run_telemetron() — pack policy decisions"
+#   skip: telemetry opt-out | skip: no systemctl
+header "Test: _telemetron_should_run() — shared policy decisions"
 
 DEC_TMP="$(mktemp -d)"
-# Patched install.sh that defines functions but skips the final invocation
-# and the rest of the pack install. We extract only up to the `_telemetron_sidecar`
-# invocation, and stop there.
-sed '/^_telemetron_sidecar$/,$d' "${INSTALL}" > "${DEC_TMP}/install-patched.sh"
-# The patched file sources common.sh and then runs the entire pack install.
-# That's fine for function definitions, but we also need to neutralize the
-# install logic so tests don't try to `npm install` etc. Strategy: source only
-# the common.sh + the last two function definitions (should_run_telemetron,
-# _telemetron_sidecar) by extracting them explicitly.
 
-# Extract should_run_telemetron from install.sh.
-awk '
-  /^should_run_telemetron\(\) \{/ { p=1 }
-  p
-  p && /^\}/ { p=0 }
-' "${INSTALL}" > "${DEC_TMP}/should_run.sh"
-if grep -q '^should_run_telemetron() {' "${DEC_TMP}/should_run.sh" \
-   && grep -q '^}$' "${DEC_TMP}/should_run.sh"; then
-  pass "extracted should_run_telemetron()"
+# The function lives in common-telemetron.sh — source it directly.
+COMMON_TELEMETRON="${SCRIPT_DIR}/../common-telemetron.sh"
+if [[ -f "$COMMON_TELEMETRON" ]]; then
+  pass "common-telemetron.sh exists"
 else
-  fail "could not extract should_run_telemetron"
+  fail "common-telemetron.sh not found at ${COMMON_TELEMETRON}"
   exit 1
 fi
 
-# Helper: run should_run_telemetron under an isolated PATH + env, compare output.
+# Helper: run _telemetron_should_run under an isolated PATH + env, compare output.
 dec_run() { # args: ENV_KV... -- PATH_DIR — prints decision
   local envs=() path_dir=""
   while [[ $# -gt 0 ]]; do
@@ -111,7 +96,7 @@ dec_run() { # args: ENV_KV... -- PATH_DIR — prints decision
     else envs+=("$1"); shift; fi
   done
   env -i HOME="${DEC_TMP}/home" PATH="${path_dir}" BASH_ENV= ENV= "${envs[@]}" \
-    bash --noprofile --norc -c "set -euo pipefail; source '${DEC_TMP}/should_run.sh'; should_run_telemetron"
+    bash --noprofile --norc -c "set -euo pipefail; source '${COMMON_TELEMETRON}'; _telemetron_should_run"
 }
 
 mk_path() { # args: dir — pre-populate a PATH dir with common coreutils
@@ -140,11 +125,11 @@ mkdir -p "${DEC_TMP}/home"
 
 assert_decision "no flags → yes"                 "yes"                             -- "$P"
 assert_decision "--skip-telemetron → skip"       "skip: --skip-telemetron"         PACK_ARG_SKIP_TELEMETRON=true -- "$P"
-assert_decision "LOWKEY_TELEMETRY=0 → opt-out"   "skip: lowkey telemetry opt-out"  LOWKEY_TELEMETRY=0 -- "$P"
-assert_decision "DO_NOT_TRACK=1 → opt-out"       "skip: lowkey telemetry opt-out"  DO_NOT_TRACK=1 -- "$P"
+assert_decision "LOWKEY_TELEMETRY=0 → opt-out"   "skip: telemetry opt-out"         LOWKEY_TELEMETRY=0 -- "$P"
+assert_decision "DO_NOT_TRACK=1 → opt-out"       "skip: telemetry opt-out"         DO_NOT_TRACK=1 -- "$P"
 
 mkdir -p "${DEC_TMP}/home/.lowkey"; touch "${DEC_TMP}/home/.lowkey/telemetry-off"
-assert_decision "telemetry-off file → opt-out"   "skip: lowkey telemetry opt-out"  -- "$P"
+assert_decision "telemetry-off file → opt-out"   "skip: telemetry opt-out"         -- "$P"
 rm -f "${DEC_TMP}/home/.lowkey/telemetry-off"
 
 P_DARWIN="${DEC_TMP}/path.darwin"; mk_path "$P_DARWIN"
@@ -152,7 +137,7 @@ rm -f "${P_DARWIN}/uname"; printf '#!/bin/sh\necho Darwin\n' > "${P_DARWIN}/unam
 assert_decision "Darwin → non-Linux"             "skip: non-Linux"                 -- "$P_DARWIN"
 
 P_NOSYSD="${DEC_TMP}/path.nosysd"; mk_path "$P_NOSYSD"; rm -f "${P_NOSYSD}/systemctl"
-assert_decision "no systemctl → skip"            "skip: systemctl not found"       -- "$P_NOSYSD"
+assert_decision "no systemctl → skip"            "skip: no systemctl"              -- "$P_NOSYSD"
 
 # Decision precedence: explicit --skip wins over everything.
 assert_decision "--skip beats opt-out env"       "skip: --skip-telemetron" \

@@ -92,6 +92,10 @@ pack_banner() {
 # companion (metrics agent, diagnostics daemon, etc.) with the following
 # hard invariants:
 #
+# DEPRECATED: No pack currently calls this function. Telemetron installs now
+# use `install_telemetron` from common-telemetron.sh instead. Kept for
+# potential future sidecars that use a curl|bash pipeline pattern.
+#
 #   - Silent:  zero bytes on caller's stdout/stderr. Every line (begin,
 #              outcome, transcript of the inner installer, end) goes to
 #              LOG_FILE only.
