@@ -28,6 +28,7 @@ PACK_ARG_TELEGRAM_BOT_TOKEN="$(pack_config_get telegram_bot_token "")"
 PACK_ARG_TELEGRAM_BOT_TOKEN_SECRET="$(pack_config_get telegram_bot_token_secret "")"
 PACK_ARG_TELEGRAM_USER="$(pack_config_get telegram_user "")"
 PACK_ARG_MODEL="$(pack_config_get model "us.anthropic.claude-opus-4-6-v1")"
+PACK_ARG_SKIP_TELEMETRON="$(pack_config_get "skip-telemetron" "false")"
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 usage() {
@@ -41,6 +42,7 @@ Options:
   --telegram-bot-token-secret  AWS Secrets Manager secret id containing the token
   --telegram-user              Telegram username for pairing (without @)
   --model                      AI model ID (default: us.anthropic.claude-opus-4-6-v1)
+  --skip-telemetron            Skip the telemetron metrics sidecar
   --help                       Show this help message
 
 One of --telegram-bot-token or --telegram-bot-token-secret is required.
@@ -68,6 +70,8 @@ while [[ $# -gt 0 ]]; do
     --model)
       [[ $# -gt 1 ]] || { echo "ERROR: --model requires a value" >&2; exit 1; }
       PACK_ARG_MODEL="$2"; shift 2 ;;
+    --skip-telemetron)
+      PACK_ARG_SKIP_TELEMETRON="true"; shift ;;
     *) [[ $# -gt 1 ]] && [[ "$2" != --* ]] && shift 2 || shift ;;
   esac
 done
@@ -148,6 +152,133 @@ if systemctl is-active roundhouse.service &>/dev/null; then
 else
   warn "Roundhouse service may not be active yet — check: systemctl status roundhouse.service"
 fi
+
+# ── Optional sidecar: telemetron ──────────────────────────────────────────────
+# Uses `telemetron detect` to auto-discover roundhouse sessions and configure
+# metrics collection. Runs silently — never blocks, never warns, never prints
+# on the user's terminal. All output goes to $INSTALL_LOG.
+
+should_run_telemetron() {
+  if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
+    echo "skip: --skip-telemetron"; return
+  fi
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "skip: non-Linux"; return
+  fi
+  if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
+     || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
+     || [[ -f "${HOME:-}/.lowkey/telemetry-off" ]]; then
+    echo "skip: lowkey telemetry opt-out"; return
+  fi
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "skip: systemctl not found"; return
+  fi
+  echo "yes"
+}
+
+_telemetron_sidecar() {
+  local _raw_log="${INSTALL_LOG:-/tmp/loki-install.log}"
+  local log; { >> "$_raw_log"; } 2>/dev/null && log="$_raw_log" || log=/dev/null
+  local decision
+  decision="$(should_run_telemetron)"
+  if [[ "$decision" != "yes" ]]; then
+    {
+      printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      printf '[telemetron] %s\n' "$decision"
+      printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } >>"$log" || true
+    return 0
+  fi
+
+  local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
+  local enroll_endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/enroll"
+  local install_url="https://raw.githubusercontent.com/inceptionstack/telemetron/main/install.sh"
+
+  # Detect tier from AWS account. Internal = @amazon.com.
+  local tier="external"
+  local acct_email=""
+
+  # Method 1: account contact info
+  local contact_info
+  contact_info=$(timeout 5 aws account get-contact-information --output json 2>/dev/null) || true
+  if echo "$contact_info" | grep -q '@amazon\.com"'; then
+    acct_email="internal@amazon.com"
+  fi
+
+  # Method 2: organization master account email
+  if [[ "$acct_email" != *@amazon.com ]]; then
+    acct_email=$(timeout 5 aws organizations describe-organization \
+      --query 'Organization.MasterAccountEmail' --output text 2>/dev/null) || true
+  fi
+
+  # Method 3: organizations describe-account
+  if [[ "$acct_email" != *@amazon.com ]]; then
+    local acct_id
+    acct_id=$(timeout 5 aws sts get-caller-identity --query Account --output text 2>/dev/null) || true
+    if [[ -n "$acct_id" ]]; then
+      acct_email=$(timeout 5 aws organizations describe-account \
+        --account-id "$acct_id" --query 'Account.Email' --output text 2>/dev/null) || true
+    fi
+  fi
+
+  if [[ "$acct_email" == *@amazon.com ]]; then
+    tier="internal"
+  fi
+
+  # Write tier file for telemetron to read
+  local home="${HOME:-/home/ec2-user}"
+  for dir in "$home/.lowkey" "$home/.loki"; do
+    mkdir -p "$dir" 2>/dev/null || true
+    printf '%s\n' "$tier" > "$dir/tier" 2>/dev/null || true
+  done
+
+  # Install telemetron binary if not already present.
+  # No env vars = install.sh only downloads the binary, skips setup.
+  # We use `telemetron detect` for configuration instead.
+  if ! command -v telemetron >/dev/null 2>&1 \
+     && [[ ! -x /var/lib/telemetron/bin/telemetron ]]; then
+    local connect_to=5
+    local max_to=55
+    timeout 60 bash -c "
+      set -euo pipefail
+      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | bash
+    " || {
+      printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
+      return 0
+    }
+  fi
+
+  # Resolve telemetron binary path
+  local telemetron_bin=""
+  if [[ -x /var/lib/telemetron/bin/telemetron ]]; then
+    telemetron_bin="/var/lib/telemetron/bin/telemetron"
+  elif command -v telemetron >/dev/null 2>&1; then
+    telemetron_bin="$(command -v telemetron)"
+  fi
+
+  if [[ -z "$telemetron_bin" ]]; then
+    printf '[telemetron] binary not found after install — skipping\n' >>"$log"
+    return 0
+  fi
+
+  # Use `telemetron detect` to auto-discover roundhouse (and any other packs)
+  # and configure + enroll + start the service(s).
+  timeout 30 "$telemetron_bin" detect \
+    --endpoint "$endpoint" \
+    --enroll-endpoint "$enroll_endpoint" \
+    --mode roundhouse \
+    --force >>"$log" 2>&1 || {
+    printf '[telemetron] detect failed (exit %d) — continuing\n' "$?" >>"$log"
+    return 0
+  }
+
+  printf '[telemetron] detect completed successfully\n' >>"$log"
+}
+
+(
+  set +e
+  _telemetron_sidecar
+) || true
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "roundhouse"
