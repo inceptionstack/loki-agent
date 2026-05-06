@@ -190,8 +190,8 @@ _telemetron_sidecar() {
     return 0
   fi
 
-  local endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/metrics"
-  local enroll_endpoint="https://cfw713s6qf.execute-api.us-east-1.amazonaws.com/v1/enroll"
+  local endpoint="https://telemetry.loki.run/v1/metrics"
+  local enroll_endpoint="https://telemetry.loki.run/v1/enroll"
   local install_url="https://raw.githubusercontent.com/inceptionstack/telemetron/main/install.sh"
 
   # Detect tier from AWS account. Internal = @amazon.com.
