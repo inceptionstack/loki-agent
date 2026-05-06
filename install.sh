@@ -1038,13 +1038,10 @@ verify_aws_credentials() {
   local sts_output sts_rc=0
   sts_output=$(aws sts get-caller-identity --output json 2>&1) || sts_rc=$?
   if [[ $sts_rc -ne 0 ]]; then
-    warn "aws sts get-caller-identity failed:"
-    warn "$sts_output"
-    if aws configure list 2>/dev/null | grep -q '<not set>'; then
-      fail "AWS credentials not configured. Run 'aws configure' first."
-    else
-      fail "AWS credentials are configured (profile: ${AWS_PROFILE:-default}) but authentication failed. Refresh your session or check your credential process."
-    fi
+    echo ""
+    $GUM style --border rounded --border-foreground 196 --padding "1 2" --margin "0 2"       "✗ AWS credentials check failed"       ""       "  Not logged in or insufficient permissions."       ""       "  Quick fixes:"       "    • aws sso login              (if using SSO)"       "    • aws configure              (set up credentials)"       "    • aws sts get-caller-identity (verify who you are)"       ""       "  Or try AWS CloudShell (no setup needed):"       "  https://console.aws.amazon.com/cloudshell"
+    echo ""
+    fail "Cannot continue without valid AWS credentials."
   fi
   # Extract account and ARN from the single STS response
   ACCOUNT_ID=$(echo "$sts_output" | json_field Account) \
@@ -1160,6 +1157,40 @@ show_banner() {
     info "$auto_msg"
   fi
 }
+
+# ── Welcome & prerequisites prompt ───────────────────────────────────────────
+show_welcome() {
+  if [[ "$AUTO_YES" == true ]]; then return 0; fi
+
+  echo ""
+  $GUM style --border rounded --border-foreground 39 --padding "1 2" --margin "0 2"     "🚀  Lowkey Agent Installer"     ""     "You'll need:"     "  • AWS CLI logged in with admin access"     "  • A sandbox AWS account (recommended)"     ""     "Easiest: run this from AWS CloudShell"     "https://console.aws.amazon.com/cloudshell"
+  echo ""
+
+  local choice
+  _gum_or_die choice $GUM choose --header "  Ready?" "Continue" "Learn more" "Quit" || choice="Continue"
+  case "$choice" in
+    "Learn more")
+      _show_prerequisites_detail
+      local choice2
+      _gum_or_die choice2 $GUM choose --header "  Ready?" "Continue" "Quit" || choice2="Continue"
+      if [[ "$choice2" == "Quit" ]]; then
+        info "No resources created. Re-run when ready."
+        exit 0
+      fi
+      ;;
+    "Quit")
+      info "No resources created. Re-run when ready."
+      exit 0
+      ;;
+  esac
+}
+
+_show_prerequisites_detail() {
+  echo ""
+  $GUM style --border rounded --border-foreground 39 --padding "1 2" --margin "0 2"     "Prerequisites"     ""     "1. AWS Account (sandbox/dev recommended)"     "   https://aws.amazon.com/free"     ""     "2. Admin credentials — any of these work:"     "   • AWS CloudShell (zero setup)"     "     https://console.aws.amazon.com/cloudshell"     "   • SSO login: aws configure sso && aws sso login"     "     https://docs.aws.amazon.com/cli/latest/userguide/sso"     "   • IAM user keys: aws configure"     "     https://docs.aws.amazon.com/IAM/latest/UserGuide/"     ""     "3. Permissions (admin role covers all):"     "   CloudFormation, EC2, IAM, SSM, SecretsManager"     ""     "4. Supported regions: any with Bedrock model access"     "   https://docs.aws.amazon.com/bedrock/latest/userguide/"
+  echo ""
+}
+
 
 # Minimum AWS CLI version — aws account subcommand requires 2.8+.
 MIN_AWS_CLI_MAJOR=2
@@ -3061,6 +3092,7 @@ main() {
     ok "Exit code 0."
     exit 0
   fi
+  show_welcome
   choose_install_mode    # simple (default) or advanced — needed before preflight
   _TELEM_CURRENT_STEP="preflight"
   preflight_checks       # step 1
