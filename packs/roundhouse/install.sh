@@ -235,6 +235,8 @@ _telemetron_sidecar() {
   # Install telemetron binary if not already present.
   # No env vars = install.sh only downloads the binary, skips setup.
   # We use `telemetron detect` for configuration instead.
+  # Redirect to $log so first-install curl|bash output doesn't leak to the
+  # user terminal (this section's contract is silent, log-only).
   if ! command -v telemetron >/dev/null 2>&1 \
      && [[ ! -x /var/lib/telemetron/bin/telemetron ]]; then
     local connect_to=5
@@ -242,7 +244,7 @@ _telemetron_sidecar() {
     timeout 60 bash -c "
       set -euo pipefail
       curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | bash
-    " || {
+    " >>"$log" 2>&1 || {
       printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
       return 0
     }
@@ -275,11 +277,16 @@ _telemetron_sidecar() {
   printf '[telemetron] detect completed successfully\n' >>"$log"
 }
 
+# ── Done ──────────────────────────────────────────────────────────────────────
+# Mark install complete BEFORE running the telemetron sidecar so callers that
+# wait on the done marker aren't blocked by sidecar work (which has bounded
+# but real timeouts: 60s install + 30s detect + AWS probe waits). The sidecar
+# is optional — its success or failure must not gate pack completion.
+write_done_marker "roundhouse"
+
 (
   set +e
   _telemetron_sidecar
 ) || true
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-write_done_marker "roundhouse"
 printf "\n[PACK:roundhouse] INSTALLED — Telegram bot connected (systemd: roundhouse)\n"
