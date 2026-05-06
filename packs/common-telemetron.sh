@@ -168,7 +168,7 @@ install_telemetron() {
     fi
 
     # Run detect — auto-discovers sessions, enrolls, starts service
-    timeout 30 sudo -n "$bin" detect \
+    timeout 45 sudo -n "$bin" detect \
       --endpoint "$_TELEMETRON_ENDPOINT" \
       --enroll-endpoint "$_TELEMETRON_ENROLL_ENDPOINT" \
       --mode "$mode" \
