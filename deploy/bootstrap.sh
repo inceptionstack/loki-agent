@@ -467,7 +467,16 @@ ok()   { echo "[OK]    $(date -u '+%H:%M:%S') $1"; }
 info() { echo "[INFO]  $(date -u '+%H:%M:%S') $1"; }
 
 step "mise install"
-curl -fsSL https://mise.run | sh
+for _attempt in 1 2 3; do
+  if curl --retry 3 --retry-delay 2 -fsSL https://mise.run | sh; then
+    break
+  fi
+  if [[ $_attempt -eq 3 ]]; then
+    echo "[FAIL] mise install failed after 3 attempts"; exit 1
+  fi
+  echo "[INFO] mise install attempt $_attempt failed, retrying in 5s..."
+  sleep 5
+done
 export PATH="/home/ec2-user/.local/bin:$PATH"
 eval "$(/home/ec2-user/.local/bin/mise activate bash)"
 ok "mise installed: $(mise --version 2>/dev/null || echo unknown)"
