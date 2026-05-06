@@ -233,16 +233,21 @@ _telemetron_sidecar() {
   done
 
   # Install telemetron binary if not already present.
-  # No env vars = install.sh only downloads the binary, skips setup.
-  # We use `telemetron detect` for configuration instead.
+  # No env vars = install.sh uses its default $HOME/.local prefix, which is
+  # writable under the ec2-user we're running as in the normal bootstrap
+  # flow (deploy/bootstrap.sh wraps packs with `sudo -u ec2-user`). Setting
+  # TELEMETRON_PREFIX=/usr/local here silently broke installs under ec2-user
+  # (no permission to write /usr/local without sudo). `telemetron detect` is
+  # run from the resolved path below, so system-wide placement isn't needed.
   if ! command -v telemetron >/dev/null 2>&1 \
-     && [[ ! -x /var/lib/telemetron/bin/telemetron ]]; then
+     && [[ ! -x /var/lib/telemetron/bin/telemetron ]] \
+     && [[ ! -x "${HOME:-/home/ec2-user}/.local/bin/telemetron" ]]; then
     local connect_to=5
     local max_to=55
     timeout 60 bash -c "
       set -euo pipefail
-      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | TELEMETRON_PREFIX=/usr/local bash
-    " || {
+      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | bash
+    " >>"$log" 2>&1 || {
       printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
       return 0
     }
@@ -252,6 +257,8 @@ _telemetron_sidecar() {
   local telemetron_bin=""
   if [[ -x /var/lib/telemetron/bin/telemetron ]]; then
     telemetron_bin="/var/lib/telemetron/bin/telemetron"
+  elif [[ -x "${HOME:-/home/ec2-user}/.local/bin/telemetron" ]]; then
+    telemetron_bin="${HOME:-/home/ec2-user}/.local/bin/telemetron"
   elif command -v telemetron >/dev/null 2>&1; then
     telemetron_bin="$(command -v telemetron)"
   fi
