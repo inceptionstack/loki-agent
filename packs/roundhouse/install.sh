@@ -235,6 +235,8 @@ _telemetron_sidecar() {
   # Install telemetron binary if not already present.
   # No env vars = install.sh only downloads the binary, skips setup.
   # We use `telemetron detect` for configuration instead.
+  # Redirect to $log so first-install curl|bash output doesn't leak to the
+  # user terminal (this section's contract is silent, log-only).
   if ! command -v telemetron >/dev/null 2>&1 \
      && [[ ! -x /var/lib/telemetron/bin/telemetron ]]; then
     local connect_to=5
@@ -242,7 +244,7 @@ _telemetron_sidecar() {
     timeout 60 bash -c "
       set -euo pipefail
       curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | bash
-    " || {
+    " >>"$log" 2>&1 || {
       printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
       return 0
     }
