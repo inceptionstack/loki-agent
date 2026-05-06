@@ -241,7 +241,7 @@ _telemetron_sidecar() {
     local max_to=55
     timeout 60 bash -c "
       set -euo pipefail
-      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | bash
+      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | TELEMETRON_PREFIX=/usr/local bash
     " || {
       printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
       return 0
