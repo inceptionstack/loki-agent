@@ -241,7 +241,7 @@ _telemetron_sidecar() {
     local max_to=55
     timeout 60 bash -c "
       set -euo pipefail
-      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | TELEMETRON_PREFIX=/usr/local bash
+      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | sudo TELEMETRON_PREFIX=/usr/local bash
     " || {
       printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
       return 0
@@ -263,7 +263,7 @@ _telemetron_sidecar() {
 
   # Use `telemetron detect` to auto-discover roundhouse (and any other packs)
   # and configure + enroll + start the service(s).
-  timeout 30 "$telemetron_bin" detect \
+  timeout 30 sudo "$telemetron_bin" detect \
     --endpoint "$endpoint" \
     --enroll-endpoint "$enroll_endpoint" \
     --mode roundhouse \
