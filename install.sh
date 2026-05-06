@@ -1167,12 +1167,12 @@ show_welcome() {
   echo ""
 
   local choice
-  choice=$($GUM choose --header "  Ready?" "Continue" "Learn more" "Quit" 2>/dev/null) || choice="Continue"
+  _gum_or_die choice $GUM choose --header "  Ready?" "Continue" "Learn more" "Quit" || choice="Continue"
   case "$choice" in
     "Learn more")
       _show_prerequisites_detail
       local choice2
-      choice2=$($GUM choose --header "  Ready?" "Continue" "Quit" 2>/dev/null) || choice2="Continue"
+      _gum_or_die choice2 $GUM choose --header "  Ready?" "Continue" "Quit" || choice2="Continue"
       if [[ "$choice2" == "Quit" ]]; then
         info "No resources created. Re-run when ready."
         exit 0
