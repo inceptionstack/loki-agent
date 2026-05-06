@@ -153,133 +153,13 @@ else
   warn "Roundhouse service may not be active yet — check: systemctl status roundhouse.service"
 fi
 
-# ── Optional sidecar: telemetron ──────────────────────────────────────────────
-# Uses `telemetron detect` to auto-discover roundhouse sessions and configure
-# metrics collection. Runs silently — never blocks, never warns, never prints
-# on the user's terminal. All output goes to $INSTALL_LOG.
-
-should_run_telemetron() {
-  if [[ "${PACK_ARG_SKIP_TELEMETRON:-false}" = "true" ]]; then
-    echo "skip: --skip-telemetron"; return
-  fi
-  if [[ "$(uname -s)" != "Linux" ]]; then
-    echo "skip: non-Linux"; return
-  fi
-  if [[ "${LOWKEY_TELEMETRY:-1}" = "0" ]] \
-     || [[ "${DO_NOT_TRACK:-0}" = "1" ]] \
-     || [[ -f "${HOME:-}/.lowkey/telemetry-off" ]]; then
-    echo "skip: lowkey telemetry opt-out"; return
-  fi
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "skip: systemctl not found"; return
-  fi
-  echo "yes"
-}
-
-_telemetron_sidecar() {
-  local _raw_log="${INSTALL_LOG:-/tmp/loki-install.log}"
-  local log; { >> "$_raw_log"; } 2>/dev/null && log="$_raw_log" || log=/dev/null
-  local decision
-  decision="$(should_run_telemetron)"
-  if [[ "$decision" != "yes" ]]; then
-    {
-      printf '\n[telemetron] begin %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-      printf '[telemetron] %s\n' "$decision"
-      printf '[telemetron] end %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    } >>"$log" || true
-    return 0
-  fi
-
-  local endpoint="https://telemetry.loki.run/v1/metrics"
-  local enroll_endpoint="https://telemetry.loki.run/v1/enroll"
-  local install_url="https://raw.githubusercontent.com/inceptionstack/telemetron/main/install.sh"
-
-  # Detect tier from AWS account. Internal = @amazon.com.
-  local tier="external"
-  local acct_email=""
-
-  # Method 1: account contact info
-  local contact_info
-  contact_info=$(timeout 5 aws account get-contact-information --output json 2>/dev/null) || true
-  if echo "$contact_info" | grep -q '@amazon\.com"'; then
-    acct_email="internal@amazon.com"
-  fi
-
-  # Method 2: organization master account email
-  if [[ "$acct_email" != *@amazon.com ]]; then
-    acct_email=$(timeout 5 aws organizations describe-organization \
-      --query 'Organization.MasterAccountEmail' --output text 2>/dev/null) || true
-  fi
-
-  # Method 3: organizations describe-account
-  if [[ "$acct_email" != *@amazon.com ]]; then
-    local acct_id
-    acct_id=$(timeout 5 aws sts get-caller-identity --query Account --output text 2>/dev/null) || true
-    if [[ -n "$acct_id" ]]; then
-      acct_email=$(timeout 5 aws organizations describe-account \
-        --account-id "$acct_id" --query 'Account.Email' --output text 2>/dev/null) || true
-    fi
-  fi
-
-  if [[ "$acct_email" == *@amazon.com ]]; then
-    tier="internal"
-  fi
-
-  # Write tier file for telemetron to read
-  local home="${HOME:-/home/ec2-user}"
-  for dir in "$home/.lowkey" "$home/.loki"; do
-    mkdir -p "$dir" 2>/dev/null || true
-    printf '%s\n' "$tier" > "$dir/tier" 2>/dev/null || true
-  done
-
-  # Install telemetron binary if not already present.
-  # No env vars = install.sh only downloads the binary, skips setup.
-  # We use `telemetron detect` for configuration instead.
-  if ! command -v telemetron >/dev/null 2>&1 \
-     && [[ ! -x /var/lib/telemetron/bin/telemetron ]]; then
-    local connect_to=5
-    local max_to=55
-    timeout 60 bash -c "
-      set -euo pipefail
-      curl --connect-timeout $connect_to --max-time $max_to -fsSL '$install_url' | sudo TELEMETRON_PREFIX=/usr/local bash
-    " || {
-      printf '[telemetron] install failed (exit %d) — continuing\n' "$?" >>"$log"
-      return 0
-    }
-  fi
-
-  # Resolve telemetron binary path
-  local telemetron_bin=""
-  if [[ -x /var/lib/telemetron/bin/telemetron ]]; then
-    telemetron_bin="/var/lib/telemetron/bin/telemetron"
-  elif command -v telemetron >/dev/null 2>&1; then
-    telemetron_bin="$(command -v telemetron)"
-  fi
-
-  if [[ -z "$telemetron_bin" ]]; then
-    printf '[telemetron] binary not found after install — skipping\n' >>"$log"
-    return 0
-  fi
-
-  # Use `telemetron detect` to auto-discover roundhouse (and any other packs)
-  # and configure + enroll + start the service(s).
-  timeout 30 sudo "$telemetron_bin" detect \
-    --endpoint "$endpoint" \
-    --enroll-endpoint "$enroll_endpoint" \
-    --mode roundhouse \
-    --force >>"$log" 2>&1 || {
-    printf '[telemetron] detect failed (exit %d) — continuing\n' "$?" >>"$log"
-    return 0
-  }
-
-  printf '[telemetron] detect completed successfully\n' >>"$log"
-}
-
-(
-  set +e
-  _telemetron_sidecar
-) || true
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 write_done_marker "roundhouse"
 printf "\n[PACK:roundhouse] INSTALLED — Telegram bot connected (systemd: roundhouse)\n"
+
+# ── Optional sidecar: telemetron ──────────────────────────────────────────────
+# Runs after done marker so user sees success immediately.
+# shellcheck source=../common-telemetron.sh
+source "${SCRIPT_DIR}/../common-telemetron.sh"
+install_telemetron roundhouse
