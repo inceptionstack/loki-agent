@@ -796,7 +796,14 @@ DEPLOY_TERRAFORM=3
 # Stamped at release; fall back to git info at runtime
 INSTALLER_COMMIT="${INSTALLER_COMMIT:-$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo dev)}"
 INSTALLER_DATE="${INSTALLER_DATE:-$(d=$(git -C "$SCRIPT_DIR" log -1 --format='%ci' 2>/dev/null | cut -d' ' -f1,2); echo "${d:-unknown}")}"
-REPO_BRANCH="${REPO_BRANCH:-$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
+# Only detect branch from git if we're inside the actual lowkey repo (not a random parent repo)
+if [[ -z "${REPO_BRANCH:-}" ]]; then
+  if [[ -f "$SCRIPT_DIR/packs/registry.yaml" ]]; then
+    REPO_BRANCH="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
+  else
+    REPO_BRANCH="main"
+  fi
+fi
 [[ "$REPO_BRANCH" == "HEAD" ]] && REPO_BRANCH="main"
 
 # Detect AWS CloudShell (limited ~1GB home dir, use /tmp for large files)
