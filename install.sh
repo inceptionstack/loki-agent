@@ -1968,7 +1968,7 @@ pack_default_model() {
 build_deploy_params() {
   # Bedrock region: use us-east-1 by default (widest model availability, cross-region inference)
   # Only override if the deploy region is itself a supported Bedrock region
-  local bedrock_allowed="us-east-1 us-west-2 eu-west-1 eu-central-1 eu-north-1 ap-northeast-1"
+  local bedrock_allowed="us-east-1 us-west-2 eu-west-1 eu-central-1 eu-north-1 ap-northeast-1 ap-southeast-1"
   if [[ " $bedrock_allowed " == *" $DEPLOY_REGION "* ]]; then
     BEDROCK_REGION="$DEPLOY_REGION"
   else
