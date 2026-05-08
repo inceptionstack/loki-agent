@@ -1966,6 +1966,15 @@ pack_default_model() {
 
 # Populate PARAM_VALUES from user config (call after collect_config)
 build_deploy_params() {
+  # Bedrock region: use us-east-1 by default (widest model availability, cross-region inference)
+  # Only override if the deploy region is itself a supported Bedrock region
+  local bedrock_allowed="us-east-1 us-west-2 eu-west-1 eu-central-1 eu-north-1 ap-northeast-1"
+  if [[ " $bedrock_allowed " == *" $DEPLOY_REGION "* ]]; then
+    BEDROCK_REGION="$DEPLOY_REGION"
+  else
+    BEDROCK_REGION="us-east-1"
+  fi
+
   PARAM_VALUES=(
     "$ENV_NAME"
     "$PACK_NAME"
@@ -1973,7 +1982,7 @@ build_deploy_params() {
     "$INSTANCE_TYPE"
     "${DEFAULT_MODEL:-$(pack_default_model "$PACK_NAME")}"
     "bedrock"
-    "$DEPLOY_REGION"
+    "$BEDROCK_REGION"
     "$LOKI_WATERMARK"
     "false"
     "$SECURITY_HUB"
@@ -2061,6 +2070,7 @@ show_summary() {
   summary+="Profile       ${PROFILE_NAME}\n"
   summary+="Instance      ${INSTANCE_TYPE}\n"
   summary+="Region        ${DEPLOY_REGION}\n"
+  [[ "$BEDROCK_REGION" != "$DEPLOY_REGION" ]] && summary+="Bedrock       ${BEDROCK_REGION} (cross-region inference)\n"
   [[ -n "${EXISTING_VPC_ID:-}" ]] && summary+="VPC           reuse ${EXISTING_VPC_ID}\n"
   summary+="Security      ${security_summary}\n"
   summary+="Environment   ${ENV_NAME}"
