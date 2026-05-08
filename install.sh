@@ -2022,6 +2022,8 @@ format_tf_vars() {
   for i in "${!PARAM_TF_NAMES[@]}"; do
     vars+=(-var="${PARAM_TF_NAMES[$i]}=${PARAM_VALUES[$i]}")
   done
+  # aws_region controls the provider region — must match DEPLOY_REGION
+  vars+=(-var="aws_region=${DEPLOY_REGION}")
   printf '%s\n' "${vars[@]}"
 }
 
@@ -3074,7 +3076,7 @@ run_config_and_review() {
     # User chose "Change settings" → re-run in advanced mode with current values as preselects
     PRESELECT_PACK="$PACK_NAME"
     PRESELECT_PROFILE="$PROFILE_NAME"
-    PRESELECT_METHOD="terraform"
+    PRESELECT_METHOD=""
     EXISTING_VPC_ID=""
     EXISTING_SUBNET_ID=""
     STEP_NUM=1
