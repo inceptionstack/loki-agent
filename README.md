@@ -52,6 +52,12 @@
 
 Run `curl -sfL install.lowkey.run | bash` — the installer walks you through **pack**, **profile**, **instance size**, and **deploy method** (CloudFormation or Terraform).
 
+> **📊 Telemetry opt-out:** The installer sends anonymous install telemetry (start/success/failure + OS/arch/duration — no code, credentials, IPs, or hostnames). To opt out before installing:
+> ```bash
+> mkdir -p ~/.lowkey && touch ~/.lowkey/telemetry-off
+> ```
+> Or set `LOWKEY_TELEMETRY=0` when running the installer. [Full privacy details →](https://docs.lowkey.run/reference/telemetry-privacy)
+
 **CLI flags for non-interactive deploys:**
 
 | Flag | Description |
