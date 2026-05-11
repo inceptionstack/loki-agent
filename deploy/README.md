@@ -85,7 +85,6 @@ These set up security baselines, coding guidelines, MCP tools, memory search, an
 | `BOOTSTRAP-SECURITY.md` | Security hardening + AWS Budgets alerts |
 | `BOOTSTRAP-SKILLS.md` | Installs AWS infrastructure skills |
 | `BOOTSTRAP-MCPORTER.md` | Sets up MCP server tooling |
-| `BOOTSTRAP-MEMORY-SEARCH.md` | Enables semantic memory search via Bedrock embeddings |
 | `BOOTSTRAP-CODING-GUIDELINES.md` | Coding standards and project conventions |
 | `BOOTSTRAP-SECRETS-AWS.md` | AWS Secrets Manager integration |
 | `BOOTSTRAP-PLAYWRIGHT.md` | Browser automation via Playwright MCP |
