@@ -163,7 +163,7 @@ Pushes all Tier 3 custom metrics in a single `put-metric-data` call (batched).
 **What it checks:**
 1. **OpenClaw instances:** `pgrep -f openclaw-gatewa` — OpenClaw gateway process alive
    **Hermes instances:** `pgrep -f hermes` — Hermes agent process alive
-2. `systemctl list-units --failed --no-legend | wc -l` — Failed unit count
+2. `systemctl list-units --failed --no-legend | grep -v 'systemd-coredump@' | wc -l` — Failed unit count (excludes transient coredump handler units, which linger in `failed` state after handling any crash)
 4. `df --output=pcent / | tail -1` — Root disk percent
 5. `free | awk '/Mem/ {printf "%.0f", $3/$2*100}'` — Memory percent
 6. Quick Bedrock `InvokeModel` with tiny payload (1 embedding, cached model) — API reachable
