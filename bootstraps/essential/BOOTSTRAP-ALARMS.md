@@ -12,6 +12,8 @@ Alarms to deploy on every EC2 instance running a Loki agent. Designed to catch t
 - SNS topic for notifications (create one or pass existing ARN)
 - Instance ID and region known at deploy time
 
+> ⚠️ **Rebind on instance replacement.** All custom alarms (Tier 3) are scoped to a specific `InstanceId` dimension. When the EC2 instance is replaced (manual rebuild, ASG refresh, etc.), you **must** redeploy the alarms against the new instance id — otherwise alarms stay in `INSUFFICIENT_DATA` forever (or flap to ALARM depending on `TreatMissingData`). All custom alarms here set `TreatMissingData=missing` to avoid spurious paging on short metric gaps.
+
 ## Tier 1 — Instance Survival (auto-recover)
 
 These use built-in EC2/CloudWatch metrics. No agent needed.
@@ -120,18 +122,7 @@ Action: SNS notify
 
 ### Common Service Checks (All Agents)
 
-### 3.2 Bedrockify Alive
-
-Both OpenClaw and Hermes depend on bedrockify. Monitor it on all instances.
-
-```
-Metric: Custom/Loki BedrockifyAlive
-Value: 1 = systemd active + HTTP 200 on health endpoint (port 8090), 0 = down
-Threshold: < 1 for 2 consecutive periods (1 min each)
-Action: SNS notify
-```
-
-### 3.3 Systemd Failed Units
+### 3.2 Systemd Failed Units
 
 Catches: any crash-looping service, not just the ones we know about.
 **Would have caught the bedrock-embed-proxy crash-loop immediately.**
@@ -143,7 +134,7 @@ Threshold: > 0 for 1 period (1 min)
 Action: SNS notify
 ```
 
-### 3.4 Bedrock API Reachable
+### 3.3 Bedrock API Reachable
 
 Catches: credential expiry, region issues, service disruptions, model access revoked.
 
@@ -172,8 +163,7 @@ Pushes all Tier 3 custom metrics in a single `put-metric-data` call (batched).
 **What it checks:**
 1. **OpenClaw instances:** `pgrep -f openclaw-gatewa` — OpenClaw gateway process alive
    **Hermes instances:** `pgrep -f hermes` — Hermes agent process alive
-2. `systemctl is-active bedrockify` + `curl -sf localhost:8090/` — Bedrockify alive + healthy (required for all agents)
-3. `systemctl list-units --failed --no-legend | wc -l` — Failed unit count
+2. `systemctl list-units --failed --no-legend | wc -l` — Failed unit count
 4. `df --output=pcent / | tail -1` — Root disk percent
 5. `free | awk '/Mem/ {printf "%.0f", $3/$2*100}'` — Memory percent
 6. Quick Bedrock `InvokeModel` with tiny payload (1 embedding, cached model) — API reachable
@@ -248,7 +238,6 @@ Provides a single-pane view of all alarms, service health, compute resources, ne
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-instance-status-check-failed",
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-openclaw-down",
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-hermes-down",
-          "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-bedrockify-down",
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-bedrock-unreachable",
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-failed-units",
           "arn:aws:cloudwatch:us-east-1:ACCOUNT_ID:alarm:loki-cpu-high",
@@ -284,7 +273,6 @@ Provides a single-pane view of all alarms, service health, compute resources, ne
       "properties": {
         "title": "⚡ Bedrockify",
         "metrics": [
-          [ "Custom/Loki", "BedrockifyAlive", "InstanceId", "INSTANCE_ID", { "label": "Bedrockify Alive", "color": "#1f77b4" } ]
         ],
         "view": "timeSeries", "stacked": false, "region": "us-east-1",
         "period": 60, "stat": "Minimum",
