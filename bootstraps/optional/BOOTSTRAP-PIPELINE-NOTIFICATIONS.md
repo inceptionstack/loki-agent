@@ -32,7 +32,7 @@ CodePipeline state change
 
 ```bash
 aws secretsmanager create-secret \
-  --name /faststart/telegram-bot-token \
+  --name faststart/telegram-bot-token \
   --secret-string "YOUR_BOT_TOKEN" \
   --region us-east-1
 ```
@@ -51,7 +51,7 @@ const cp = new CodePipelineClient({ region: "us-east-1" });
 const ssm = new SSMClient({ region: "us-east-1" });
 
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const SECRET_NAME = "/faststart/telegram-bot-token";
+const SECRET_NAME = "faststart/telegram-bot-token";
 const INSTANCE_ID = process.env.OPENCLAW_INSTANCE_ID;
 
 let cachedToken = null;
@@ -156,7 +156,7 @@ The role needs:
     {
       "Effect": "Allow",
       "Action": "secretsmanager:GetSecretValue",
-      "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:/faststart/telegram-bot-token-*"
+      "Resource": "arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:faststart/telegram-bot-token-*"
     },
     {
       "Effect": "Allow",
@@ -357,7 +357,7 @@ echo "Webhook URL: https://${API_ID}.execute-api.us-east-1.amazonaws.com/webhook
 
 ```bash
 export GH_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/github-token --query SecretString --output text --region us-east-1)
+  --secret-id faststart/github-token --query SecretString --output text --region us-east-1)
 
 WEBHOOK_URL="https://API_ID.execute-api.us-east-1.amazonaws.com/webhook"
 

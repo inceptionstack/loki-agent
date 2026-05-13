@@ -39,8 +39,8 @@
 ## ✅ DOs
 
 **Secrets & Config**
-- All secrets → AWS Secrets Manager (`/faststart/<project>/<key>`)
-- All config → SSM Parameter Store (`/faststart/<project>/<key>`)
+- All secrets → AWS Secrets Manager (`faststart/<project>/<key>` — no leading `/`; some agents reject it)
+- All config → SSM Parameter Store (`/faststart/<project>/<key>` — leading `/` is fine here)
 - Lambda config injected via CFN `Environment.Variables` using `!Ref`/`!Sub`
 - Frontend config injected as `VITE_*` build vars from CodeBuild SSM params
 - Use `AWS::AccountId`, `AWS::Region`, `AWS::StackName` pseudo-refs in CFN
@@ -75,7 +75,8 @@
 - Resources: `{project}-{resource}` (e.g. `outline-alb`)
 - IAM roles: `{project}-{purpose}-role`
 - Security groups: `{project}-{layer}-sg`
-- SSM params: `/faststart/{project}/{key}`
+- Secrets: `faststart/{project}/{key}` (no leading slash — OpenClaw's exec secret reference rejects it)
+- SSM params: `/faststart/{project}/{key}` (leading slash is the SSM convention)
 
 ---
 
