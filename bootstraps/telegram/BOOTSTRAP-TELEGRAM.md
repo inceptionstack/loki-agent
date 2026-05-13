@@ -21,10 +21,12 @@ Store it immediately in Secrets Manager — don't leave it in chat history:
 
 ```bash
 aws secretsmanager create-secret \
-  --name /faststart/telegram-bot-token \
+  --name faststart/telegram-bot-token \
   --secret-string "YOUR_BOT_TOKEN_HERE" \
   --region us-east-1
 ```
+
+> **Note:** No leading `/` in the secret name. OpenClaw's exec secret reference (`exec:aws-sm:<name>`) requires the name to start with an alphanumeric character; `/faststart/...` will fail gateway startup with a `SECRETS_RELOADER_DEGRADED` error. Slashes are allowed *inside* the name as separators.
 
 ### Step 2: Get Your Telegram Chat ID
 
@@ -32,7 +34,7 @@ Start a conversation with your new bot (send it any message). Then fetch your ch
 
 ```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/telegram-bot-token \
+  --secret-id faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
 
 curl -s "https://api.telegram.org/bot${BOT_TOKEN}/getUpdates" \
@@ -53,7 +55,7 @@ Add the Telegram channel to OpenClaw config. Ask Loki to run:
 ```
 /config patch channels.telegram with:
   enabled: true
-  botToken: <fetched from /faststart/telegram-bot-token>
+  botToken: <fetched from faststart/telegram-bot-token>
   dmPolicy: allowlist
   allowFrom: [YOUR_CHAT_ID]
   groupPolicy: allowlist
@@ -64,7 +66,7 @@ Or use `openclaw config patch` directly:
 
 ```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/telegram-bot-token \
+  --secret-id faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
 
 openclaw config patch <<EOF
@@ -115,7 +117,7 @@ To fetch the token from Secrets Manager:
 
 ```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/telegram-bot-token \
+  --secret-id faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
 
 echo "TELEGRAM_BOT_TOKEN=${BOT_TOKEN}" >> ~/.hermes/.env
@@ -148,7 +150,7 @@ Send your bot a message. You should get a response from the agent within a few s
 
 ```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/telegram-bot-token \
+  --secret-id faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
 
 curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
@@ -285,7 +287,7 @@ To fetch the token from Secrets Manager:
 
 ```bash
 BOT_TOKEN=$(aws secretsmanager get-secret-value \
-  --secret-id /faststart/telegram-bot-token \
+  --secret-id faststart/telegram-bot-token \
   --query SecretString --output text --region us-east-1)
 
 echo "TELEGRAM_BOT_TOKEN=${BOT_TOKEN}" >> ~/.ironclaw/.env
