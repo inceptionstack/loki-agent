@@ -58,7 +58,7 @@ Post-install authentication:
 Examples:
   ./install.sh
   ./install.sh --region eu-west-1
-  ./install.sh --from-secret /faststart/kiro-api-key
+  ./install.sh --from-secret faststart/kiro-api-key
 
 SECURITY NOTE:
   Don't pass raw API keys on the command line. Store your key in AWS
